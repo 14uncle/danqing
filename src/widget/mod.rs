@@ -22,6 +22,7 @@ mod row;
 mod scrollable;
 mod text;
 mod text_area;
+mod text_editor;
 mod text_input;
 
 pub use box_::Box;

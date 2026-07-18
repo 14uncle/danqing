@@ -10,33 +10,17 @@ use std::cell::Cell;
 use crate::app::AnimationCtx;
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 use crate::render::{RectBatch, TextBatch};
+use crate::widget::text_editor::TextEditor;
 use crate::widget::{EventResult, MsgQueue, Widget};
 use crate::{Color, Constraints, Edges, Rect, Size};
 
-/// 文本变化回调:返回一条应用消息。
-type ChangeFactory = Box<dyn Fn(&str) -> Box<dyn std::any::Any>>;
-
 /// 光标闪烁周期(秒)。
 const BLINK_PERIOD: f32 = 0.5;
-/// 撤销栈最大深度。
-const MAX_UNDO: usize = 100;
-
-/// 编辑前快照(用于撤销/重做)。
-#[derive(Debug, Clone)]
-struct Snapshot {
-    text: String,
-    cursor: usize,
-    anchor: usize,
-}
 
 /// 单行文本输入组件。
 pub struct TextInput {
-    /// 当前文本内容。
-    text: String,
-    /// 光标位置(字符索引,0..=char_count)。
-    cursor: usize,
-    /// 选区锚点(字符索引);与 cursor 相等表示无选区。
-    anchor: usize,
+    /// 共享文本编辑状态。
+    editor: TextEditor,
     /// 是否获得焦点。
     focused: bool,
     /// 字体大小。
@@ -63,25 +47,15 @@ pub struct TextInput {
     caret_visible: bool,
     /// IME 合成文本(显示在光标处,带下划线)。
     preedit: Option<String>,
-    /// 文本变化时产出的应用消息。
-    on_change: Option<ChangeFactory>,
     /// 鼠标拖拽选区状态。
     dragging: bool,
-    /// 撤销栈。
-    undo_stack: Vec<Snapshot>,
-    /// 重做栈。
-    redo_stack: Vec<Snapshot>,
-    /// 正在执行撤销/重做,避免重复记录快照。
-    is_undoing: bool,
 }
 
 impl TextInput {
     /// 创建文本输入框(默认空文本、字号 16、深色文本、浅色背景)。
     pub fn new() -> Self {
         Self {
-            text: String::new(),
-            cursor: 0,
-            anchor: 0,
+            editor: TextEditor::new(),
             focused: false,
             font_size: 16,
             color: Color::from_srgb8(0x22, 0x22, 0x22),
@@ -95,19 +69,13 @@ impl TextInput {
             line_height: 0.0,
             caret_visible: true,
             preedit: None,
-            on_change: None,
             dragging: false,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
-            is_undoing: false,
         }
     }
 
-    /// 设置文本变化回调。
+    /// 设置文本内容。
     pub fn text(mut self, text: impl Into<String>) -> Self {
-        self.text = text.into();
-        self.cursor = self.text.chars().count();
-        self.anchor = self.cursor;
+        self.editor.set_text(text);
         self
     }
 
@@ -137,116 +105,81 @@ impl TextInput {
 
     /// 设置文本变化回调(每次编辑后触发)。
     pub fn on_change<M: 'static>(mut self, f: impl Fn(&str) -> M + 'static) -> Self {
-        self.on_change = Some(Box::new(move |text| {
-            Box::new(f(text)) as Box<dyn std::any::Any>
-        }));
+        self.editor = self.editor.on_change(f);
         self
     }
 
     /// 当前文本(不含 preedit)。
     pub fn value(&self) -> &str {
-        &self.text
+        self.editor.text()
     }
 
-    /// 测量到给定字符索引的文本宽度。
-    fn measure_to(&self, texts: &mut TextBatch, char_idx: usize) -> f32 {
-        let prefix: String = self.text.chars().take(char_idx).collect();
-        texts.measure(&prefix, self.font_size)
+    /// 光标位置(测试用)。
+    #[cfg(test)]
+    pub(crate) fn cursor(&self) -> usize {
+        self.editor.cursor()
     }
 
-    /// 在光标处插入文本,并记录撤销快照。
+    /// 设置光标位置(测试用)。
+    #[cfg(test)]
+    pub(crate) fn set_cursor(&mut self, cursor: usize) {
+        self.editor.set_cursor(cursor);
+    }
+
+    /// 选区锚点(测试用)。
+    #[cfg(test)]
+    pub(crate) fn anchor(&self) -> usize {
+        self.editor.anchor()
+    }
+
+    /// 设置选区锚点(测试用)。
+    #[cfg(test)]
+    pub(crate) fn set_anchor(&mut self, anchor: usize) {
+        self.editor.set_anchor(anchor);
+    }
+
+    /// 在光标处插入文本。
     fn insert(&mut self, text: &str) {
-        self.save_undo();
-        self.delete_selection_pre_edit();
-        let byte_idx = char_to_byte(&self.text, self.cursor);
-        self.text.insert_str(byte_idx, text);
-        self.cursor += text.chars().count();
-        self.anchor = self.cursor;
+        self.editor.insert(text);
     }
 
     /// 通知应用文本已变化。
     fn notify_change(&self, msgs: &mut MsgQueue) {
-        if let Some(factory) = &self.on_change {
-            msgs.push(factory(&self.text));
-        }
-    }
-
-    fn delete_selection_pre_edit(&mut self) {
-        let (start, end) = self.selection_range();
-        if start == end {
-            return;
-        }
-        let start_byte = char_to_byte(&self.text, start);
-        let end_byte = char_to_byte(&self.text, end);
-        self.text.drain(start_byte..end_byte);
-        self.cursor = start;
-        self.anchor = self.cursor;
+        self.editor.notify_change(msgs);
     }
 
     /// 全选文本。
     fn select_all(&mut self) {
-        self.cursor = self.text.chars().count();
-        self.anchor = 0;
+        self.editor.select_all();
     }
 
-    /// 删除当前选区(若存在)。
+    /// 删除当前选区(若存在,测试用)。
+    #[cfg(test)]
     fn delete_selection(&mut self) {
-        let (start, end) = self.selection_range();
-        if start != end {
-            let start_byte = char_to_byte(&self.text, start);
-            let end_byte = char_to_byte(&self.text, end);
-            self.text.drain(start_byte..end_byte);
-            self.cursor = start;
-            self.anchor = self.cursor;
-        }
-    }
-
-    /// 在变更前保存快照到撤销栈。
-    fn save_undo(&mut self) {
-        if self.is_undoing {
-            return;
-        }
-        if self.undo_stack.len() >= MAX_UNDO {
-            self.undo_stack.remove(0);
-        }
-        self.undo_stack.push(Snapshot {
-            text: self.text.clone(),
-            cursor: self.cursor,
-            anchor: self.anchor,
-        });
-        self.redo_stack.clear();
+        self.editor.delete_selection();
     }
 
     /// 撤销上一次编辑。
-    fn undo(&mut self) {
-        if let Some(snapshot) = self.undo_stack.pop() {
-            self.redo_stack.push(Snapshot {
-                text: self.text.clone(),
-                cursor: self.cursor,
-                anchor: self.anchor,
-            });
-            self.is_undoing = true;
-            self.text = snapshot.text;
-            self.cursor = snapshot.cursor;
-            self.anchor = snapshot.anchor;
-            self.is_undoing = false;
-        }
+    fn undo(&mut self) -> bool {
+        self.editor.undo()
     }
 
     /// 重做上一次撤销。
-    fn redo(&mut self) {
-        if let Some(snapshot) = self.redo_stack.pop() {
-            self.undo_stack.push(Snapshot {
-                text: self.text.clone(),
-                cursor: self.cursor,
-                anchor: self.anchor,
-            });
-            self.is_undoing = true;
-            self.text = snapshot.text;
-            self.cursor = snapshot.cursor;
-            self.anchor = snapshot.anchor;
-            self.is_undoing = false;
+    fn redo(&mut self) -> bool {
+        self.editor.redo()
+    }
+
+    /// 选区范围(起点,终点),保证 start <= end。
+    fn selection_range(&self) -> (usize, usize) {
+        self.editor.selection_range()
+    }
+
+    /// 测量到给定字符索引的文本宽度。
+    fn measure_to(&self, _texts: &mut TextBatch, char_idx: usize) -> f32 {
+        if char_idx == 0 {
+            return 0.0;
         }
+        self.char_offsets.get(char_idx - 1).copied().unwrap_or(0.0)
     }
 
     /// 将本地 x 坐标(相对于文本起点)转换为字符索引。
@@ -258,26 +191,9 @@ impl TextInput {
             .partition_point(|offset| *offset <= local_x)
             .min(self.char_offsets.len())
     }
-    fn move_cursor(&mut self, delta: isize, extend_selection: bool) {
-        let len = self.text.chars().count();
-        let new_cursor = if delta < 0 {
-            self.cursor.saturating_sub(delta.unsigned_abs())
-        } else {
-            (self.cursor + delta as usize).min(len)
-        };
-        self.cursor = new_cursor;
-        if !extend_selection {
-            self.anchor = self.cursor;
-        }
-    }
 
-    /// 选区范围(起点,终点),保证 start <= end。
-    fn selection_range(&self) -> (usize, usize) {
-        if self.anchor <= self.cursor {
-            (self.anchor, self.cursor)
-        } else {
-            (self.cursor, self.anchor)
-        }
+    fn move_cursor(&mut self, delta: isize, extend_selection: bool) {
+        self.editor.move_cursor(delta, extend_selection);
     }
 }
 
@@ -298,7 +214,7 @@ impl Widget for TextInput {
     }
 
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
-        let content_width = texts.measure(&self.text, self.font_size);
+        let content_width = texts.measure(self.editor.text(), self.font_size);
         let line_height = texts.line_height(f32::from(self.font_size));
         let height = line_height + self.padding.vertical();
         let width = self
@@ -312,7 +228,7 @@ impl Widget for TextInput {
         // 缓存每个字符右侧的 x 偏移,用于鼠标点击定位光标。
         self.char_offsets.clear();
         let mut x = 0.0f32;
-        for ch in self.text.chars() {
+        for ch in self.editor.text().chars() {
             x += texts.measure(&ch.to_string(), self.font_size);
             self.char_offsets.push(x);
         }
@@ -348,11 +264,17 @@ impl Widget for TextInput {
         }
 
         // 基础文本
-        texts.push_text(&self.text, text_x, baseline, self.font_size, self.color);
+        texts.push_text(
+            self.editor.text(),
+            text_x,
+            baseline,
+            self.font_size,
+            self.color,
+        );
 
         // preedit 文本与下划线
         if let Some(preedit) = &self.preedit {
-            let pre_x = text_x + self.measure_to(texts, self.cursor);
+            let pre_x = text_x + self.measure_to(texts, self.editor.cursor());
             texts.push_text(preedit, pre_x, baseline, self.font_size, self.color);
             let pre_width = texts.measure(preedit, self.font_size);
             let underline_y = baseline + texts.line_height(f32::from(self.font_size)) * 0.15;
@@ -365,7 +287,7 @@ impl Widget for TextInput {
 
         // 光标
         if self.focused && self.caret_visible {
-            let caret_x = text_x + self.measure_to(texts, self.cursor);
+            let caret_x = text_x + self.measure_to(texts, self.editor.cursor());
             let caret_height = texts.line_height(f32::from(self.font_size));
             let caret_y = area.origin.y + self.padding.top;
             rects.push_rect(
@@ -412,16 +334,14 @@ impl Widget for TextInput {
                 }
                 Key::Character(s) if *ctrl && s == "z" => {
                     if *shift {
-                        self.redo();
+                        changed = self.redo();
                     } else {
-                        self.undo();
+                        changed = self.undo();
                     }
-                    changed = true;
                     EventResult::Consumed
                 }
                 Key::Character(s) if *ctrl && s == "y" => {
-                    self.redo();
-                    changed = true;
+                    changed = self.redo();
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::ArrowLeft) => {
@@ -433,55 +353,26 @@ impl Widget for TextInput {
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::Home) => {
-                    self.cursor = 0;
+                    self.editor.set_cursor(0);
                     if !shift {
-                        self.anchor = 0;
+                        self.editor.set_anchor(0);
                     }
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::End) => {
-                    self.cursor = self.text.chars().count();
+                    let end = self.editor.text().chars().count();
+                    self.editor.set_cursor(end);
                     if !shift {
-                        self.anchor = self.cursor;
+                        self.editor.set_anchor(end);
                     }
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::Backspace) => {
-                    self.save_undo();
-                    let (start, end) = self.selection_range();
-                    if start != end {
-                        self.delete_selection_pre_edit();
-                        changed = true;
-                    } else if self.cursor > 0 {
-                        let byte_idx = char_to_byte(&self.text, self.cursor);
-                        let prev = self.text[..byte_idx]
-                            .chars()
-                            .next_back()
-                            .map(|c| c.len_utf8())
-                            .unwrap_or(0);
-                        self.text.drain((byte_idx - prev)..byte_idx);
-                        self.cursor -= 1;
-                        self.anchor = self.cursor;
-                        changed = true;
-                    }
+                    changed = self.editor.backspace();
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::Delete) => {
-                    self.save_undo();
-                    let (start, end) = self.selection_range();
-                    if start != end {
-                        self.delete_selection_pre_edit();
-                        changed = true;
-                    } else if self.cursor < self.text.chars().count() {
-                        let byte_idx = char_to_byte(&self.text, self.cursor);
-                        let len = self.text[byte_idx..]
-                            .chars()
-                            .next()
-                            .map(|c| c.len_utf8())
-                            .unwrap_or(0);
-                        self.text.drain(byte_idx..(byte_idx + len));
-                        changed = true;
-                    }
+                    changed = self.editor.delete();
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::Enter) => {
@@ -511,8 +402,7 @@ impl Widget for TextInput {
             Event::Copy => EventResult::Consumed,
             Event::Cut => {
                 if self.selected_text().is_some() {
-                    self.save_undo();
-                    self.delete_selection();
+                    self.editor.cut_selection();
                     changed = true;
                 }
                 EventResult::Consumed
@@ -522,7 +412,7 @@ impl Widget for TextInput {
                 if self.dragging {
                     let text_x = area.origin.x + self.padding.left;
                     let local_x = p.x - text_x;
-                    self.cursor = self.hit_to_index(local_x);
+                    self.editor.set_cursor(self.hit_to_index(local_x));
                 }
                 EventResult::Ignored
             }
@@ -537,8 +427,8 @@ impl Widget for TextInput {
             } => {
                 let text_x = area.origin.x + self.padding.left;
                 let local_x = position.x - text_x;
-                self.cursor = self.hit_to_index(local_x);
-                self.anchor = self.cursor;
+                self.editor.set_cursor(self.hit_to_index(local_x));
+                self.editor.set_anchor(self.editor.cursor());
                 self.dragging = true;
                 EventResult::Consumed
             }
@@ -563,13 +453,7 @@ impl Widget for TextInput {
     }
 
     fn selected_text(&self) -> Option<String> {
-        let (start, end) = self.selection_range();
-        if start == end {
-            return None;
-        }
-        let start_byte = char_to_byte(&self.text, start);
-        let end_byte = char_to_byte(&self.text, end);
-        Some(self.text[start_byte..end_byte].to_string())
+        self.editor.selected_text()
     }
 
     fn wants_ime(&self) -> bool {
@@ -578,13 +462,11 @@ impl Widget for TextInput {
 
     fn ime_area(&self) -> Option<Rect> {
         let area = self.area.get();
-        let cursor_x = if self.cursor == 0 {
+        let cursor = self.editor.cursor();
+        let cursor_x = if cursor == 0 {
             0.0
         } else {
-            self.char_offsets
-                .get(self.cursor - 1)
-                .copied()
-                .unwrap_or(0.0)
+            self.char_offsets.get(cursor - 1).copied().unwrap_or(0.0)
         };
         let x = area.origin.x + self.padding.left + cursor_x;
         let y = area.origin.y + self.padding.top;
@@ -594,14 +476,6 @@ impl Widget for TextInput {
     fn hit_area(&self) -> Option<Rect> {
         Some(self.area.get())
     }
-}
-
-/// 字符索引转字节索引。
-fn char_to_byte(s: &str, char_idx: usize) -> usize {
-    s.char_indices()
-        .nth(char_idx)
-        .map(|(b, _)| b)
-        .unwrap_or(s.len())
 }
 
 #[cfg(test)]
@@ -617,7 +491,7 @@ mod tests {
         let mut t = input();
         t.insert(" world");
         assert_eq!(t.value(), "Hello world");
-        assert_eq!(t.cursor, 11);
+        assert_eq!(t.cursor(), 11);
     }
 
     #[test]
@@ -634,7 +508,7 @@ mod tests {
             &mut Vec::new(),
         );
         assert_eq!(t.value(), "Hello ");
-        assert_eq!(t.cursor, 6);
+        assert_eq!(t.cursor(), 6);
     }
 
     #[test]
@@ -665,7 +539,7 @@ mod tests {
             &mut Vec::new(),
         );
         assert_eq!(t.value(), "Hello");
-        assert_eq!(t.cursor, 5);
+        assert_eq!(t.cursor(), 5);
     }
 
     #[test]
@@ -745,11 +619,11 @@ mod tests {
     #[test]
     fn undo_stack_depth_limit() {
         let mut t = TextInput::new();
-        for i in 0..=MAX_UNDO {
+        for i in 0..=crate::widget::text_editor::MAX_UNDO {
             t.insert(&i.to_string());
         }
         // 只能撤销最后 MAX_UNDO 次编辑
-        for _ in 0..MAX_UNDO {
+        for _ in 0..crate::widget::text_editor::MAX_UNDO {
             t.undo();
         }
         // 再撤销一次应无变化(栈已空)
@@ -761,23 +635,23 @@ mod tests {
     #[test]
     fn undo_restores_cursor_and_anchor() {
         let mut t = input();
-        t.cursor = 1;
-        t.anchor = 4; // 选中 "ell"
+        t.set_cursor(1);
+        t.set_anchor(4); // 选中 "ell"
         t.insert("?"); // 替换为 "H?o", 光标在 2
         assert_eq!(t.value(), "H?o");
-        assert_eq!(t.cursor, 2);
+        assert_eq!(t.cursor(), 2);
 
         t.undo();
         assert_eq!(t.value(), "Hello");
-        assert_eq!(t.cursor, 1);
-        assert_eq!(t.anchor, 4);
+        assert_eq!(t.cursor(), 1);
+        assert_eq!(t.anchor(), 4);
     }
 
     #[test]
     fn backspace_deletes_previous_char() {
         let mut t = input();
         // cursor 在末尾,Backspace 删除 'o'
-        assert_eq!(t.cursor, 5);
+        assert_eq!(t.cursor(), 5);
         t.event(
             &Event::Key {
                 key: Key::Named(NamedKey::Backspace),
@@ -789,35 +663,35 @@ mod tests {
             &mut Vec::new(),
         );
         assert_eq!(t.value(), "Hell");
-        assert_eq!(t.cursor, 4);
+        assert_eq!(t.cursor(), 4);
     }
 
     #[test]
     fn selection_and_delete() {
         let mut t = input();
         // 选中 "ell"
-        t.cursor = 1;
-        t.anchor = 4;
-        t.delete_selection_pre_edit();
+        t.set_cursor(1);
+        t.set_anchor(4);
+        t.delete_selection();
         assert_eq!(t.value(), "Ho");
-        assert_eq!(t.cursor, 1);
+        assert_eq!(t.cursor(), 1);
     }
 
     #[test]
     fn arrow_with_shift_extends_selection() {
         let mut t = input();
-        t.cursor = 1;
-        t.anchor = 1;
+        t.set_cursor(1);
+        t.set_anchor(1);
         t.move_cursor(2, true);
-        assert_eq!(t.cursor, 3);
-        assert_eq!(t.anchor, 1);
+        assert_eq!(t.cursor(), 3);
+        assert_eq!(t.anchor(), 1);
     }
 
     #[test]
     fn selected_text_returns_selection() {
         let mut t = input();
-        t.cursor = 1;
-        t.anchor = 4;
+        t.set_cursor(1);
+        t.set_anchor(4);
         assert_eq!(t.selected_text(), Some("ell".to_string()));
     }
 
@@ -836,20 +710,24 @@ mod tests {
             &mut Vec::new(),
         );
         assert_eq!(t.selected_text(), Some("Hello".to_string()));
-        assert_eq!(t.cursor, 5);
-        assert_eq!(t.anchor, 0);
+        assert_eq!(t.cursor(), 5);
+        assert_eq!(t.anchor(), 0);
     }
 
     #[test]
     fn cut_deletes_selection() {
         let mut t = input();
-        t.cursor = 1;
-        t.anchor = 4;
+        t.set_cursor(1);
+        t.set_anchor(4);
         t.event(&Event::Cut, Rect::default(), &mut Vec::new());
         assert_eq!(t.value(), "Ho");
-        assert_eq!(t.cursor, 1);
-        assert_eq!(t.anchor, 1);
+        assert_eq!(t.cursor(), 1);
+        assert_eq!(t.anchor(), 1);
         assert!(t.selected_text().is_none());
+
+        // Cut 应记录撤销快照
+        t.undo();
+        assert_eq!(t.value(), "Hello");
     }
 
     #[test]
@@ -869,7 +747,7 @@ mod tests {
             Rect::from_xywh(0.0, 0.0, 500.0, 100.0),
             &mut Vec::new(),
         );
-        assert_eq!(t.cursor, 0);
+        assert_eq!(t.cursor(), 0);
 
         // 点击文本末尾右侧,光标应在末尾
         let end_x = t.char_offsets.last().copied().unwrap_or(0.0) + 100.0;
@@ -882,7 +760,7 @@ mod tests {
             Rect::from_xywh(0.0, 0.0, 500.0, 100.0),
             &mut Vec::new(),
         );
-        assert_eq!(t.cursor, 5);
+        assert_eq!(t.cursor(), 5);
     }
 
     #[test]
@@ -925,8 +803,8 @@ mod tests {
     fn ime_area_follows_caret_after_paint() {
         let mut t = input();
         // 将光标移到开头,避免光标偏移干扰原点判断。
-        t.cursor = 0;
-        t.anchor = 0;
+        t.set_cursor(0);
+        t.set_anchor(0);
 
         let mut texts = crate::TextBatch::new();
         t.layout(Constraints::loose(Size::new(500.0, 100.0)), &mut texts);
