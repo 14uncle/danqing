@@ -12,6 +12,7 @@ mod text;
 pub use rect::{DrawTarget, RectBatch, RectPipeline};
 pub use text::{TextBatch, TextPipeline};
 
+use std::env;
 use std::sync::Arc;
 
 use winit::window::Window as WinitWindow;
@@ -31,6 +32,21 @@ const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
     all(unix, not(target_os = "macos"))
 )))]
 const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::PRIMARY;
+
+/// wgpu 实例标志。
+///
+/// 默认在 debug/release 均关闭校验层,避免 1~2 秒的启动/关闭延迟。
+/// 需要校验层时,设置环境变量 `DANQING_WGPU_VALIDATION=1` 或 `WGPU_VALIDATION=1`。
+fn instance_flags() -> wgpu::InstanceFlags {
+    let enabled = env::var("DANQING_WGPU_VALIDATION")
+        .or_else(|_| env::var("WGPU_VALIDATION"))
+        .is_ok_and(|v| v == "1");
+    if enabled {
+        wgpu::InstanceFlags::debugging()
+    } else {
+        wgpu::InstanceFlags::empty()
+    }
+}
 
 /// 渲染上下文初始化或运行期错误。
 #[derive(Debug, thiserror::Error)]
@@ -74,6 +90,7 @@ impl Context {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: DEFAULT_BACKENDS,
+            flags: instance_flags(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let surface = instance.create_surface(window)?;

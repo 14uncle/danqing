@@ -63,7 +63,7 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 
 - `build.rs` 首次构建时会从 jsdelivr 下载 OFL 回退字体(ZCOOL XiaoWei)到 `OUT_DIR`,仓库内不提交字体二进制。若下载失败,检查网络或更新 `EXPECTED_SIZE`。
 - `.cargo/config.toml` 记录本机 windows-gnu 工具链排障结论;msvc 环境下无副作用。
-- debug 构建默认启用 wgpu 校验层,用于人工验证 showcase 无校验错误。
+- debug 构建默认关闭 wgpu 校验层以避免 1~2 秒启动/关闭延迟。需要校验层时请设置环境变量 `DANQING_WGPU_VALIDATION=1`(或 `WGPU_VALIDATION=1`)再运行 showcase,用于人工验证无校验错误。
 
 ## Code conventions
 
