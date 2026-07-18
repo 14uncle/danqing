@@ -130,47 +130,16 @@ impl Widget for Button {
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
         rects.push_rect(area, self.effective_color(), self.radius);
         if self.focused {
-            // 焦点环:内缩 2px 的细边框,用 4 个小矩形模拟
+            // 焦点环:内缩 2px 的圆角虚线边框,跟随按钮圆角。
             let inset = 2.0;
-            let color = Color::WHITE;
-            let thickness = 1.0;
-            let r = Rect::new(
+            let focus_rect = Rect::new(
                 crate::Point::new(area.origin.x + inset, area.origin.y + inset),
                 crate::Size::new(
                     area.size.width - inset * 2.0,
                     area.size.height - inset * 2.0,
                 ),
             );
-            rects.push_rect(
-                Rect::from_xywh(r.origin.x, r.origin.y, r.size.width, thickness),
-                color,
-                0.0,
-            );
-            rects.push_rect(
-                Rect::from_xywh(
-                    r.origin.x,
-                    r.origin.y + r.size.height - thickness,
-                    r.size.width,
-                    thickness,
-                ),
-                color,
-                0.0,
-            );
-            rects.push_rect(
-                Rect::from_xywh(r.origin.x, r.origin.y, thickness, r.size.height),
-                color,
-                0.0,
-            );
-            rects.push_rect(
-                Rect::from_xywh(
-                    r.origin.x + r.size.width - thickness,
-                    r.origin.y,
-                    thickness,
-                    r.size.height,
-                ),
-                color,
-                0.0,
-            );
+            rects.push_rounded_border(focus_rect, Color::WHITE, self.radius, 1.0);
         }
         let inner = Rect::new(
             Point::new(

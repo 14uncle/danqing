@@ -45,6 +45,13 @@ impl Axis {
         }
     }
 
+    fn cross_min(self, c: Constraints) -> f32 {
+        match self {
+            Axis::Horizontal => c.min_height,
+            Axis::Vertical => c.min_width,
+        }
+    }
+
     /// Fill 子项的约束:主轴固定(分得的尺寸),交叉轴宽松。
     ///
     /// 交叉轴不用 tight —— 让显式尺寸的子项保留自己的交叉尺寸
@@ -104,9 +111,9 @@ impl Flow {
 
     /// 流式布局:Fit 子项先量,Fill 子项按权重分剩余空间。
     pub fn layout(&mut self, axis: Axis, constraints: Constraints, texts: &mut TextBatch) -> Size {
+        // 第一遍:仅量 Fit 子项,得到其自然主轴/交叉轴尺寸。
         let mut flows: Vec<FlowChild> = Vec::with_capacity(self.children.len());
         let mut fit_cross: Vec<f32> = Vec::with_capacity(self.children.len());
-        // 第一遍:Fit 子项按宽松约束量尺寸
         for (child, weight) in self.children.iter_mut().zip(self.weights.iter()) {
             if *weight == 0 {
                 let size = child.layout(Constraints::loose(constraints.max()), texts);
@@ -127,9 +134,15 @@ impl Flow {
         let main_max = axis.main(constraints.max());
         let dist = distribute(main_max, self.gap, &flows);
 
+        // 容器实际交叉高度:Fit 子项自然交叉高的最大值,同时不低于父约束的交叉下限
+        // (保证 tight 约束下 Fill 子项能撑满容器)。
+        let cross_max = fit_cross
+            .iter()
+            .copied()
+            .fold(axis.cross_min(constraints), f32::max);
+
         self.areas.clear();
         let mut used_main = 0.0f32;
-        let mut cross_max = 0.0f32;
         let mut has_fill = false;
         for (i, (child, weight)) in self
             .children
@@ -142,13 +155,9 @@ impl Flow {
                 axis.make_size(main_size, fit_cross[i])
             } else {
                 has_fill = true;
-                child.layout(
-                    axis.fill_constraints(main_size, axis.cross(constraints.max())),
-                    texts,
-                )
+                child.layout(axis.fill_constraints(main_size, cross_max), texts)
             };
             used_main = used_main.max(offset + axis.main(child_size));
-            cross_max = cross_max.max(axis.cross(child_size));
             self.areas.push(axis.make_rect(offset, child_size));
         }
 
@@ -192,7 +201,7 @@ impl Flow {
 mod tests {
     use super::*;
     use crate::Color;
-    use crate::widget::{Box as UiBox, Text, node};
+    use crate::widget::{Box as UiBox, node};
 
     fn screen(w: f32, h: f32) -> Constraints {
         Constraints::tight(Size::new(w, h))
@@ -231,16 +240,20 @@ mod tests {
     }
 
     #[test]
-    fn text_in_column_measures_natural_width() {
+    fn row_height_follows_fit_children_not_parent_max() {
         let mut texts = TextBatch::new();
         let mut flow = Flow::new(0.0);
-        flow.push(node(Text::new("你好")), 0);
+        // Fit 子项高 20,Fill 子项不应把 Row 撑到父约束的 800 高
+        flow.push(node(UiBox::new(Color::BLACK).size(50.0, 20.0)), 0);
+        flow.push(node(UiBox::new(Color::BLACK)), 1);
         let size = flow.layout(
-            Axis::Vertical,
-            Constraints::loose(Size::new(500.0, 500.0)),
+            Axis::Horizontal,
+            Constraints::loose(Size::new(300.0, 800.0)),
             &mut texts,
         );
-        assert!(size.width > 0.0 && size.width < 500.0);
-        assert!(size.height > 0.0);
+        assert!(
+            size.height <= 30.0,
+            "Row 高度应接近 Fit 子项,而非父约束的 800;实际 {size:?}"
+        );
     }
 }

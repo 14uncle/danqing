@@ -475,6 +475,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     let prev = self.focus.previous().map(|p| p.to_vec());
                     let curr = self.focus.current().map(|p| p.to_vec());
                     self.dispatch_focus_changes(prev.as_deref(), curr.as_deref());
+                    self.focus.acknowledge();
                     let size = self
                         .tree
                         .layout(crate::Constraints::tight(screen), &mut self.texts);

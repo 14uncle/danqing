@@ -33,7 +33,6 @@ impl FocusManager {
 
     /// 根据组件树重建焦点链,并保留仍有效的当前焦点。
     pub fn rebuild(&mut self, root: &Node) {
-        self.previous = self.current.clone();
         self.chain.clear();
         self.collect(root, &mut Vec::new());
 
@@ -58,6 +57,13 @@ impl FocusManager {
     /// 上一帧焦点路径(用于检测焦点变化)。
     pub fn previous(&self) -> Option<&FocusPath> {
         self.previous.as_ref()
+    }
+
+    /// 确认当前焦点变化已处理,将 previous 同步为 current。
+    ///
+    /// 由窗口层在发送完 FocusIn/FocusOut 后调用,防止同一变化被重复分发。
+    pub fn acknowledge(&mut self) {
+        self.previous = self.current.clone();
     }
 
     /// 当前焦点是否刚变化(用于在 window.rs 发送 FocusIn/FocusOut)。
@@ -242,5 +248,39 @@ mod tests {
         let tree = node(UiBox::new(Color::BLACK));
         mgr.rebuild(&tree);
         assert!(mgr.current().is_none());
+    }
+
+    #[test]
+    fn rebuild_preserves_previous_after_next() {
+        let mut texts = dummy_texts();
+        let mut tree = node(
+            Column::new()
+                .child(Button::new(Text::new("A")))
+                .child(Button::new(Text::new("B"))),
+        );
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree); // current=A, previous=A
+        mgr.next(); // current=B, previous=A
+        mgr.rebuild(&tree); // 不应覆盖 previous
+        assert_eq!(mgr.previous(), Some(&vec![0]));
+        assert_eq!(mgr.current(), Some(&vec![1]));
+    }
+
+    #[test]
+    fn rebuild_preserves_previous_after_set_focus() {
+        let mut texts = dummy_texts();
+        let mut tree = node(
+            Column::new()
+                .child(Button::new(Text::new("A")))
+                .child(Button::new(Text::new("B"))),
+        );
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree); // current=A, previous=None
+        mgr.set_focus(vec![1]); // current=B, previous=A
+        mgr.rebuild(&tree); // 不应覆盖 previous
+        assert_eq!(mgr.previous(), Some(&vec![0]));
+        assert_eq!(mgr.current(), Some(&vec![1]));
     }
 }

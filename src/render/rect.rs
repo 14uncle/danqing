@@ -50,6 +50,210 @@ impl RectBatch {
         });
     }
 
+    /// 添加一条沿圆角矩形边框的虚线(划线-空隙式)。
+    ///
+    /// 四条直边为长条形 dash,四个圆角用等距小圆点衔接,
+    /// 从而跟随组件圆角。`dash` 为每段划线长度,`gap` 为空隙长度,
+    /// `thickness` 为线宽。
+    pub fn push_dashed_border(
+        &mut self,
+        rect: Rect,
+        color: Color,
+        radius: f32,
+        dash: f32,
+        gap: f32,
+        thickness: f32,
+    ) {
+        let r = radius
+            .min(rect.size.width * 0.5)
+            .min(rect.size.height * 0.5);
+        let straight_w = (rect.size.width - 2.0 * r).max(0.0);
+        let straight_h = (rect.size.height - 2.0 * r).max(0.0);
+
+        // 四条直边
+        push_dashed_hline(
+            self,
+            rect.origin.x + r,
+            rect.origin.y,
+            straight_w,
+            color,
+            dash,
+            gap,
+            thickness,
+        );
+        push_dashed_hline(
+            self,
+            rect.origin.x + rect.size.width - r,
+            rect.origin.y + rect.size.height,
+            -straight_w,
+            color,
+            dash,
+            gap,
+            thickness,
+        );
+        push_dashed_vline(
+            self,
+            rect.origin.x + rect.size.width,
+            rect.origin.y + r,
+            straight_h,
+            color,
+            dash,
+            gap,
+            thickness,
+        );
+        push_dashed_vline(
+            self,
+            rect.origin.x,
+            rect.origin.y + rect.size.height - r,
+            -straight_h,
+            color,
+            dash,
+            gap,
+            thickness,
+        );
+
+        // 四个圆角:用与线宽等大的小圆点近似,顺序左上、右上、右下、左下。
+        if r > 0.0 && thickness > 0.0 {
+            let half = thickness * 0.5;
+            let corner_step = thickness + gap;
+            let corner_len = std::f32::consts::FRAC_PI_2 * r;
+            if corner_step > 0.0 {
+                for corner_idx in 0..4 {
+                    let (cx, cy, start_theta) = match corner_idx {
+                        0 => (rect.origin.x + r, rect.origin.y + r, std::f32::consts::PI),
+                        1 => (
+                            rect.origin.x + rect.size.width - r,
+                            rect.origin.y + r,
+                            std::f32::consts::PI + std::f32::consts::FRAC_PI_2,
+                        ),
+                        2 => (
+                            rect.origin.x + rect.size.width - r,
+                            rect.origin.y + rect.size.height - r,
+                            0.0,
+                        ),
+                        3 => (
+                            rect.origin.x + r,
+                            rect.origin.y + rect.size.height - r,
+                            std::f32::consts::FRAC_PI_2,
+                        ),
+                        _ => unreachable!(),
+                    };
+                    let mut d = 0.0f32;
+                    while d < corner_len {
+                        let t = d / corner_len;
+                        let theta = start_theta + t * std::f32::consts::FRAC_PI_2;
+                        let px = cx + r * theta.cos();
+                        let py = cy + r * theta.sin();
+                        self.push_rect(
+                            Rect::from_xywh(px - half, py - half, thickness, thickness),
+                            color,
+                            half,
+                        );
+                        d += corner_step;
+                    }
+                }
+            }
+        }
+    }
+
+    /// 添加一条沿圆角矩形边框的实线描边。
+    ///
+    /// 四条直边为矩形长条,四个圆角用沿圆弧排列的小矩形衔接,
+    /// 半径取 `thickness/2` 以自然融合成平滑弧线,从而跟随组件圆角。
+    /// `thickness` 为线宽。
+    pub fn push_rounded_border(&mut self, rect: Rect, color: Color, radius: f32, thickness: f32) {
+        if thickness <= 0.0 {
+            return;
+        }
+        let r = radius
+            .min(rect.size.width * 0.5)
+            .min(rect.size.height * 0.5);
+        let straight_w = (rect.size.width - 2.0 * r).max(0.0);
+        let straight_h = (rect.size.height - 2.0 * r).max(0.0);
+        let half = thickness * 0.5;
+
+        // 四条直边
+        self.push_rect(
+            Rect::from_xywh(
+                rect.origin.x + r,
+                rect.origin.y - half,
+                straight_w,
+                thickness,
+            ),
+            color,
+            0.0,
+        );
+        self.push_rect(
+            Rect::from_xywh(
+                rect.origin.x + r,
+                rect.origin.y + rect.size.height - half,
+                straight_w,
+                thickness,
+            ),
+            color,
+            0.0,
+        );
+        self.push_rect(
+            Rect::from_xywh(
+                rect.origin.x - half,
+                rect.origin.y + r,
+                thickness,
+                straight_h,
+            ),
+            color,
+            0.0,
+        );
+        self.push_rect(
+            Rect::from_xywh(
+                rect.origin.x + rect.size.width - half,
+                rect.origin.y + r,
+                thickness,
+                straight_h,
+            ),
+            color,
+            0.0,
+        );
+
+        // 四个圆角:沿 90° 圆弧等距放置小矩形,步长为 half 使弧线更平滑。
+        // 顺序:左上、右上、右下、左下,每段从一条直边过渡到相邻直边。
+        if r > 0.0 {
+            let corner_len = std::f32::consts::FRAC_PI_2 * r;
+            let segments = (corner_len / half).ceil().max(2.0) as usize;
+            let angle_step = std::f32::consts::FRAC_PI_2 / segments as f32;
+            for corner_idx in 0..4 {
+                let (cx, cy, start_theta) = match corner_idx {
+                    0 => (rect.origin.x + r, rect.origin.y + r, std::f32::consts::PI),
+                    1 => (
+                        rect.origin.x + rect.size.width - r,
+                        rect.origin.y + r,
+                        std::f32::consts::PI + std::f32::consts::FRAC_PI_2,
+                    ),
+                    2 => (
+                        rect.origin.x + rect.size.width - r,
+                        rect.origin.y + rect.size.height - r,
+                        0.0,
+                    ),
+                    3 => (
+                        rect.origin.x + r,
+                        rect.origin.y + rect.size.height - r,
+                        std::f32::consts::FRAC_PI_2,
+                    ),
+                    _ => unreachable!(),
+                };
+                for i in 0..=segments {
+                    let theta = start_theta + i as f32 * angle_step;
+                    let px = cx + r * theta.cos();
+                    let py = cy + r * theta.sin();
+                    self.push_rect(
+                        Rect::from_xywh(px - half, py - half, thickness, thickness),
+                        color,
+                        half,
+                    );
+                }
+            }
+        }
+    }
+
     /// 矩形数量。
     pub fn len(&self) -> usize {
         self.instances.len()
@@ -64,6 +268,77 @@ impl RectBatch {
     #[doc(hidden)]
     pub fn instance_colors(&self) -> Vec<[f32; 4]> {
         self.instances.iter().map(|i| i.color).collect()
+    }
+
+    /// 测试用:读取所有实例的矩形(不参与公开 API 契约)。
+    #[doc(hidden)]
+    pub fn instance_rects(&self) -> Vec<Rect> {
+        self.instances
+            .iter()
+            .map(|i| Rect::from_xywh(i.pos[0], i.pos[1], i.size[0], i.size[1]))
+            .collect()
+    }
+}
+
+/// 沿水平方向绘制一段划线-空隙虚线(长度可为负,表示从右向左)。
+#[allow(clippy::too_many_arguments)]
+fn push_dashed_hline(
+    rects: &mut RectBatch,
+    x0: f32,
+    y: f32,
+    len: f32,
+    color: Color,
+    dash: f32,
+    gap: f32,
+    thickness: f32,
+) {
+    let step = dash + gap;
+    if step <= 0.0 || thickness <= 0.0 {
+        return;
+    }
+    let abs_len = len.abs();
+    let dir = len.signum();
+    let mut dist = 0.0f32;
+    while dist < abs_len {
+        let seg = dash.min(abs_len - dist);
+        let start_x = x0 + dir * dist;
+        rects.push_rect(
+            Rect::from_xywh(start_x, y - thickness * 0.5, seg, thickness),
+            color,
+            0.0,
+        );
+        dist += step;
+    }
+}
+
+/// 沿垂直方向绘制一段划线-空隙虚线(长度可为负,表示从下向上)。
+#[allow(clippy::too_many_arguments)]
+fn push_dashed_vline(
+    rects: &mut RectBatch,
+    x: f32,
+    y0: f32,
+    len: f32,
+    color: Color,
+    dash: f32,
+    gap: f32,
+    thickness: f32,
+) {
+    let step = dash + gap;
+    if step <= 0.0 || thickness <= 0.0 {
+        return;
+    }
+    let abs_len = len.abs();
+    let dir = len.signum();
+    let mut dist = 0.0f32;
+    while dist < abs_len {
+        let seg = dash.min(abs_len - dist);
+        let start_y = y0 + dir * dist;
+        rects.push_rect(
+            Rect::from_xywh(x - thickness * 0.5, start_y, thickness, seg),
+            color,
+            0.0,
+        );
+        dist += step;
     }
 }
 

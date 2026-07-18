@@ -6,7 +6,7 @@
 //! 支持光标、选区、键盘编辑、IME preedit 显示与 commit 插入。
 
 use crate::app::AnimationCtx;
-use crate::event::{Event, ImeEvent, Key, NamedKey};
+use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 use crate::render::{RectBatch, TextBatch};
 use crate::widget::{EventResult, MsgQueue, Widget};
 use crate::{Color, Constraints, Edges, Rect, Size};
@@ -15,7 +15,7 @@ use crate::{Color, Constraints, Edges, Rect, Size};
 type ChangeFactory = Box<dyn Fn(&str) -> Box<dyn std::any::Any>>;
 
 /// 光标闪烁周期(秒)。
-const BLINK_PERIOD: f32 = 1.0;
+const BLINK_PERIOD: f32 = 0.5;
 
 /// 单行文本输入组件。
 pub struct TextInput {
@@ -43,6 +43,8 @@ pub struct TextInput {
     width: Option<f32>,
     /// layout/paint 缓存:自身绝对矩形。
     area: Rect,
+    /// 每个字符右侧的 x 偏移(用于鼠标点击定位光标)。
+    char_offsets: Vec<f32>,
     /// 光标可见性(由动画控制闪烁)。
     caret_visible: bool,
     /// IME 合成文本(显示在光标处,带下划线)。
@@ -67,6 +69,7 @@ impl TextInput {
             padding: Edges::symmetric(12.0, 8.0),
             width: None,
             area: Rect::default(),
+            char_offsets: Vec::new(),
             caret_visible: true,
             preedit: None,
             on_change: None,
@@ -152,7 +155,33 @@ impl TextInput {
         self.anchor = self.cursor;
     }
 
-    /// 移动光标。
+    /// 全选文本。
+    fn select_all(&mut self) {
+        self.cursor = self.text.chars().count();
+        self.anchor = 0;
+    }
+
+    /// 删除当前选区(若存在)。
+    fn delete_selection(&mut self) {
+        let (start, end) = self.selection_range();
+        if start != end {
+            let start_byte = char_to_byte(&self.text, start);
+            let end_byte = char_to_byte(&self.text, end);
+            self.text.drain(start_byte..end_byte);
+            self.cursor = start;
+            self.anchor = self.cursor;
+        }
+    }
+
+    /// 将本地 x 坐标(相对于文本起点)转换为字符索引。
+    fn hit_to_index(&self, local_x: f32) -> usize {
+        if self.char_offsets.is_empty() {
+            return 0;
+        }
+        self.char_offsets
+            .partition_point(|offset| *offset <= local_x)
+            .min(self.char_offsets.len())
+    }
     fn move_cursor(&mut self, delta: isize, extend_selection: bool) {
         let len = self.text.chars().count();
         let new_cursor = if delta < 0 {
@@ -201,7 +230,14 @@ impl Widget for TextInput {
             .max(content_width + self.padding.horizontal());
         let size = constraints.constrain(Size::new(width, height));
         self.area = Rect::new(crate::Point::ZERO, size);
-        let _ = texts;
+
+        // 缓存每个字符右侧的 x 偏移,用于鼠标点击定位光标。
+        self.char_offsets.clear();
+        let mut x = 0.0f32;
+        for ch in self.text.chars() {
+            x += texts.measure(&ch.to_string(), self.font_size);
+            self.char_offsets.push(x);
+        }
         size
     }
 
@@ -252,7 +288,7 @@ impl Widget for TextInput {
             let caret_height = texts.line_height(f32::from(self.font_size));
             let caret_y = area.origin.y + self.padding.top;
             rects.push_rect(
-                Rect::from_xywh(caret_x, caret_y, 1.0, caret_height),
+                Rect::from_xywh(caret_x, caret_y, 2.0, caret_height),
                 self.caret_color,
                 0.0,
             );
@@ -282,6 +318,10 @@ impl Widget for TextInput {
                 Key::Character(s) if !ctrl => {
                     self.insert(s);
                     changed = true;
+                    EventResult::Consumed
+                }
+                Key::Character(s) if *ctrl && s == "a" => {
+                    self.select_all();
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::ArrowLeft) => {
@@ -366,7 +406,26 @@ impl Widget for TextInput {
                 self.preedit = None;
                 EventResult::Consumed
             }
-            Event::Copy | Event::Cut | Event::Paste => EventResult::Consumed,
+            Event::Copy => EventResult::Consumed,
+            Event::Cut => {
+                if self.selected_text().is_some() {
+                    self.delete_selection();
+                    changed = true;
+                }
+                EventResult::Consumed
+            }
+            Event::Paste => EventResult::Consumed,
+            Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position,
+            } => {
+                let text_x = area.origin.x + self.padding.left;
+                let local_x = position.x - text_x;
+                self.cursor = self.hit_to_index(local_x);
+                self.anchor = self.cursor;
+                EventResult::Consumed
+            }
             _ => EventResult::Ignored,
         };
         if changed {
@@ -468,5 +527,69 @@ mod tests {
         t.cursor = 1;
         t.anchor = 4;
         assert_eq!(t.selected_text(), Some("ell".to_string()));
+    }
+
+    #[test]
+    fn ctrl_a_selects_all_text() {
+        let mut t = input();
+        t.event(&Event::FocusIn, Rect::default(), &mut Vec::new());
+        t.event(
+            &Event::Key {
+                key: Key::Character("a".to_string()),
+                pressed: true,
+                shift: false,
+                ctrl: true,
+            },
+            Rect::default(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.selected_text(), Some("Hello".to_string()));
+        assert_eq!(t.cursor, 5);
+        assert_eq!(t.anchor, 0);
+    }
+
+    #[test]
+    fn cut_deletes_selection() {
+        let mut t = input();
+        t.cursor = 1;
+        t.anchor = 4;
+        t.event(&Event::Cut, Rect::default(), &mut Vec::new());
+        assert_eq!(t.value(), "Ho");
+        assert_eq!(t.cursor, 1);
+        assert_eq!(t.anchor, 1);
+        assert!(t.selected_text().is_none());
+    }
+
+    #[test]
+    fn mouse_click_positions_cursor() {
+        let mut t = input();
+        let mut texts = crate::TextBatch::new();
+        // 触发 layout 以计算 char_offsets
+        t.layout(Constraints::loose(Size::new(500.0, 100.0)), &mut texts);
+
+        // 点击文本起点左侧,光标应在 0
+        t.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: crate::Point::new(0.0, 0.0),
+            },
+            Rect::from_xywh(0.0, 0.0, 500.0, 100.0),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.cursor, 0);
+
+        // 点击文本末尾右侧,光标应在末尾
+        let end_x = t.char_offsets.last().copied().unwrap_or(0.0) + 100.0;
+        t.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: crate::Point::new(end_x, 0.0),
+            },
+            Rect::from_xywh(0.0, 0.0, 500.0, 100.0),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.cursor, 5);
     }
 }
