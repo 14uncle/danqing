@@ -234,4 +234,8 @@ impl Widget for Button {
     fn ime_area(&self) -> Option<Rect> {
         Some(self.area)
     }
+
+    fn hit_area(&self) -> Option<Rect> {
+        Some(self.area)
+    }
 }
