@@ -410,6 +410,11 @@ impl Widget for TextArea {
                     changed = true;
                     EventResult::Consumed
                 }
+                Key::Named(NamedKey::Space) => {
+                    self.insert(" ");
+                    changed = true;
+                    EventResult::Consumed
+                }
                 Key::Character(s) if *ctrl && s == "a" => {
                     self.select_all();
                     EventResult::Consumed
@@ -621,6 +626,26 @@ mod tests {
         t.insert("c");
         assert_eq!(t.value(), "ab\nc");
         assert_eq!(t.cursor, 4);
+    }
+
+    #[test]
+    fn space_inserts_space() {
+        let mut t = TextArea::new();
+        let mut texts = crate::TextBatch::new();
+        t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
+        t.insert("ab");
+        t.event(
+            &Event::Key {
+                key: Key::Named(NamedKey::Space),
+                pressed: true,
+                shift: false,
+                ctrl: false,
+            },
+            area(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "ab ");
+        assert_eq!(t.cursor, 3);
     }
 
     #[test]
