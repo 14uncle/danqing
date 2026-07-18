@@ -304,7 +304,7 @@ impl Widget for Scrollable {
 mod tests {
     use super::*;
     use crate::Color;
-    use crate::widget::{Box as UiBox, node};
+    use crate::widget::Box as UiBox;
 
     #[test]
     fn vertical_scroll_clamps_offset() {
