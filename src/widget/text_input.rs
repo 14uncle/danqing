@@ -333,6 +333,11 @@ impl Widget for TextInput {
                     changed = true;
                     EventResult::Consumed
                 }
+                Key::Named(NamedKey::Space) => {
+                    self.insert(" ");
+                    changed = true;
+                    EventResult::Consumed
+                }
                 Key::Character(s) if *ctrl && s == "a" => {
                     self.select_all();
                     EventResult::Consumed
@@ -528,6 +533,23 @@ mod tests {
         t.insert(" world");
         assert_eq!(t.value(), "Hello world");
         assert_eq!(t.cursor, 11);
+    }
+
+    #[test]
+    fn space_inserts_space() {
+        let mut t = input();
+        t.event(
+            &Event::Key {
+                key: Key::Named(NamedKey::Space),
+                pressed: true,
+                shift: false,
+                ctrl: false,
+            },
+            Rect::default(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "Hello ");
+        assert_eq!(t.cursor, 6);
     }
 
     #[test]
