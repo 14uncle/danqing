@@ -34,7 +34,7 @@
 - `lyon` —— 任意矢量路径(曲线/复杂图形),M1 只支持矩形族
 - `cosmic-text` —— 复杂整形、双向文本、富文本排版
 - `taffy` —— 完整 flexbox 布局;M1 用自写的 Column/Row/Padding/Center
-- 焦点系统、输入法(IME)、剪贴板、多窗口、DPI 缩放
+- 多窗口、DPI 缩放
 
 ## Commands
 
@@ -111,7 +111,7 @@ impl Text {
 
 - **单元测试**(模块内 `#[cfg(test)]`):布局计算、事件命中分发、字形图集分配 —— 全部为纯逻辑,CI/本地无需 GPU
 - **集成测试**(`tests/`):组件树构建 + 布局 + 模拟事件分发的端到端逻辑
-- **渲染验证**:M1 阶段靠 `cargo run --example showcase` 人工确认(debug 构建自动启用 wgpu 校验层,要求无校验错误)
+- **渲染验证**:M1 阶段靠 `cargo run --example showcase` 人工确认。wgpu 校验层默认关闭以避免启动/关闭延迟;如需启用,设置 `DANQING_WGPU_VALIDATION=1` 或 `WGPU_VALIDATION=1`,并确保无校验错误
 - **覆盖率**:M1 不设硬指标,但布局/事件/图集三个纯逻辑模块必须有测试
 - GPU 相关代码通过 trait 隔离,避免纯逻辑测试依赖设备
 
@@ -142,7 +142,7 @@ impl Text {
 | 1 | `cargo run --example showcase` 在 Windows 打开窗口,简单场景稳定 ~60 FPS(vsync) | 人工运行 |
 | 2 | showcase 展示:彩色矩形 + 圆角矩形(边缘抗锯齿)、**中文与英文文本**、可交互按钮(hover 变色、点击计数)、键盘响应区(按键移动方块) | 人工运行 |
 | 3 | 鼠标移动/按下/抬起/滚轮事件经命中测试正确分发;键盘字符与功能键正确接收 | 人工运行 + 事件分发单元测试 |
-| 4 | 关闭窗口干净退出:无 panic、wgpu 校验层无错误 | 人工运行 |
+| 4 | 关闭窗口干净退出:无 panic;默认 wgpu 校验层关闭,如启用则校验层零错误 | 人工运行 |
 | 5 | `cargo test` 全绿;`cargo clippy -- -D warnings` 通过 | 命令验证 |
 | 6 | 适配层之外无 Windows 专有 API(winit/wgpu 天然跨平台),结构上为 macOS/Linux 就绪 | 代码评审 |
 
