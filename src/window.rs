@@ -399,6 +399,8 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 return;
             }
         }
+        window.set_visible(true);
+        log::info!("窗口已显示");
         self.window = Some(window);
         // 持续渲染模式: 请求首帧, 之后每帧结束再请求下一帧
         if let Some(window) = &self.window {
@@ -503,11 +505,6 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 if !self.first_frame_done {
                     self.first_frame_done = true;
                     log::info!("首帧渲染耗时: {:?}", frame_start.elapsed());
-                    // 首帧渲染完成后再显示窗口,避免初始化期间白屏。
-                    if let Some(window) = &self.window {
-                        window.set_visible(true);
-                        log::info!("窗口已显示");
-                    }
                 }
                 if let Some(window) = &self.window {
                     window.request_redraw();
