@@ -53,8 +53,11 @@ impl Font {
 
     /// 尝试从系统加载中文字体;成功返回 Some。
     fn system_cjk() -> Option<Self> {
+        let sys_start = std::time::Instant::now();
         let source = font_kit::source::SystemSource::new();
+        log::debug!("SystemSource::new 耗时: {:?}", sys_start.elapsed());
         for family in SYSTEM_CJK_CANDIDATES {
+            let fam_start = std::time::Instant::now();
             let Ok(family_handle) = source.select_family_by_name(family) else {
                 continue;
             };
@@ -72,10 +75,15 @@ impl Font {
             };
             // 必须具备中文覆盖
             if font.inner.lookup_glyph_index('你') != 0 {
+                log::info!(
+                    "系统字体加载成功: {family}, 总耗时 {:?}",
+                    fam_start.elapsed()
+                );
                 return Some(font);
             }
             log::debug!("系统字体 {family} 缺少中文字形,跳过");
         }
+        log::info!("未找到可用系统 CJK 字体,耗时 {:?}", sys_start.elapsed());
         None
     }
 
