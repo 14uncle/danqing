@@ -18,6 +18,16 @@ type ChangeFactory = Box<dyn Fn(&str) -> Box<dyn std::any::Any>>;
 
 /// 光标闪烁周期(秒)。
 const BLINK_PERIOD: f32 = 0.5;
+/// 撤销栈最大深度。
+const MAX_UNDO: usize = 100;
+
+/// 编辑前快照(用于撤销/重做)。
+#[derive(Debug, Clone)]
+struct Snapshot {
+    text: String,
+    cursor: usize,
+    anchor: usize,
+}
 
 /// 单行文本输入组件。
 pub struct TextInput {
@@ -57,6 +67,12 @@ pub struct TextInput {
     on_change: Option<ChangeFactory>,
     /// 鼠标拖拽选区状态。
     dragging: bool,
+    /// 撤销栈。
+    undo_stack: Vec<Snapshot>,
+    /// 重做栈。
+    redo_stack: Vec<Snapshot>,
+    /// 正在执行撤销/重做,避免重复记录快照。
+    is_undoing: bool,
 }
 
 impl TextInput {
@@ -81,6 +97,9 @@ impl TextInput {
             preedit: None,
             on_change: None,
             dragging: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            is_undoing: false,
         }
     }
 
@@ -135,8 +154,9 @@ impl TextInput {
         texts.measure(&prefix, self.font_size)
     }
 
-    /// 在光标处插入文本。
+    /// 在光标处插入文本,并记录撤销快照。
     fn insert(&mut self, text: &str) {
+        self.save_undo();
         self.delete_selection_pre_edit();
         let byte_idx = char_to_byte(&self.text, self.cursor);
         self.text.insert_str(byte_idx, text);
@@ -178,6 +198,54 @@ impl TextInput {
             self.text.drain(start_byte..end_byte);
             self.cursor = start;
             self.anchor = self.cursor;
+        }
+    }
+
+    /// 在变更前保存快照到撤销栈。
+    fn save_undo(&mut self) {
+        if self.is_undoing {
+            return;
+        }
+        if self.undo_stack.len() >= MAX_UNDO {
+            self.undo_stack.remove(0);
+        }
+        self.undo_stack.push(Snapshot {
+            text: self.text.clone(),
+            cursor: self.cursor,
+            anchor: self.anchor,
+        });
+        self.redo_stack.clear();
+    }
+
+    /// 撤销上一次编辑。
+    fn undo(&mut self) {
+        if let Some(snapshot) = self.undo_stack.pop() {
+            self.redo_stack.push(Snapshot {
+                text: self.text.clone(),
+                cursor: self.cursor,
+                anchor: self.anchor,
+            });
+            self.is_undoing = true;
+            self.text = snapshot.text;
+            self.cursor = snapshot.cursor;
+            self.anchor = snapshot.anchor;
+            self.is_undoing = false;
+        }
+    }
+
+    /// 重做上一次撤销。
+    fn redo(&mut self) {
+        if let Some(snapshot) = self.redo_stack.pop() {
+            self.undo_stack.push(Snapshot {
+                text: self.text.clone(),
+                cursor: self.cursor,
+                anchor: self.anchor,
+            });
+            self.is_undoing = true;
+            self.text = snapshot.text;
+            self.cursor = snapshot.cursor;
+            self.anchor = snapshot.anchor;
+            self.is_undoing = false;
         }
     }
 
@@ -342,6 +410,20 @@ impl Widget for TextInput {
                     self.select_all();
                     EventResult::Consumed
                 }
+                Key::Character(s) if *ctrl && s == "z" => {
+                    if *shift {
+                        self.redo();
+                    } else {
+                        self.undo();
+                    }
+                    changed = true;
+                    EventResult::Consumed
+                }
+                Key::Character(s) if *ctrl && s == "y" => {
+                    self.redo();
+                    changed = true;
+                    EventResult::Consumed
+                }
                 Key::Named(NamedKey::ArrowLeft) => {
                     self.move_cursor(-1, *shift);
                     EventResult::Consumed
@@ -365,6 +447,7 @@ impl Widget for TextInput {
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::Backspace) => {
+                    self.save_undo();
                     let (start, end) = self.selection_range();
                     if start != end {
                         self.delete_selection_pre_edit();
@@ -384,6 +467,7 @@ impl Widget for TextInput {
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::Delete) => {
+                    self.save_undo();
                     let (start, end) = self.selection_range();
                     if start != end {
                         self.delete_selection_pre_edit();
@@ -427,6 +511,7 @@ impl Widget for TextInput {
             Event::Copy => EventResult::Consumed,
             Event::Cut => {
                 if self.selected_text().is_some() {
+                    self.save_undo();
                     self.delete_selection();
                     changed = true;
                 }
@@ -550,6 +635,142 @@ mod tests {
         );
         assert_eq!(t.value(), "Hello ");
         assert_eq!(t.cursor, 6);
+    }
+
+    #[test]
+    fn undo_restores_deleted_text() {
+        let mut t = input();
+        // 删除 'o'
+        t.event(
+            &Event::Key {
+                key: Key::Named(NamedKey::Backspace),
+                pressed: true,
+                shift: false,
+                ctrl: false,
+            },
+            Rect::default(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "Hell");
+
+        // Ctrl+Z 撤销
+        t.event(
+            &Event::Key {
+                key: Key::Character("z".to_string()),
+                pressed: true,
+                shift: false,
+                ctrl: true,
+            },
+            Rect::default(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "Hello");
+        assert_eq!(t.cursor, 5);
+    }
+
+    #[test]
+    fn undo_redo_cycle() {
+        let mut t = input();
+        t.event(
+            &Event::Key {
+                key: Key::Character("z".to_string()),
+                pressed: true,
+                shift: false,
+                ctrl: true,
+            },
+            Rect::default(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "Hello"); // 空撤销栈,无变化
+
+        t.insert("!");
+        assert_eq!(t.value(), "Hello!");
+
+        t.undo();
+        assert_eq!(t.value(), "Hello");
+
+        t.redo();
+        assert_eq!(t.value(), "Hello!");
+    }
+
+    #[test]
+    fn new_edit_clears_redo_stack() {
+        let mut t = input();
+        t.insert("!");
+        t.undo();
+        assert_eq!(t.value(), "Hello");
+
+        t.insert("?");
+        t.redo(); // 重做栈已被清空
+        assert_eq!(t.value(), "Hello?");
+    }
+
+    #[test]
+    fn redo_via_keyboard_shortcuts() {
+        let mut t = input();
+        t.insert("!");
+        t.undo();
+        assert_eq!(t.value(), "Hello");
+
+        // Ctrl+Shift+Z 重做
+        t.event(
+            &Event::Key {
+                key: Key::Character("z".to_string()),
+                pressed: true,
+                shift: true,
+                ctrl: true,
+            },
+            Rect::default(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "Hello!");
+
+        t.undo();
+        assert_eq!(t.value(), "Hello");
+
+        // Ctrl+Y 重做
+        t.event(
+            &Event::Key {
+                key: Key::Character("y".to_string()),
+                pressed: true,
+                shift: false,
+                ctrl: true,
+            },
+            Rect::default(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "Hello!");
+    }
+
+    #[test]
+    fn undo_stack_depth_limit() {
+        let mut t = TextInput::new();
+        for i in 0..=MAX_UNDO {
+            t.insert(&i.to_string());
+        }
+        // 只能撤销最后 MAX_UNDO 次编辑
+        for _ in 0..MAX_UNDO {
+            t.undo();
+        }
+        // 再撤销一次应无变化(栈已空)
+        let after_undos = t.value().to_string();
+        t.undo();
+        assert_eq!(t.value(), after_undos);
+    }
+
+    #[test]
+    fn undo_restores_cursor_and_anchor() {
+        let mut t = input();
+        t.cursor = 1;
+        t.anchor = 4; // 选中 "ell"
+        t.insert("?"); // 替换为 "H?o", 光标在 2
+        assert_eq!(t.value(), "H?o");
+        assert_eq!(t.cursor, 2);
+
+        t.undo();
+        assert_eq!(t.value(), "Hello");
+        assert_eq!(t.cursor, 1);
+        assert_eq!(t.anchor, 4);
     }
 
     #[test]
