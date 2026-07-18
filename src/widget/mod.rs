@@ -21,6 +21,7 @@ mod padding;
 mod row;
 mod scrollable;
 mod text;
+mod text_area;
 mod text_input;
 
 pub use box_::Box;
@@ -32,6 +33,7 @@ pub use padding::Padding;
 pub use row::Row;
 pub use scrollable::{ScrollAxis, Scrollable};
 pub use text::Text;
+pub use text_area::TextArea;
 pub use text_input::TextInput;
 
 use std::any::Any;
