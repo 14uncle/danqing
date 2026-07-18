@@ -57,6 +57,13 @@ src/
 - 单行 `TextInput`:光标、选区、键盘编辑、IME 合成、剪贴板复制/剪切/粘贴
 - `Button` 支持焦点与空格/回车触发
 
+## M3 已交付
+
+- `Scrollable` 滚动容器:垂直/水平/双向滚动、滚轮、视口裁剪、滚动条
+- `TextArea` 多行文本域:显式换行、按字符 soft-wrap、光标/选区、键盘编辑、IME、剪贴板
+- 鼠标拖拽选区(`TextInput` + `TextArea`)
+- 渲染裁剪基础(Batch clip stack + shader discard)
+
 ## 许可证
 
 MIT OR Apache-2.0
