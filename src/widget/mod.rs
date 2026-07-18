@@ -19,6 +19,7 @@ mod flow;
 mod focus;
 mod padding;
 mod row;
+mod scrollable;
 mod text;
 mod text_input;
 
@@ -29,6 +30,7 @@ pub use column::Column;
 pub use focus::FocusManager;
 pub use padding::Padding;
 pub use row::Row;
+pub use scrollable::{ScrollAxis, Scrollable};
 pub use text::Text;
 pub use text_input::TextInput;
 
