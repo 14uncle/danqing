@@ -21,9 +21,10 @@ arboard = "3"
 [dev-dependencies]
 anyhow = "1"
 env_logger = "0.11"
+chrono = "0.4"
 
 [profile.dev]
-# debug 构建自动启用 wgpu 校验层(wgpu 默认行为),此处仅加速依赖编译
+# debug 构建默认关闭 wgpu 校验层,避免部分机器 1~3s 启动/关闭延迟
 opt-level = 1
 
 [profile.dev.package."*"]
