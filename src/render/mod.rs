@@ -21,7 +21,7 @@ use crate::Color;
 
 /// 根据平台选择单一主 backend,避免实例创建时扫描多个后端。
 #[cfg(target_os = "windows")]
-const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
+const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::PRIMARY;
 #[cfg(target_os = "macos")]
 const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::METAL;
 #[cfg(all(unix, not(target_os = "macos")))]
