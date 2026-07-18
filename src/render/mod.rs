@@ -18,6 +18,20 @@ use winit::window::Window as WinitWindow;
 
 use crate::Color;
 
+/// 根据平台选择单一主 backend,避免实例创建时扫描多个后端。
+#[cfg(target_os = "windows")]
+const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::DX12;
+#[cfg(target_os = "macos")]
+const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::METAL;
+#[cfg(all(unix, not(target_os = "macos")))]
+const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
+#[cfg(not(any(
+    target_os = "windows",
+    target_os = "macos",
+    all(unix, not(target_os = "macos"))
+)))]
+const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::PRIMARY;
+
 /// 渲染上下文初始化或运行期错误。
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
@@ -59,7 +73,7 @@ impl Context {
     async fn new_async(window: Arc<WinitWindow>, clear_color: Color) -> Result<Self, RenderError> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends: DEFAULT_BACKENDS,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let surface = instance.create_surface(window)?;

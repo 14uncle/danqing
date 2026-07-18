@@ -166,6 +166,8 @@ struct Handler<'a, A: App> {
     start: Instant,
     /// 系统剪贴板 (懒加载)。
     clipboard: Option<arboard::Clipboard>,
+    /// 是否已完成首帧渲染(用于一次性诊断计时)。
+    first_frame_done: bool,
 }
 
 impl<A: App> Handler<'_, A> {
@@ -384,9 +386,11 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         };
         log::info!("窗口已创建: {}", self.config.title);
 
+        let ctx_start = Instant::now();
         match Context::new(Arc::clone(&window), self.config.clear_color) {
             Ok(context) => {
                 self.context = Some(context);
+                log::info!("渲染上下文初始化耗时: {:?}", ctx_start.elapsed());
             }
             Err(err) => {
                 log::error!("初始化渲染上下文失败: {err}");
@@ -462,6 +466,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 }
             }
             WindowEvent::RedrawRequested => {
+                let frame_start = Instant::now();
                 let mut rects = RectBatch::new();
                 self.texts.clear();
                 let screen = self.window.as_ref().map(|w| {
@@ -490,6 +495,10 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     event_loop.exit();
                     return;
                 }
+                if !self.first_frame_done {
+                    self.first_frame_done = true;
+                    log::info!("首帧渲染耗时: {:?}", frame_start.elapsed());
+                }
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
@@ -502,12 +511,18 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
 /// 打开窗口并运行应用: 事件分发、消息驱动、每帧重绘, 直到窗口关闭。
 pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowError> {
     let event_loop = EventLoop::new()?;
+    let texts_start = Instant::now();
+    let texts = TextBatch::new();
+    log::info!(
+        "文本批次初始化(含字体加载)耗时: {:?}",
+        texts_start.elapsed()
+    );
     let mut handler = Handler {
         tree: app.view(),
         config,
         window: None,
         context: None,
-        texts: TextBatch::new(),
+        texts,
         cursor: Point::ZERO,
         modifiers: ModifiersState::empty(),
         app,
@@ -516,8 +531,11 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
         focus: FocusManager::new(),
         start: Instant::now(),
         clipboard: None,
+        first_frame_done: false,
     };
+    let run_start = Instant::now();
     event_loop.run_app(&mut handler)?;
+    log::info!("事件循环运行耗时: {:?}", run_start.elapsed());
     log::info!("事件循环已退出");
     Ok(())
 }
