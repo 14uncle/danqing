@@ -12,23 +12,17 @@ use crate::app::AnimationCtx;
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 use crate::render::{RectBatch, TextBatch};
 use crate::text::{Line, break_lines};
+use crate::widget::text_editor::{TextEditor, char_to_byte};
 use crate::widget::{EventResult, MsgQueue, Widget};
 use crate::{Color, Constraints, Edges, Point, Rect, Size};
-
-/// 文本变化回调:返回一条应用消息。
-type ChangeFactory = Box<dyn Fn(&str) -> Box<dyn std::any::Any>>;
 
 /// 光标闪烁周期(秒)。
 const BLINK_PERIOD: f32 = 0.5;
 
 /// 多行文本输入组件。
 pub struct TextArea {
-    /// 当前文本内容(可含换行符)。
-    text: String,
-    /// 光标位置(字符索引,0..=char_count)。
-    cursor: usize,
-    /// 选区锚点(字符索引);与 cursor 相等表示无选区。
-    anchor: usize,
+    /// 共享文本编辑状态。
+    editor: TextEditor,
     /// 是否获得焦点。
     focused: bool,
     /// 字体大小。
@@ -57,8 +51,6 @@ pub struct TextArea {
     caret_visible: bool,
     /// IME 合成文本。
     preedit: Option<String>,
-    /// 文本变化时产出的应用消息。
-    on_change: Option<ChangeFactory>,
     /// 鼠标拖拽选区状态。
     dragging: bool,
 }
@@ -67,9 +59,7 @@ impl TextArea {
     /// 创建多行文本输入框(默认空文本、字号 16、深色文本、浅色背景)。
     pub fn new() -> Self {
         Self {
-            text: String::new(),
-            cursor: 0,
-            anchor: 0,
+            editor: TextEditor::new(),
             focused: false,
             font_size: 16,
             color: Color::from_srgb8(0x22, 0x22, 0x22),
@@ -84,16 +74,13 @@ impl TextArea {
             line_height: 0.0,
             caret_visible: true,
             preedit: None,
-            on_change: None,
             dragging: false,
         }
     }
 
     /// 设置初始文本。
     pub fn text(mut self, text: impl Into<String>) -> Self {
-        self.text = text.into();
-        self.cursor = self.text.chars().count();
-        self.anchor = self.cursor;
+        self.editor.set_text(text);
         self
     }
 
@@ -123,30 +110,52 @@ impl TextArea {
 
     /// 设置文本变化回调(每次编辑后触发)。
     pub fn on_change<M: 'static>(mut self, f: impl Fn(&str) -> M + 'static) -> Self {
-        self.on_change = Some(Box::new(move |text| {
-            Box::new(f(text)) as Box<dyn std::any::Any>
-        }));
+        self.editor = self.editor.on_change(f);
         self
     }
 
     /// 当前文本(不含 preedit)。
     pub fn value(&self) -> &str {
-        &self.text
+        self.editor.text()
+    }
+
+    /// 光标位置(测试用)。
+    #[cfg(test)]
+    pub(crate) fn cursor(&self) -> usize {
+        self.editor.cursor()
+    }
+
+    /// 设置光标位置(测试用)。
+    #[cfg(test)]
+    pub(crate) fn set_cursor(&mut self, cursor: usize) {
+        self.editor.set_cursor(cursor);
+    }
+
+    /// 选区锚点(测试用)。
+    #[cfg(test)]
+    pub(crate) fn anchor(&self) -> usize {
+        self.editor.anchor()
+    }
+
+    /// 设置选区锚点(测试用)。
+    #[cfg(test)]
+    pub(crate) fn set_anchor(&mut self, anchor: usize) {
+        self.editor.set_anchor(anchor);
     }
 
     /// 重新计算行排版与每行字符偏移。
     fn rebuild_lines(&mut self, texts: &mut TextBatch, content_width: f32) {
-        self.lines = break_lines(&self.text, content_width, &mut |ch| {
+        self.lines = break_lines(self.editor.text(), content_width, &mut |ch| {
             texts.measure(&ch.to_string(), self.font_size)
         });
 
         self.char_offsets.clear();
         for line in &self.lines {
             let mut offsets = Vec::with_capacity(line.len());
-            let start_byte = char_to_byte(&self.text, line.start);
-            let end_byte = char_to_byte(&self.text, line.end);
+            let start_byte = char_to_byte(self.editor.text(), line.start);
+            let end_byte = char_to_byte(self.editor.text(), line.end);
             let mut x = 0.0f32;
-            for ch in self.text[start_byte..end_byte].chars() {
+            for ch in self.editor.text()[start_byte..end_byte].chars() {
                 x += texts.measure(&ch.to_string(), self.font_size);
                 offsets.push(x);
             }
@@ -156,7 +165,7 @@ impl TextArea {
 
     /// 返回光标所在行的索引。
     fn cursor_line(&self) -> usize {
-        self.line_index_of_char(self.cursor)
+        self.line_index_of_char(self.editor.cursor())
     }
 
     /// 返回字符索引所在行的索引。
@@ -204,66 +213,33 @@ impl TextArea {
 
     /// 在光标处插入文本。
     fn insert(&mut self, text: &str) {
-        self.delete_selection();
-        let byte_idx = char_to_byte(&self.text, self.cursor);
-        self.text.insert_str(byte_idx, text);
-        self.cursor += text.chars().count();
-        self.anchor = self.cursor;
+        self.editor.insert(text);
     }
 
     /// 通知应用文本已变化。
     fn notify_change(&self, msgs: &mut MsgQueue) {
-        if let Some(factory) = &self.on_change {
-            msgs.push(factory(&self.text));
-        }
-    }
-
-    /// 删除当前选区(若存在)。
-    fn delete_selection(&mut self) {
-        let (start, end) = self.selection_range();
-        if start == end {
-            return;
-        }
-        let start_byte = char_to_byte(&self.text, start);
-        let end_byte = char_to_byte(&self.text, end);
-        self.text.drain(start_byte..end_byte);
-        self.cursor = start;
-        self.anchor = self.cursor;
+        self.editor.notify_change(msgs);
     }
 
     /// 全选文本。
     fn select_all(&mut self) {
-        self.cursor = self.text.chars().count();
-        self.anchor = 0;
+        self.editor.select_all();
     }
 
     /// 选区范围(起点,终点),保证 start <= end。
     fn selection_range(&self) -> (usize, usize) {
-        if self.anchor <= self.cursor {
-            (self.anchor, self.cursor)
-        } else {
-            (self.cursor, self.anchor)
-        }
+        self.editor.selection_range()
     }
 
     /// 水平移动光标。
     fn move_cursor_horizontal(&mut self, delta: isize, extend_selection: bool) {
-        let len = self.text.chars().count();
-        let new_cursor = if delta < 0 {
-            self.cursor.saturating_sub(delta.unsigned_abs())
-        } else {
-            (self.cursor + delta as usize).min(len)
-        };
-        self.cursor = new_cursor;
-        if !extend_selection {
-            self.anchor = self.cursor;
-        }
+        self.editor.move_cursor(delta, extend_selection);
     }
 
     /// 垂直移动光标(按行)。
     fn move_cursor_vertical(&mut self, delta: isize, extend_selection: bool) {
         let line_idx = self.cursor_line();
-        let col = self.cursor - self.lines[line_idx].start;
+        let col = self.editor.cursor() - self.lines[line_idx].start;
         let target_idx = if delta < 0 {
             line_idx.saturating_sub(delta.unsigned_abs())
         } else {
@@ -271,10 +247,20 @@ impl TextArea {
         };
         let target_line = self.lines[target_idx];
         let target_col = col.min(target_line.len());
-        self.cursor = target_line.start + target_col;
+        self.editor.set_cursor(target_line.start + target_col);
         if !extend_selection {
-            self.anchor = self.cursor;
+            self.editor.set_anchor(self.editor.cursor());
         }
+    }
+
+    /// 撤销上一次编辑。
+    fn undo(&mut self) -> bool {
+        self.editor.undo()
+    }
+
+    /// 重做上一次撤销。
+    fn redo(&mut self) -> bool {
+        self.editor.redo()
     }
 }
 
@@ -341,10 +327,10 @@ impl Widget for TextArea {
             }
 
             // 基础文本
-            let start_byte = char_to_byte(&self.text, line.start);
-            let end_byte = char_to_byte(&self.text, line.end);
+            let start_byte = char_to_byte(self.editor.text(), line.start);
+            let end_byte = char_to_byte(self.editor.text(), line.end);
             texts.push_text(
-                &self.text[start_byte..end_byte],
+                &self.editor.text()[start_byte..end_byte],
                 text_x,
                 baseline,
                 self.font_size,
@@ -356,7 +342,7 @@ impl Widget for TextArea {
         if let Some(preedit) = &self.preedit {
             let line_idx = self.cursor_line();
             let line = self.lines[line_idx];
-            let col = self.cursor - line.start;
+            let col = self.editor.cursor() - line.start;
             let pre_x = text_x + self.measure_to(line_idx, col);
             let pre_y = area.origin.y + self.padding.top + line_idx as f32 * self.line_height;
             let baseline = pre_y + ascent;
@@ -374,7 +360,7 @@ impl Widget for TextArea {
         if self.focused && self.caret_visible {
             let line_idx = self.cursor_line();
             let line = self.lines[line_idx];
-            let col = self.cursor - line.start;
+            let col = self.editor.cursor() - line.start;
             let caret_x = text_x + self.measure_to(line_idx, col);
             let caret_y = area.origin.y + self.padding.top + line_idx as f32 * self.line_height;
             rects.push_rect(
@@ -419,6 +405,18 @@ impl Widget for TextArea {
                     self.select_all();
                     EventResult::Consumed
                 }
+                Key::Character(s) if *ctrl && s == "z" => {
+                    if *shift {
+                        changed = self.redo();
+                    } else {
+                        changed = self.undo();
+                    }
+                    EventResult::Consumed
+                }
+                Key::Character(s) if *ctrl && s == "y" => {
+                    changed = self.redo();
+                    EventResult::Consumed
+                }
                 Key::Named(NamedKey::ArrowLeft) => {
                     self.move_cursor_horizontal(-1, *shift);
                     EventResult::Consumed
@@ -437,54 +435,26 @@ impl Widget for TextArea {
                 }
                 Key::Named(NamedKey::Home) => {
                     let line = self.lines[self.cursor_line()];
-                    self.cursor = line.start;
+                    self.editor.set_cursor(line.start);
                     if !shift {
-                        self.anchor = self.cursor;
+                        self.editor.set_anchor(line.start);
                     }
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::End) => {
                     let line = self.lines[self.cursor_line()];
-                    self.cursor = line.end;
+                    self.editor.set_cursor(line.end);
                     if !shift {
-                        self.anchor = self.cursor;
+                        self.editor.set_anchor(line.end);
                     }
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::Backspace) => {
-                    let (start, end) = self.selection_range();
-                    if start != end {
-                        self.delete_selection();
-                        changed = true;
-                    } else if self.cursor > 0 {
-                        let byte_idx = char_to_byte(&self.text, self.cursor);
-                        let prev = self.text[..byte_idx]
-                            .chars()
-                            .next_back()
-                            .map(|c| c.len_utf8())
-                            .unwrap_or(0);
-                        self.text.drain((byte_idx - prev)..byte_idx);
-                        self.cursor -= 1;
-                        self.anchor = self.cursor;
-                        changed = true;
-                    }
+                    changed = self.editor.backspace();
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::Delete) => {
-                    let (start, end) = self.selection_range();
-                    if start != end {
-                        self.delete_selection();
-                        changed = true;
-                    } else if self.cursor < self.text.chars().count() {
-                        let byte_idx = char_to_byte(&self.text, self.cursor);
-                        let len = self.text[byte_idx..]
-                            .chars()
-                            .next()
-                            .map(|c| c.len_utf8())
-                            .unwrap_or(0);
-                        self.text.drain(byte_idx..(byte_idx + len));
-                        changed = true;
-                    }
+                    changed = self.editor.delete();
                     EventResult::Consumed
                 }
                 Key::Named(NamedKey::Enter) => {
@@ -515,17 +485,17 @@ impl Widget for TextArea {
             Event::Copy => EventResult::Consumed,
             Event::Cut => {
                 if self.selected_text().is_some() {
-                    self.delete_selection();
+                    self.editor.cut_selection();
                     changed = true;
                 }
                 EventResult::Consumed
             }
             Event::Paste => EventResult::Consumed,
             Event::CursorMoved(p) => {
-                if self.dragging && area.contains(*p) {
+                if self.dragging {
                     let local_x = p.x - area.origin.x;
                     let local_y = p.y - area.origin.y;
-                    self.cursor = self.hit_to_index(local_x, local_y);
+                    self.editor.set_cursor(self.hit_to_index(local_x, local_y));
                 }
                 EventResult::Ignored
             }
@@ -541,8 +511,8 @@ impl Widget for TextArea {
                 if area.contains(*position) {
                     let local_x = position.x - area.origin.x;
                     let local_y = position.y - area.origin.y;
-                    self.cursor = self.hit_to_index(local_x, local_y);
-                    self.anchor = self.cursor;
+                    self.editor.set_cursor(self.hit_to_index(local_x, local_y));
+                    self.editor.set_anchor(self.editor.cursor());
                     self.dragging = true;
                     EventResult::Consumed
                 } else {
@@ -571,13 +541,7 @@ impl Widget for TextArea {
     }
 
     fn selected_text(&self) -> Option<String> {
-        let (start, end) = self.selection_range();
-        if start == end {
-            return None;
-        }
-        let start_byte = char_to_byte(&self.text, start);
-        let end_byte = char_to_byte(&self.text, end);
-        Some(self.text[start_byte..end_byte].to_string())
+        self.editor.selected_text()
     }
 
     fn wants_ime(&self) -> bool {
@@ -588,7 +552,7 @@ impl Widget for TextArea {
         let area = self.area.get();
         let line_idx = self.cursor_line();
         let line = self.lines[line_idx];
-        let col = self.cursor - line.start;
+        let col = self.editor.cursor() - line.start;
         let cursor_x = self.measure_to(line_idx, col);
         let x = area.origin.x + self.padding.left + cursor_x;
         let y = area.origin.y + self.padding.top + line_idx as f32 * self.line_height;
@@ -598,14 +562,6 @@ impl Widget for TextArea {
     fn hit_area(&self) -> Option<Rect> {
         Some(self.area.get())
     }
-}
-
-/// 字符索引转字节索引。
-fn char_to_byte(s: &str, char_idx: usize) -> usize {
-    s.char_indices()
-        .nth(char_idx)
-        .map(|(b, _)| b)
-        .unwrap_or(s.len())
 }
 
 #[cfg(test)]
@@ -625,7 +581,7 @@ mod tests {
         t.insert("\n");
         t.insert("c");
         assert_eq!(t.value(), "ab\nc");
-        assert_eq!(t.cursor, 4);
+        assert_eq!(t.cursor(), 4);
     }
 
     #[test]
@@ -645,7 +601,7 @@ mod tests {
             &mut Vec::new(),
         );
         assert_eq!(t.value(), "ab ");
-        assert_eq!(t.cursor, 3);
+        assert_eq!(t.cursor(), 3);
     }
 
     #[test]
@@ -654,28 +610,49 @@ mod tests {
         let mut texts = crate::TextBatch::new();
         t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
         // 光标在末尾(第 1 行第 2 列之后)。
-        assert_eq!(t.cursor, 5);
+        assert_eq!(t.cursor(), 5);
 
         t.move_cursor_vertical(-1, false);
         // 移到上一行,列数 clamp 到上一行长度 2
-        assert_eq!(t.cursor, 2);
+        assert_eq!(t.cursor(), 2);
 
         t.move_cursor_vertical(1, false);
-        assert_eq!(t.cursor, 5);
+        assert_eq!(t.cursor(), 5);
     }
 
     #[test]
-    fn home_end_per_line() {
+    fn home_end_keys_move_per_line() {
         let mut t = TextArea::new().text("ab\ncd");
         let mut texts = crate::TextBatch::new();
         t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
-        t.cursor = 3; // 第 1 行开头
-        t.anchor = 3;
+        t.set_cursor(5); // 第 1 行末尾
+        t.set_anchor(5);
 
-        t.cursor = t.lines[1].end;
-        assert_eq!(t.cursor, 5);
-        t.cursor = t.lines[1].start;
-        assert_eq!(t.cursor, 3);
+        // End 应跳到行尾
+        t.event(
+            &Event::Key {
+                key: Key::Named(NamedKey::End),
+                pressed: true,
+                shift: false,
+                ctrl: false,
+            },
+            area(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.cursor(), 5);
+
+        // Home 应跳到行首
+        t.event(
+            &Event::Key {
+                key: Key::Named(NamedKey::Home),
+                pressed: true,
+                shift: false,
+                ctrl: false,
+            },
+            area(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.cursor(), 3);
     }
 
     #[test]
@@ -683,8 +660,8 @@ mod tests {
         let mut t = TextArea::new().text("ab\ncd");
         let mut texts = crate::TextBatch::new();
         t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
-        t.cursor = 3; // 第 1 行开头
-        t.anchor = 3;
+        t.set_cursor(3); // 第 1 行开头
+        t.set_anchor(3);
         t.event(
             &Event::Key {
                 key: Key::Named(NamedKey::Backspace),
@@ -696,7 +673,28 @@ mod tests {
             &mut Vec::new(),
         );
         assert_eq!(t.value(), "abcd");
-        assert_eq!(t.cursor, 2);
+        assert_eq!(t.cursor(), 2);
+    }
+
+    #[test]
+    fn delete_across_newline() {
+        let mut t = TextArea::new().text("ab\ncd");
+        let mut texts = crate::TextBatch::new();
+        t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
+        t.set_cursor(2); // 第 0 行末尾
+        t.set_anchor(2);
+        t.event(
+            &Event::Key {
+                key: Key::Named(NamedKey::Delete),
+                pressed: true,
+                shift: false,
+                ctrl: false,
+            },
+            area(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "abcd");
+        assert_eq!(t.cursor(), 2);
     }
 
     #[test]
@@ -719,6 +717,139 @@ mod tests {
     }
 
     #[test]
+    fn undo_restores_deleted_text() {
+        let mut t = TextArea::new().text("Hello");
+        let mut texts = crate::TextBatch::new();
+        t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
+
+        t.event(
+            &Event::Key {
+                key: Key::Named(NamedKey::Backspace),
+                pressed: true,
+                shift: false,
+                ctrl: false,
+            },
+            area(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "Hell");
+
+        t.event(
+            &Event::Key {
+                key: Key::Character("z".to_string()),
+                pressed: true,
+                shift: false,
+                ctrl: true,
+            },
+            area(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "Hello");
+        assert_eq!(t.cursor(), 5);
+    }
+
+    #[test]
+    fn undo_redo_cycle() {
+        let mut t = TextArea::new().text("Hello");
+        let mut texts = crate::TextBatch::new();
+        t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
+
+        t.insert("!");
+        assert_eq!(t.value(), "Hello!");
+
+        t.undo();
+        assert_eq!(t.value(), "Hello");
+
+        t.redo();
+        assert_eq!(t.value(), "Hello!");
+    }
+
+    #[test]
+    fn redo_via_keyboard_shortcuts() {
+        let mut t = TextArea::new().text("Hello");
+        let mut texts = crate::TextBatch::new();
+        t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
+
+        t.insert("!");
+        t.undo();
+        assert_eq!(t.value(), "Hello");
+
+        // Ctrl+Shift+Z
+        t.event(
+            &Event::Key {
+                key: Key::Character("z".to_string()),
+                pressed: true,
+                shift: true,
+                ctrl: true,
+            },
+            area(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "Hello!");
+
+        t.undo();
+        // Ctrl+Y
+        t.event(
+            &Event::Key {
+                key: Key::Character("y".to_string()),
+                pressed: true,
+                shift: false,
+                ctrl: true,
+            },
+            area(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "Hello!");
+    }
+
+    #[test]
+    fn undo_restores_multiline_cursor_and_anchor() {
+        let mut t = TextArea::new().text("ab\ncd");
+        let mut texts = crate::TextBatch::new();
+        t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
+
+        // 选中 "b\nc"
+        t.set_cursor(1);
+        t.set_anchor(4);
+        t.insert("?");
+        assert_eq!(t.value(), "a?d");
+
+        t.undo();
+        assert_eq!(t.value(), "ab\ncd");
+        assert_eq!(t.cursor(), 1);
+        assert_eq!(t.anchor(), 4);
+    }
+
+    #[test]
+    fn new_edit_clears_redo_stack() {
+        let mut t = TextArea::new().text("Hello");
+        let mut texts = crate::TextBatch::new();
+        t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
+
+        t.insert("!");
+        t.undo();
+        assert_eq!(t.value(), "Hello");
+
+        t.insert("?");
+        t.redo();
+        assert_eq!(t.value(), "Hello?");
+    }
+
+    #[test]
+    fn undo_stack_depth_limit() {
+        let mut t = TextArea::new();
+        for i in 0..=crate::widget::text_editor::MAX_UNDO {
+            t.insert(&i.to_string());
+        }
+        for _ in 0..crate::widget::text_editor::MAX_UNDO {
+            t.undo();
+        }
+        let after_undos = t.value().to_string();
+        t.undo();
+        assert_eq!(t.value(), after_undos);
+    }
+
+    #[test]
     fn mouse_click_positions_cursor() {
         let mut t = TextArea::new().text("ab\ncd");
         let mut texts = crate::TextBatch::new();
@@ -734,7 +865,7 @@ mod tests {
             area(),
             &mut Vec::new(),
         );
-        assert_eq!(t.cursor, 0);
+        assert_eq!(t.cursor(), 0);
     }
 
     #[test]
@@ -742,8 +873,8 @@ mod tests {
         let mut t = TextArea::new().text("ab\ncd");
         let mut texts = crate::TextBatch::new();
         t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
-        t.cursor = 3;
-        t.anchor = 3;
+        t.set_cursor(3);
+        t.set_anchor(3);
 
         let mut rects = crate::RectBatch::new();
         t.paint(area(), &mut rects, &mut texts);
