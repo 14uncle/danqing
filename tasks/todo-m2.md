@@ -31,7 +31,7 @@
 
 ## Phase 5: 打磨验收
 - [x] 新增集成测试 `tests/focus_input.rs`
-- [x] `cargo test` 全绿(43 项)
+- [x] `cargo test` 全绿(53 项)
 - [x] `cargo clippy -- -D warnings` 通过
 - [x] `cargo fmt --check` 通过
 - [x] `cargo build --release` 成功
