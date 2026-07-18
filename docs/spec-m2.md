@@ -51,7 +51,8 @@ examples/showcase.rs            → 加入 TextInput 焦点演示
 src/
   app.rs                        → 新增 AnimationCtx
   event.rs                      → 新增 Ime 事件与 Focus 相关事件;Key 携带 shift/ctrl
-  window.rs                     → 焦点路由、Ime 转发、剪贴板、IME 光标区域
+  window.rs                     → 焦点路由、Ime 转发、剪贴板、IME 光标区域、窗口延迟显示
+  render/mod.rs                 → wgpu 上下文,按平台选择 backend,校验层可 opt-in
   widget/
     mod.rs                      → Widget trait 增加 focusable/children/ime_area/wants_ime/animate/hit_area
     focus.rs                    → 焦点管理器:焦点链、Tab 遍历、点击聚焦
@@ -73,6 +74,16 @@ tests/focus_input.rs            → 焦点与文本输入集成测试
 - 焦点管理器是纯逻辑,放在 `widget/focus.rs`,不依赖 `winit`。
 - 剪贴板操作由 `window.rs` 适配层发起或封装,不直接进入 `widget/`。
 - `ime_area()` 与 `hit_area()` 职责分离:`ime_area()` 供 IME 候选框吸附(如光标处小矩形);`hit_area()` 供鼠标点击聚焦/命中测试(通常为组件完整区域)。二者不得混用,以免 IME 区域变化影响点击聚焦。
+
+## 启动与渲染性能
+
+M2 后期针对 debug 构建的启动/关闭体验做了以下调整:
+
+- **wgpu 校验层默认关闭**:debug 构建不再默认启用 wgpu 校验层,避免部分机器上 1~3 秒的初始化与资源释放延迟。需要校验层验证 showcase 时请设置环境变量 `DANQING_WGPU_VALIDATION=1`(或 `WGPU_VALIDATION=1`)。
+- **窗口延迟显示**:showcase 启动时先创建隐藏窗口,完成字体加载与 wgpu 渲染上下文初始化后再显示窗口,避免用户看到数秒白屏。
+- **关闭即时隐藏**:点击关闭按钮后立即隐藏窗口,资源释放等收尾在后台完成,提升关闭操作的响应感。
+
+> 这些调整为 UX 优化,不改动 `widget/`、`layout.rs`、`event.rs` 的纯逻辑约束。
 
 ## 测试策略
 
