@@ -7,6 +7,8 @@
 
 mod atlas;
 mod font;
+pub mod line_layout;
 
 pub use atlas::{AtlasError, GlyphAtlas, GlyphInfo};
 pub use font::{Font, FontError};
+pub use line_layout::{Line, break_lines};
