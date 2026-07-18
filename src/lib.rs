@@ -1,0 +1,24 @@
+//! @author 十四叔
+//! @date 2026/07/17
+
+//! 丹青 (danqing) —— 跨平台自绘 UI 框架。
+//!
+//! 保留模式组件树 + wgpu 自绘管线。M1 最小闭环:
+//! 跨平台开窗、基础图元/文本绘制、键鼠事件响应。
+//!
+//! 公开 API 一律经本模块 re-export,不允许使用者路径深穿。
+
+mod app;
+pub mod event;
+pub mod layout;
+mod render;
+mod text;
+pub mod widget;
+mod window;
+
+pub use app::{AnimationCtx, App};
+pub use event::{Event, ImeEvent, Key, MouseButton, NamedKey};
+pub use layout::{Color, Constraints, Edges, FlowChild, Point, Rect, Size, distribute};
+pub use render::{Context as RenderContext, RectBatch, RenderError, TextBatch};
+pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo};
+pub use window::{WindowConfig, WindowError, run, run_app};

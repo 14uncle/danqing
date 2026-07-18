@@ -1,0 +1,35 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+
+
+# IDE
+/.idea
+/.vscode
+/.vs
+*.iml
+.rust-analyzer/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor backup / swap / merge files
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+*.rej
+
+# Logs
+*.log
+
+# Local Claude Code settings
+ /.claude/settings.local.json
+
+# Coverage / profiling
+*.profraw
+/coverage
+/flamegraph.svg

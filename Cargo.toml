@@ -1,0 +1,30 @@
+[package]
+name = "danqing"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "丹青 —— 跨平台自绘 UI 框架"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+winit = "0.30.13"
+wgpu = "30"
+fontdue = "0.9"
+etagere = "0.3"
+font-kit = "0.14"
+bytemuck = "1"
+pollster = "1"
+thiserror = "2"
+log = "0.4"
+arboard = "3"
+
+[dev-dependencies]
+anyhow = "1"
+env_logger = "0.11"
+
+[profile.dev]
+# debug 构建自动启用 wgpu 校验层(wgpu 默认行为),此处仅加速依赖编译
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,0 +1,258 @@
+//! @author 十四叔
+//! @date 2026/07/17
+
+//! 矩形族渲染管线(SDF 圆角,实例化 quad)。
+//!
+//! 每帧用法:先经 [`RectBatch`] 收集矩形,再由管线一次绘制。
+//! 绘制同时负责以清屏色开始 render pass(每帧第一个 pass)。
+
+use crate::{Color, Rect};
+
+/// 单个矩形实例的 GPU 数据布局。
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct RectInstance {
+    /// 左上角像素坐标。
+    pos: [f32; 2],
+    /// 像素尺寸。
+    size: [f32; 2],
+    /// RGBA 颜色。
+    color: [f32; 4],
+    /// 圆角半径(像素)。
+    radius: f32,
+    /// 对齐填充。
+    _pad: f32,
+}
+
+/// 矩形收集器:一帧内待绘制的矩形列表。
+///
+/// 组件树 paint 阶段向其中 push 矩形;目前由应用层直接使用,
+/// Task 8 起由组件树驱动。
+#[derive(Debug, Default)]
+pub struct RectBatch {
+    instances: Vec<RectInstance>,
+}
+
+impl RectBatch {
+    /// 新建空收集器。
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 添加一个矩形(颜色与圆角半径,半径 0 为直角)。
+    pub fn push_rect(&mut self, rect: Rect, color: Color, radius: f32) {
+        self.instances.push(RectInstance {
+            pos: [rect.origin.x, rect.origin.y],
+            size: [rect.size.width, rect.size.height],
+            color: [color.r, color.g, color.b, color.a],
+            radius,
+            _pad: 0.0,
+        });
+    }
+
+    /// 矩形数量。
+    pub fn len(&self) -> usize {
+        self.instances.len()
+    }
+
+    /// 是否为空。
+    pub fn is_empty(&self) -> bool {
+        self.instances.is_empty()
+    }
+
+    /// 测试用:读取所有实例的颜色(不参与公开 API 契约)。
+    #[doc(hidden)]
+    pub fn instance_colors(&self) -> Vec<[f32; 4]> {
+        self.instances.iter().map(|i| i.color).collect()
+    }
+}
+
+/// 一帧的绘制目标与参数。
+pub struct DrawTarget<'a> {
+    /// 帧纹理视图。
+    pub view: &'a wgpu::TextureView,
+    /// 目标宽度(像素)。
+    pub width: f32,
+    /// 目标高度(像素)。
+    pub height: f32,
+    /// 清屏颜色。
+    pub clear_color: Color,
+}
+
+/// 矩形渲染管线。持有 GPU 管线、uniform 与实例缓冲。
+pub struct RectPipeline {
+    pipeline: wgpu::RenderPipeline,
+    uniform_buf: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    instance_buf: wgpu::Buffer,
+    /// 实例缓冲当前容量(实例个数)。
+    capacity: usize,
+}
+
+impl RectPipeline {
+    const INITIAL_CAPACITY: usize = 256;
+
+    /// 创建管线,target 为 surface 颜色格式。
+    pub fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rect shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("rect.wgsl").into()),
+        });
+
+        let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("rect uniforms"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rect uniform buffer"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rect bind group"),
+            layout: &bind_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buf.as_entire_binding(),
+            }],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("rect pipeline layout"),
+            bind_group_layouts: &[Some(&bind_layout)],
+            immediate_size: 0,
+        });
+        let instance_layout = wgpu::VertexBufferLayout {
+            array_stride: size_of::<RectInstance>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![
+                0 => Float32x2, // pos
+                1 => Float32x2, // size
+                2 => Float32x4, // color
+                3 => Float32,   // radius
+            ],
+        };
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("rect pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(instance_layout)],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rect instance buffer"),
+            size: (Self::INITIAL_CAPACITY * size_of::<RectInstance>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        Self {
+            pipeline,
+            uniform_buf,
+            bind_group,
+            instance_buf,
+            capacity: Self::INITIAL_CAPACITY,
+        }
+    }
+
+    /// 上传屏幕尺寸 uniform(像素 → clip 的缩放依据)。
+    fn write_screen_uniform(&self, queue: &wgpu::Queue, width: f32, height: f32) {
+        let data = [width, height, 0.0, 0.0];
+        queue.write_buffer(&self.uniform_buf, 0, bytemuck::cast_slice(&data));
+    }
+
+    /// 确保实例缓冲容量足够(不足则扩容到下一个 2 的幂)。
+    fn ensure_capacity(&mut self, device: &wgpu::Device, needed: usize) {
+        if needed <= self.capacity {
+            return;
+        }
+        let new_capacity = needed.next_power_of_two();
+        self.instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rect instance buffer"),
+            size: (new_capacity * size_of::<RectInstance>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.capacity = new_capacity;
+    }
+
+    /// 开始 render pass(以 clear_color 清屏)并绘制收集到的全部矩形。
+    pub fn draw(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &DrawTarget,
+        batch: &RectBatch,
+    ) {
+        self.write_screen_uniform(queue, target.width, target.height);
+        self.ensure_capacity(device, batch.len());
+        if !batch.is_empty() {
+            queue.write_buffer(
+                &self.instance_buf,
+                0,
+                bytemuck::cast_slice(&batch.instances),
+            );
+        }
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("rect pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: f64::from(target.clear_color.r),
+                        g: f64::from(target.clear_color.g),
+                        b: f64::from(target.clear_color.b),
+                        a: f64::from(target.clear_color.a),
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        if !batch.is_empty() {
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_vertex_buffer(0, self.instance_buf.slice(..));
+            pass.draw(0..6, 0..batch.len() as u32);
+        }
+    }
+}
