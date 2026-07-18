@@ -19,6 +19,9 @@ struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) px: vec2<f32>,        // 片段像素坐标(用于裁剪)
+    @location(3) clip_min: vec2<f32>,
+    @location(4) clip_max: vec2<f32>,
 };
 
 @vertex
@@ -29,6 +32,8 @@ fn vs_main(
     @location(2) uv_min: vec2<f32>,
     @location(3) uv_max: vec2<f32>,
     @location(4) color: vec4<f32>,
+    @location(5) clip_min: vec2<f32>,
+    @location(6) clip_max: vec2<f32>,
 ) -> VsOut {
     var corners = array<vec2<f32>, 6>(
         vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0),
@@ -46,11 +51,19 @@ fn vs_main(
     out.clip = clip;
     out.uv = mix(uv_min, uv_max, c);
     out.color = color;
+    out.px = px;
+    out.clip_min = clip_min;
+    out.clip_max = clip_max;
     return out;
 }
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    // 按 clip 矩形剔除视口外片段(clip_max 不含)
+    if in.px.x < in.clip_min.x || in.px.x >= in.clip_max.x
+        || in.px.y < in.clip_min.y || in.px.y >= in.clip_max.y {
+        discard;
+    }
     let coverage = textureSample(atlas_tex, atlas_samp, in.uv).r;
     return vec4<f32>(in.color.rgb, in.color.a * coverage);
 }

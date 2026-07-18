@@ -18,6 +18,9 @@ struct VsOut {
     @location(1) half_size: vec2<f32>, // 矩形半尺寸
     @location(2) color: vec4<f32>,
     @location(3) radius: f32,
+    @location(4) px: vec2<f32>,        // 片段像素坐标(用于裁剪)
+    @location(5) clip_min: vec2<f32>,
+    @location(6) clip_max: vec2<f32>,
 };
 
 @vertex
@@ -27,6 +30,9 @@ fn vs_main(
     @location(1) size: vec2<f32>,
     @location(2) color: vec4<f32>,
     @location(3) radius: f32,
+    @location(4) _pad: f32,
+    @location(5) clip_min: vec2<f32>,
+    @location(6) clip_max: vec2<f32>,
 ) -> VsOut {
     var corners = array<vec2<f32>, 6>(
         vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0),
@@ -47,6 +53,9 @@ fn vs_main(
     out.half_size = size * 0.5;
     out.color = color;
     out.radius = radius;
+    out.px = px;
+    out.clip_min = clip_min;
+    out.clip_max = clip_max;
     return out;
 }
 
@@ -58,6 +67,11 @@ fn sd_rounded_box(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    // 按 clip 矩形剔除视口外片段(clip_max 不含)
+    if in.px.x < in.clip_min.x || in.px.x >= in.clip_max.x
+        || in.px.y < in.clip_min.y || in.px.y >= in.clip_max.y {
+        discard;
+    }
     let r = min(in.radius, min(in.half_size.x, in.half_size.y));
     let d = sd_rounded_box(in.local, in.half_size, r);
     // 以距离的变化率为过渡带宽,约 1 物理像素抗锯齿

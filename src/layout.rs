@@ -117,6 +117,28 @@ impl Rect {
             self.size,
         )
     }
+
+    /// 判断矩形是否为空(宽或高非正)。
+    pub fn is_empty(&self) -> bool {
+        self.size.width <= 0.0 || self.size.height <= 0.0
+    }
+
+    /// 求两个矩形的交集。
+    ///
+    /// 若不相交或仅边界接触,返回 `None`。
+    pub fn intersect(&self, other: &Self) -> Option<Self> {
+        let x0 = self.origin.x.max(other.origin.x);
+        let y0 = self.origin.y.max(other.origin.y);
+        let x1 = (self.origin.x + self.size.width).min(other.origin.x + other.size.width);
+        let y1 = (self.origin.y + self.size.height).min(other.origin.y + other.size.height);
+        let width = x1 - x0;
+        let height = y1 - y0;
+        if width > 0.0 && height > 0.0 {
+            Some(Self::from_xywh(x0, y0, width, height))
+        } else {
+            None
+        }
+    }
 }
 
 /// 四边间距(用于 Padding 等),逻辑像素。
@@ -284,6 +306,31 @@ mod tests {
         assert!(rect.contains(Point::new(109.9, 69.9)));
         assert!(!rect.contains(Point::new(110.0, 70.0))); // 右下角不含
         assert!(!rect.contains(Point::new(9.9, 30.0)));
+    }
+
+    #[test]
+    fn rect_intersection() {
+        let a = Rect::from_xywh(0.0, 0.0, 100.0, 100.0);
+        let b = Rect::from_xywh(50.0, 50.0, 100.0, 100.0);
+        assert_eq!(
+            a.intersect(&b),
+            Some(Rect::from_xywh(50.0, 50.0, 50.0, 50.0))
+        );
+
+        // 不相交
+        let c = Rect::from_xywh(200.0, 200.0, 10.0, 10.0);
+        assert!(a.intersect(&c).is_none());
+
+        // 边界接触(视为不相交)
+        let d = Rect::from_xywh(100.0, 0.0, 10.0, 10.0);
+        assert!(a.intersect(&d).is_none());
+    }
+
+    #[test]
+    fn rect_is_empty() {
+        assert!(Rect::from_xywh(0.0, 0.0, 0.0, 10.0).is_empty());
+        assert!(Rect::from_xywh(0.0, 0.0, 10.0, 0.0).is_empty());
+        assert!(!Rect::from_xywh(0.0, 0.0, 10.0, 10.0).is_empty());
     }
 
     #[test]
