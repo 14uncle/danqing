@@ -7,8 +7,8 @@
 // ! 就在这里展示一项 (以用代测)。
 
 use danqing::widget::{
-    self, Box as UiBox, Button, Center, Column, EventResult, MsgQueue, Node, Padding, Row, Text,
-    TextInput, Widget,
+    self, Box as UiBox, Button, Center, Column, EventResult, MsgQueue, Node, Padding, Row,
+    Scrollable, Text, TextArea, TextInput, Widget,
 };
 use danqing::{App, Color, Event, Key, NamedKey, Point, Size};
 use std::io::Write;
@@ -26,6 +26,7 @@ struct Showcase {
     square_pos: Point,
     last_key: String,
     input_value: String,
+    textarea_value: String,
 }
 
 /// 应用消息。
@@ -38,6 +39,8 @@ enum Msg {
     KeyChar(String),
     /// 文本输入框内容变化。
     InputChanged(String),
+    /// 多行文本域内容变化。
+    TextareaChanged(String),
 }
 
 impl App for Showcase {
@@ -54,6 +57,7 @@ impl App for Showcase {
             }
             Msg::KeyChar(c) => self.last_key = c,
             Msg::InputChanged(s) => self.input_value = s,
+            Msg::TextareaChanged(s) => self.textarea_value = s,
         }
     }
 
@@ -193,6 +197,36 @@ fn input_row() -> Row {
         )
 }
 
+/// 多行输入区:Scrollable + TextArea + 实时回显字数/行数。
+fn textarea_row() -> Row {
+    Row::new()
+        .gap(16.0)
+        .child(Text::new("多行:").font_size(20).color(Color::WHITE))
+        .child(
+            UiBox::new(Color::from_srgb8(0x2A, 0x2A, 0x2A))
+                .size(400.0, 160.0)
+                .radius(8.0)
+                .child(Scrollable::new(
+                    TextArea::new()
+                        .width(400.0)
+                        .font_size(18)
+                        .on_change(|s: &str| Msg::TextareaChanged(s.to_string())),
+                )),
+        )
+        .fill(
+            Center::new(
+                Text::bind(|s: &Showcase| {
+                    let chars = s.textarea_value.chars().count();
+                    let lines = s.textarea_value.lines().count();
+                    format!("字数:{} 行数:{}", chars, lines)
+                })
+                .font_size(20)
+                .color(Color::WHITE),
+            ),
+            1,
+        )
+}
+
 /// 绝对 / 相对定位容器: 把子组件按状态绑定的偏移量平移。
 ///
 /// 本组件为 showcase 键盘演示专用, 放在示例文件中以保持框架核心精简。
@@ -278,6 +312,7 @@ fn build_tree() -> Node {
             .fill(rounded_row(), 2)
             .child(counter_row())
             .child(input_row())
+            .child(textarea_row())
             .child(keyboard_row())
             .child(
                 Row::new()
@@ -308,6 +343,7 @@ fn main() -> anyhow::Result<()> {
         square_pos: Point::ZERO,
         last_key: String::from("-"),
         input_value: String::new(),
+        textarea_value: String::new(),
     };
     danqing::run_app(danqing::WindowConfig::default(), &mut app)?;
     Ok(())
