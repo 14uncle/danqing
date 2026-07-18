@@ -55,6 +55,8 @@ pub struct TextInput {
     preedit: Option<String>,
     /// 文本变化时产出的应用消息。
     on_change: Option<ChangeFactory>,
+    /// 鼠标拖拽选区状态。
+    dragging: bool,
 }
 
 impl TextInput {
@@ -78,6 +80,7 @@ impl TextInput {
             caret_visible: true,
             preedit: None,
             on_change: None,
+            dragging: false,
         }
     }
 
@@ -316,6 +319,7 @@ impl Widget for TextInput {
             Event::FocusOut => {
                 self.focused = false;
                 self.preedit = None;
+                self.dragging = false;
                 EventResult::Consumed
             }
             Event::Key {
@@ -424,6 +428,18 @@ impl Widget for TextInput {
                 EventResult::Consumed
             }
             Event::Paste => EventResult::Consumed,
+            Event::CursorMoved(p) => {
+                if self.dragging {
+                    let text_x = area.origin.x + self.padding.left;
+                    let local_x = p.x - text_x;
+                    self.cursor = self.hit_to_index(local_x);
+                }
+                EventResult::Ignored
+            }
+            Event::CursorLeft => {
+                self.dragging = false;
+                EventResult::Ignored
+            }
             Event::MouseInput {
                 button: MouseButton::Left,
                 pressed: true,
@@ -433,7 +449,16 @@ impl Widget for TextInput {
                 let local_x = position.x - text_x;
                 self.cursor = self.hit_to_index(local_x);
                 self.anchor = self.cursor;
+                self.dragging = true;
                 EventResult::Consumed
+            }
+            Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: false,
+                ..
+            } => {
+                self.dragging = false;
+                EventResult::Ignored
             }
             _ => EventResult::Ignored,
         };
@@ -615,6 +640,42 @@ mod tests {
             &mut Vec::new(),
         );
         assert_eq!(t.cursor, 5);
+    }
+
+    #[test]
+    fn mouse_drag_selects_text() {
+        let mut t = input();
+        let mut texts = crate::TextBatch::new();
+        t.layout(Constraints::loose(Size::new(500.0, 100.0)), &mut texts);
+
+        let area = Rect::from_xywh(0.0, 0.0, 500.0, 100.0);
+        // 按下并拖到末尾
+        t.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: crate::Point::new(0.0, 0.0),
+            },
+            area,
+            &mut Vec::new(),
+        );
+        let end_x = t.char_offsets.last().copied().unwrap_or(0.0) + 100.0;
+        t.event(
+            &Event::CursorMoved(crate::Point::new(end_x, 0.0)),
+            area,
+            &mut Vec::new(),
+        );
+        t.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: false,
+                position: crate::Point::new(end_x, 0.0),
+            },
+            area,
+            &mut Vec::new(),
+        );
+        assert_eq!(t.selected_text(), Some("Hello".to_string()));
+        assert!(!t.dragging);
     }
 
     #[test]
