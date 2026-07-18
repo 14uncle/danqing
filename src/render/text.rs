@@ -10,6 +10,10 @@ use crate::Color;
 use crate::render::DrawTarget;
 use crate::text::{Font, GlyphAtlas};
 
+/// 无裁剪时使用的极大安全矩形(像素坐标)。
+const NO_CLIP_MIN: [f32; 2] = [-1_000_000.0; 2];
+const NO_CLIP_MAX: [f32; 2] = [1_000_000.0; 2];
+
 /// 单个字形实例的 GPU 数据布局。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -24,6 +28,10 @@ struct GlyphInstance {
     uv_max: [f32; 2],
     /// RGBA 颜色。
     color: [f32; 4],
+    /// 裁剪矩形左上角。
+    clip_min: [f32; 2],
+    /// 裁剪矩形右下角(不含)。
+    clip_max: [f32; 2],
 }
 
 /// 文本收集器: 字体 + 图集 + 一帧内的字形实例。
@@ -33,6 +41,8 @@ pub struct TextBatch {
     font: Font,
     atlas: GlyphAtlas,
     instances: Vec<GlyphInstance>,
+    /// 裁剪矩形栈;`None` 表示当前裁剪区为空(完全裁剪)。
+    clip_stack: Vec<Option<crate::Rect>>,
 }
 
 impl TextBatch {
@@ -42,7 +52,29 @@ impl TextBatch {
             font: Font::load(),
             atlas: GlyphAtlas::new(),
             instances: Vec::new(),
+            clip_stack: Vec::new(),
         }
+    }
+
+    /// 压入一个裁剪矩形。
+    ///
+    /// 后续 push 的字形会被裁剪到该矩形与所有祖先裁剪矩形的交集。
+    /// 必须在子组件 paint 前调用,并在 paint 后调用 [`Self::pop_clip`]。
+    pub fn push_clip(&mut self, rect: crate::Rect) {
+        let next = match self.current_clip() {
+            Some(parent) => parent.intersect(&rect),
+            None => Some(rect),
+        };
+        self.clip_stack.push(next);
+    }
+
+    /// 弹出当前裁剪矩形,恢复上一层裁剪状态。
+    pub fn pop_clip(&mut self) {
+        self.clip_stack.pop();
+    }
+
+    fn current_clip(&self) -> Option<crate::Rect> {
+        self.clip_stack.iter().rev().find_map(|r| *r)
     }
 
     /// 字体来源描述 (诊断用)。
@@ -90,6 +122,24 @@ impl TextBatch {
             if info.width > 0 {
                 let gx = pen_x + info.bearing_x as f32;
                 let gy = baseline - info.bearing_y as f32;
+                let glyph_rect =
+                    crate::Rect::from_xywh(gx, gy, info.width as f32, info.height as f32);
+                let (clip_min, clip_max) = match self.current_clip() {
+                    Some(clip) => match clip.intersect(&glyph_rect) {
+                        Some(intersection) => (
+                            [intersection.origin.x, intersection.origin.y],
+                            [
+                                intersection.origin.x + intersection.size.width,
+                                intersection.origin.y + intersection.size.height,
+                            ],
+                        ),
+                        None => {
+                            pen_x += info.advance;
+                            continue;
+                        }
+                    },
+                    None => (NO_CLIP_MIN, NO_CLIP_MAX),
+                };
                 self.instances.push(GlyphInstance {
                     dst_pos: [gx, gy],
                     dst_size: [info.width as f32, info.height as f32],
@@ -102,6 +152,8 @@ impl TextBatch {
                         info.uv_max.1 as f32 / atlas_size,
                     ],
                     color: [color.r, color.g, color.b, color.a],
+                    clip_min,
+                    clip_max,
                 });
             }
             pen_x += info.advance;
@@ -252,6 +304,8 @@ impl TextPipeline {
                 2 => Float32x2, // uv_min
                 3 => Float32x2, // uv_max
                 4 => Float32x4, // color
+                5 => Float32x2, // clip_min
+                6 => Float32x2, // clip_max
             ],
         };
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -396,5 +450,41 @@ impl TextPipeline {
         pass.set_bind_group(1, &self.atlas_bind, &[]);
         pass.set_vertex_buffer(0, self.instance_buf.slice(..));
         pass.draw(0..6, 0..batch.len() as u32);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Rect;
+
+    #[test]
+    fn clip_stack_skips_fully_clipped_glyphs() {
+        let mut batch = TextBatch::new();
+        batch.push_clip(Rect::from_xywh(0.0, 0.0, 10.0, 10.0));
+        // 文本在 (20,0) 开始,完全在裁剪区外
+        batch.push_text("A", 20.0, 20.0, 16, Color::BLACK);
+        assert_eq!(batch.len(), 0);
+    }
+
+    #[test]
+    fn clip_stack_keeps_visible_glyphs() {
+        let mut batch = TextBatch::new();
+        batch.push_clip(Rect::from_xywh(0.0, 0.0, 100.0, 100.0));
+        batch.push_text("A", 0.0, 20.0, 16, Color::BLACK);
+        assert!(batch.len() > 0);
+    }
+
+    #[test]
+    fn nested_clip_intersects_for_text() {
+        let mut batch = TextBatch::new();
+        batch.push_clip(Rect::from_xywh(0.0, 0.0, 100.0, 100.0));
+        batch.push_clip(Rect::from_xywh(50.0, 0.0, 100.0, 100.0));
+        batch.push_text("A", 0.0, 20.0, 16, Color::BLACK);
+        assert_eq!(batch.len(), 0);
+        batch.pop_clip();
+        batch.pop_clip();
+        batch.push_text("A", 0.0, 20.0, 16, Color::BLACK);
+        assert!(batch.len() > 0);
     }
 }

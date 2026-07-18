@@ -8,6 +8,10 @@
 
 use crate::{Color, Rect};
 
+/// 无裁剪时使用的极大安全矩形(像素坐标)。
+const NO_CLIP_MIN: [f32; 2] = [-1_000_000.0; 2];
+const NO_CLIP_MAX: [f32; 2] = [1_000_000.0; 2];
+
 /// 单个矩形实例的 GPU 数据布局。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -22,6 +26,10 @@ struct RectInstance {
     radius: f32,
     /// 对齐填充。
     _pad: f32,
+    /// 裁剪矩形左上角。
+    clip_min: [f32; 2],
+    /// 裁剪矩形右下角(不含)。
+    clip_max: [f32; 2],
 }
 
 /// 矩形收集器:一帧内待绘制的矩形列表。
@@ -31,6 +39,8 @@ struct RectInstance {
 #[derive(Debug, Default)]
 pub struct RectBatch {
     instances: Vec<RectInstance>,
+    /// 裁剪矩形栈;`None` 表示当前裁剪区为空(完全裁剪)。
+    clip_stack: Vec<Option<crate::Rect>>,
 }
 
 impl RectBatch {
@@ -39,14 +49,50 @@ impl RectBatch {
         Self::default()
     }
 
+    /// 压入一个裁剪矩形。
+    ///
+    /// 后续 push 的矩形会被裁剪到该矩形与所有祖先裁剪矩形的交集。
+    /// 必须在子组件 paint 前调用,并在 paint 后调用 [`Self::pop_clip`]。
+    pub fn push_clip(&mut self, rect: crate::Rect) {
+        let next = match self.current_clip() {
+            Some(parent) => parent.intersect(&rect),
+            None => Some(rect),
+        };
+        self.clip_stack.push(next);
+    }
+
+    /// 弹出当前裁剪矩形,恢复上一层裁剪状态。
+    pub fn pop_clip(&mut self) {
+        self.clip_stack.pop();
+    }
+
+    fn current_clip(&self) -> Option<crate::Rect> {
+        self.clip_stack.iter().rev().find_map(|r| *r)
+    }
+
     /// 添加一个矩形(颜色与圆角半径,半径 0 为直角)。
     pub fn push_rect(&mut self, rect: Rect, color: Color, radius: f32) {
+        let (clip_min, clip_max) = match self.current_clip() {
+            Some(clip) => match clip.intersect(&rect) {
+                Some(intersection) => (
+                    [intersection.origin.x, intersection.origin.y],
+                    [
+                        intersection.origin.x + intersection.size.width,
+                        intersection.origin.y + intersection.size.height,
+                    ],
+                ),
+                None => return,
+            },
+            None => (NO_CLIP_MIN, NO_CLIP_MAX),
+        };
         self.instances.push(RectInstance {
             pos: [rect.origin.x, rect.origin.y],
             size: [rect.size.width, rect.size.height],
             color: [color.r, color.g, color.b, color.a],
             radius,
             _pad: 0.0,
+            clip_min,
+            clip_max,
         });
     }
 
@@ -280,6 +326,52 @@ impl RectBatch {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Color, Rect};
+
+    #[test]
+    fn clip_stack_skips_fully_clipped_rects() {
+        let mut batch = RectBatch::new();
+        batch.push_clip(Rect::from_xywh(0.0, 0.0, 10.0, 10.0));
+        batch.push_rect(Rect::from_xywh(20.0, 20.0, 10.0, 10.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 0);
+    }
+
+    #[test]
+    fn clip_stack_keeps_partially_visible_rects() {
+        let mut batch = RectBatch::new();
+        batch.push_clip(Rect::from_xywh(0.0, 0.0, 15.0, 10.0));
+        batch.push_rect(Rect::from_xywh(10.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 1);
+    }
+
+    #[test]
+    fn nested_clip_intersects() {
+        let mut batch = RectBatch::new();
+        batch.push_clip(Rect::from_xywh(0.0, 0.0, 100.0, 100.0));
+        batch.push_clip(Rect::from_xywh(50.0, 50.0, 100.0, 100.0));
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 60.0, 60.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 1);
+        batch.pop_clip();
+        batch.pop_clip();
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 2);
+    }
+
+    #[test]
+    fn empty_clip_skips_all() {
+        let mut batch = RectBatch::new();
+        batch.push_clip(Rect::from_xywh(0.0, 0.0, 0.0, 10.0));
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 0);
+        batch.pop_clip();
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 1);
+    }
+}
+
 /// 沿水平方向绘制一段划线-空隙虚线(长度可为负,表示从右向左)。
 #[allow(clippy::too_many_arguments)]
 fn push_dashed_hline(
@@ -415,6 +507,9 @@ impl RectPipeline {
                 1 => Float32x2, // size
                 2 => Float32x4, // color
                 3 => Float32,   // radius
+                4 => Float32,   // _pad (对齐占位,shader 中忽略)
+                5 => Float32x2, // clip_min
+                6 => Float32x2, // clip_max
             ],
         };
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
