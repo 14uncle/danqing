@@ -12,7 +12,6 @@ use danqing::widget::{
 };
 use danqing::{App, Color, Event, Key, NamedKey, Point, Size};
 use std::io::Write;
-use std::time::SystemTime;
 
 /// 键盘移动方块的区域尺寸。
 const KEYBOARD_AREA: Size = Size::new(300.0, 180.0);
@@ -315,23 +314,13 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn init_log() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug"))
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format(|buf, record| {
-            let now = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default();
-            let secs = now.as_secs() % 86_400;
-            let ms = now.subsec_millis();
-            let hh = secs / 3600;
-            let mm = (secs % 3600) / 60;
-            let ss = secs % 60;
+            let now = chrono::Local::now();
             writeln!(
                 buf,
-                "{:02}:{:02}:{:02}.{:03} {} [{}] {}",
-                hh,
-                mm,
-                ss,
-                ms,
+                "{} {} [{}] {}",
+                now.format("%H:%M:%S%.3f"),
                 record.level(),
                 record.target(),
                 record.args()
