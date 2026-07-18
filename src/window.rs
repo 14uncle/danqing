@@ -372,6 +372,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         }
         let attrs = WindowAttributes::default()
             .with_title(&self.config.title)
+            .with_visible(false)
             .with_inner_size(LogicalSize::new(
                 f64::from(self.config.size.width),
                 f64::from(self.config.size.height),
@@ -457,6 +458,10 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         match event {
             WindowEvent::CloseRequested => {
                 log::info!("收到关闭请求,退出事件循环");
+                // 立即隐藏窗口,让关闭感觉更快(资源释放仍在后台完成)。
+                if let Some(window) = &self.window {
+                    window.set_visible(false);
+                }
                 event_loop.exit();
             }
             WindowEvent::Resized(size) => {
@@ -498,6 +503,11 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 if !self.first_frame_done {
                     self.first_frame_done = true;
                     log::info!("首帧渲染耗时: {:?}", frame_start.elapsed());
+                    // 首帧渲染完成后再显示窗口,避免初始化期间白屏。
+                    if let Some(window) = &self.window {
+                        window.set_visible(true);
+                        log::info!("窗口已显示");
+                    }
                 }
                 if let Some(window) = &self.window {
                     window.request_redraw();
