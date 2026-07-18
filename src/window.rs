@@ -431,6 +431,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     self.focus.set_by_click(&self.tree, *position);
                     let curr = self.focus.current().map(|p| p.to_vec());
                     self.dispatch_focus_changes(prev.as_deref(), curr.as_deref());
+                    self.focus.acknowledge();
                 }
                 if result == crate::widget::EventResult::Ignored {
                     self.app.event(&internal);

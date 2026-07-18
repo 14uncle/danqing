@@ -5,6 +5,8 @@
 //!
 //! 支持光标、选区、键盘编辑、IME preedit 显示与 commit 插入。
 
+use std::cell::Cell;
+
 use crate::app::AnimationCtx;
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 use crate::render::{RectBatch, TextBatch};
@@ -42,9 +44,11 @@ pub struct TextInput {
     /// 显式宽度(未指定则按约束上限)。
     width: Option<f32>,
     /// layout/paint 缓存:自身绝对矩形。
-    area: Rect,
-    /// 每个字符右侧的 x 偏移(用于鼠标点击定位光标)。
+    area: Cell<Rect>,
+    /// 每个字符右侧的 x 偏移(用于鼠标点击定位光标与 IME 区域)。
     char_offsets: Vec<f32>,
+    /// 行高(用于 IME 区域与光标高度)。
+    line_height: f32,
     /// 光标可见性(由动画控制闪烁)。
     caret_visible: bool,
     /// IME 合成文本(显示在光标处,带下划线)。
@@ -68,8 +72,9 @@ impl TextInput {
             caret_color: Color::from_srgb8(0x1E, 0x90, 0xFF),
             padding: Edges::symmetric(12.0, 8.0),
             width: None,
-            area: Rect::default(),
+            area: Cell::new(Rect::default()),
             char_offsets: Vec::new(),
+            line_height: 0.0,
             caret_visible: true,
             preedit: None,
             on_change: None,
@@ -223,13 +228,15 @@ impl Widget for TextInput {
 
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
         let content_width = texts.measure(&self.text, self.font_size);
-        let height = texts.line_height(f32::from(self.font_size)) + self.padding.vertical();
+        let line_height = texts.line_height(f32::from(self.font_size));
+        let height = line_height + self.padding.vertical();
         let width = self
             .width
             .unwrap_or(constraints.max_width)
             .max(content_width + self.padding.horizontal());
         let size = constraints.constrain(Size::new(width, height));
-        self.area = Rect::new(crate::Point::ZERO, size);
+        self.area.set(Rect::new(crate::Point::ZERO, size));
+        self.line_height = line_height;
 
         // 缓存每个字符右侧的 x 偏移,用于鼠标点击定位光标。
         self.char_offsets.clear();
@@ -242,6 +249,9 @@ impl Widget for TextInput {
     }
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
+        // 缓存绝对矩形,供 IME 区域与后续事件使用。
+        self.area.set(area);
+
         // 背景
         rects.push_rect(area, self.background, 4.0);
 
@@ -296,7 +306,6 @@ impl Widget for TextInput {
     }
 
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
-        self.area = area;
         let mut changed = false;
         let result = match event {
             Event::FocusIn => {
@@ -453,7 +462,22 @@ impl Widget for TextInput {
     }
 
     fn ime_area(&self) -> Option<Rect> {
-        Some(self.area)
+        let area = self.area.get();
+        let cursor_x = if self.cursor == 0 {
+            0.0
+        } else {
+            self.char_offsets
+                .get(self.cursor - 1)
+                .copied()
+                .unwrap_or(0.0)
+        };
+        let x = area.origin.x + self.padding.left + cursor_x;
+        let y = area.origin.y + self.padding.top;
+        Some(Rect::from_xywh(x, y, 0.0, self.line_height))
+    }
+
+    fn hit_area(&self) -> Option<Rect> {
+        Some(self.area.get())
     }
 }
 
@@ -591,5 +615,34 @@ mod tests {
             &mut Vec::new(),
         );
         assert_eq!(t.cursor, 5);
+    }
+
+    #[test]
+    fn ime_area_follows_caret_after_paint() {
+        let mut t = input();
+        // 将光标移到开头,避免光标偏移干扰原点判断。
+        t.cursor = 0;
+        t.anchor = 0;
+
+        let mut texts = crate::TextBatch::new();
+        t.layout(Constraints::loose(Size::new(500.0, 100.0)), &mut texts);
+
+        // paint 前 area 为本地原点,IME 区域应位于 (padding.left, padding.top)。
+        let local = t.ime_area().unwrap();
+        assert!((local.origin.x - t.padding.left).abs() < f32::EPSILON);
+        assert!((local.origin.y - t.padding.top).abs() < f32::EPSILON);
+
+        // paint 后缓存绝对矩形,IME 区域应跟随光标平移。
+        let abs = Rect::from_xywh(20.0, 30.0, 500.0, 100.0);
+        let mut rects = crate::RectBatch::new();
+        t.paint(abs, &mut rects, &mut texts);
+
+        let area = t.ime_area().unwrap();
+        let expected_x = abs.origin.x + t.padding.left;
+        let expected_y = abs.origin.y + t.padding.top;
+        assert!((area.origin.x - expected_x).abs() < f32::EPSILON);
+        assert!((area.origin.y - expected_y).abs() < f32::EPSILON);
+        assert_eq!(area.size.width, 0.0);
+        assert_eq!(area.size.height, t.line_height);
     }
 }

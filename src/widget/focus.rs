@@ -158,7 +158,7 @@ fn visit(node: &Node, path: &mut FocusPath, pos: Point, result: &mut Option<Focu
         path.pop();
     }
     if node.focusable() {
-        if let Some(area) = node.ime_area() {
+        if let Some(area) = node.hit_area() {
             if area.contains(pos) {
                 *result = Some(path.clone());
             }
@@ -170,7 +170,7 @@ fn visit(node: &Node, path: &mut FocusPath, pos: Point, result: &mut Option<Focu
 mod tests {
     use super::*;
     use crate::widget::{Box as UiBox, Button, Column, Text, node};
-    use crate::{Color, Constraints, Size};
+    use crate::{Color, Constraints, Rect, Size};
 
     fn dummy_texts() -> crate::TextBatch {
         crate::TextBatch::new()
@@ -239,6 +239,35 @@ mod tests {
         mgr.rebuild(&tree);
         mgr.set_by_click(&tree, crate::Point::new(0.0, 0.0));
         assert_eq!(mgr.current(), Some(&vec![0]));
+    }
+
+    #[test]
+    fn click_text_input_uses_hit_area_not_ime_cursor() {
+        use crate::widget::TextInput;
+
+        let mut texts = dummy_texts();
+        let mut tree = node(
+            Column::new()
+                .child(Button::new(Text::new("A")))
+                .child(TextInput::new().text("hello")),
+        );
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+
+        // 必须 paint 一次,让子组件缓存绝对矩形。
+        let mut rects = crate::RectBatch::new();
+        tree.paint(
+            Rect::from_xywh(0.0, 0.0, 1000.0, 1000.0),
+            &mut rects,
+            &mut texts,
+        );
+
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree);
+        assert_eq!(mgr.current(), Some(&vec![0])); // 初始焦点在 Button
+
+        // 点击 TextInput 内部但远离光标的位置,应聚焦到 TextInput([1])。
+        mgr.set_by_click(&tree, crate::Point::new(10.0, 80.0));
+        assert_eq!(mgr.current(), Some(&vec![1]));
     }
 
     #[test]
