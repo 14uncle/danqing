@@ -53,7 +53,7 @@ src/
   event.rs                      → 新增 Ime 事件与 Focus 相关事件;Key 携带 shift/ctrl
   window.rs                     → 焦点路由、Ime 转发、剪贴板、IME 光标区域
   widget/
-    mod.rs                      → Widget trait 增加 focusable/children/ime_area/wants_ime/animate
+    mod.rs                      → Widget trait 增加 focusable/children/ime_area/wants_ime/animate/hit_area
     focus.rs                    → 焦点管理器:焦点链、Tab 遍历、点击聚焦
     text_input.rs               → 单行文本输入组件
     button.rs                   → 支持 focusable + 空格/回车触发 + 焦点环
@@ -72,6 +72,7 @@ tests/focus_input.rs            → 焦点与文本输入集成测试
 
 - 焦点管理器是纯逻辑,放在 `widget/focus.rs`,不依赖 `winit`。
 - 剪贴板操作由 `window.rs` 适配层发起或封装,不直接进入 `widget/`。
+- `ime_area()` 与 `hit_area()` 职责分离:`ime_area()` 供 IME 候选框吸附(如光标处小矩形);`hit_area()` 供鼠标点击聚焦/命中测试(通常为组件完整区域)。二者不得混用,以免 IME 区域变化影响点击聚焦。
 
 ## 测试策略
 
@@ -100,8 +101,8 @@ tests/focus_input.rs            → 焦点与文本输入集成测试
 
 1. showcase 页面包含 `TextInput` 与 `Button`,按 Tab/Shift+Tab 可在二者间切换焦点,焦点组件有视觉焦点环。
 2. `TextInput` 支持:输入字符、Backspace/Delete 删除、方向键移动光标、Home/End、Ctrl+A 全选、Ctrl+C/X/V 复制剪切粘贴。
-3. IME 合成可见:输入中文时显示下划线 preedit 文本,按空格/回车 commit 到输入框。
-4. 鼠标点击 `TextInput` 可聚焦并定位光标(如能实现选区更佳)。
+3. IME 合成可见:输入中文时显示下划线 preedit 文本,按空格/回车 commit 到输入框;IME 候选框吸附在光标处,不偏移到窗口左上角。
+4. 鼠标点击 `TextInput` 任意区域可聚焦并定位光标(使用 `hit_area`,不受 `ime_area` 光标矩形影响;如能实现选区更佳)。
 5. `cargo test` 全绿,`cargo clippy -- -D warnings` 通过,`cargo fmt --check` 通过。
 6. 适配层之外无新增平台专有 API。
 
