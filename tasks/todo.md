@@ -38,5 +38,10 @@
 ### ⏸ Checkpoint Complete ✅ 通过(2026-07-16):6/6 验收通过,`cargo test`/`clippy -D warnings`/`fmt --check`/`build --release` 全绿,M1 关闭
 
 ---
+
+## Post-M3 增量优化
+
+- [x] **Task 15** `TextInput` 撤销/重做支持 — `Ctrl+Z` / `Ctrl+Shift+Z` / `Ctrl+Y`,撤销栈深度 100,单元测试覆盖 ✅ 2026-07-18
+  - 验证:`cargo test` 84 项全绿,`cargo clippy -- -D warnings`,`cargo fmt --check`,`cargo build --release` 全通过。
 **并行车道**:渲染车道 2→3→4→6 ∥ 字体车道 5 ∥ 布局车道 7(契约 = Task 1 值类型)。
 **阻塞项**:Open Question 1(内嵌字体进仓库方式)阻塞 Task 5,需先裁决。
