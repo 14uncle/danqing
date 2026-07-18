@@ -7,6 +7,7 @@
 //! 通过 `Widget::focusable()` 判断节点是否可聚焦。
 
 use crate::Point;
+use crate::Rect;
 use crate::widget::Node;
 
 /// 组件树中的节点路径:从根到目标节点的子索引序列。
@@ -114,6 +115,12 @@ impl FocusManager {
         self.current = Some(path);
     }
 
+    /// 清除当前焦点。
+    pub fn clear_focus(&mut self) {
+        self.previous = self.current.clone();
+        self.current = None;
+    }
+
     fn collect(&mut self, node: &Node, prefix: &mut FocusPath) {
         if node.focusable() {
             self.chain.push(prefix.clone());
@@ -146,19 +153,40 @@ impl FocusManager {
 fn hit_focusable(root: &Node, pos: Point) -> Option<FocusPath> {
     let mut result = None;
     let mut path = Vec::new();
-    visit(root, &mut path, pos, &mut result);
+    visit(root, &mut path, pos, None, &mut result);
     result
 }
 
-fn visit(node: &Node, path: &mut FocusPath, pos: Point, result: &mut Option<FocusPath>) {
+fn visit(
+    node: &Node,
+    path: &mut FocusPath,
+    pos: Point,
+    clip: Option<Rect>,
+    result: &mut Option<FocusPath>,
+) {
+    // 祖先的 hit_area 作为后代可见区域的裁剪。
+    let child_clip = match (clip, node.hit_area()) {
+        (Some(parent), Some(hit)) => parent.intersect(&hit),
+        (Some(parent), None) => Some(parent),
+        (None, Some(hit)) => Some(hit),
+        (None, None) => None,
+    };
+
     // 后绘制者优先:先遍历子节点,再检查自身
     for (i, child) in node.children().iter().enumerate().rev() {
         path.push(i);
-        visit(child, path, pos, result);
+        visit(child, path, pos, child_clip, result);
         path.pop();
     }
     if node.focusable() {
         if let Some(area) = node.hit_area() {
+            let area = match child_clip {
+                Some(c) => match c.intersect(&area) {
+                    Some(intersection) => intersection,
+                    None => return,
+                },
+                None => area,
+            };
             if area.contains(pos) {
                 *result = Some(path.clone());
             }
@@ -311,5 +339,35 @@ mod tests {
         mgr.rebuild(&tree); // 不应覆盖 previous
         assert_eq!(mgr.previous(), Some(&vec![0]));
         assert_eq!(mgr.current(), Some(&vec![1]));
+    }
+
+    #[test]
+    fn click_outside_scrollable_viewport_does_not_focus_child() {
+        use crate::widget::{Scrollable, TextInput};
+
+        let mut texts = dummy_texts();
+        let mut tree = node(Scrollable::new(TextInput::new().text("hello").width(200.0)));
+        tree.layout(Constraints::tight(Size::new(100.0, 100.0)), &mut texts);
+        let mut rects = crate::RectBatch::new();
+        tree.paint(
+            Rect::from_xywh(0.0, 0.0, 100.0, 100.0),
+            &mut rects,
+            &mut texts,
+        );
+
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree);
+        // Scrollable 自身不可聚焦,但内部的 TextInput 是焦点链唯一成员。
+        assert_eq!(mgr.current(), Some(&vec![0]));
+
+        // 点击 Scrollable 视口内应聚焦到 TextInput([0])。
+        mgr.set_by_click(&tree, Point::new(50.0, 50.0));
+        assert_eq!(mgr.current(), Some(&vec![0]));
+
+        // 点击视口外(但仍在 TextInput 内容矩形下方)不应聚焦。
+        mgr.clear_focus();
+        mgr.acknowledge();
+        mgr.set_by_click(&tree, Point::new(50.0, 150.0));
+        assert!(mgr.current().is_none());
     }
 }
