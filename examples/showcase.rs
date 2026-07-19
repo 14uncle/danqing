@@ -11,7 +11,9 @@ use danqing::widget::{
     self, Box as UiBox, Button, Center, Column, EventResult, MsgQueue, Node, Padding, Row,
     Scrollable, Text, TextArea, TextInput, TitleBar, Widget,
 };
-use danqing::{App, Event, Key, LightTheme, NamedKey, Point, Size, Theme};
+use danqing::{
+    App, BackgroundConfig, Event, Key, LightTheme, NamedKey, Point, ScaleMode, Size, Theme,
+};
 use std::io::Write;
 
 /// 键盘移动方块的区域尺寸。
@@ -379,8 +381,21 @@ fn main() -> anyhow::Result<()> {
     };
 
     let t = theme();
+    let out_dir = std::path::PathBuf::from(env!("OUT_DIR"));
+    let background = BackgroundConfig::with_image(
+        out_dir
+            .join("assets")
+            .join("background")
+            .join("gradient.png"),
+    )
+    .with_noise(
+        out_dir.join("assets").join("background").join("noise.png"),
+        0.08,
+    )
+    .scale(ScaleMode::Cover);
     let config = danqing::WindowConfig {
         clear_color: t.background(),
+        background,
         ..danqing::WindowConfig::default()
     };
     danqing::run_app(config, &mut app)?;
