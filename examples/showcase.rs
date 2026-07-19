@@ -1,16 +1,17 @@
 // ! @author 十四叔
-// ! @date 2026/07/17
+// ! @date 2026/07/19
 
-// ! 丹青 showcase —— M2 演示页。
+// ! 丹青 showcase —— 阶段 1 毛玻璃演示页。
 // !
 // ! 本示例是唯一且持续生长的演示程序: 框架每落地一项能力,
-// ! 就在这里展示一项 (以用代测)。
+// ! 就在这里展示一项 (以用代测)。当前使用 LightTheme 与主题化组件,
+// ! 呈现统一的浅色毛玻璃视觉。
 
 use danqing::widget::{
     self, Box as UiBox, Button, Center, Column, EventResult, MsgQueue, Node, Padding, Row,
-    Scrollable, Text, TextArea, TextInput, Widget,
+    Scrollable, Text, TextArea, TextInput, TitleBar, Widget,
 };
-use danqing::{App, Color, Event, Key, NamedKey, Point, Size};
+use danqing::{App, Event, Key, LightTheme, NamedKey, Point, Size, Theme};
 use std::io::Write;
 
 /// 键盘移动方块的区域尺寸。
@@ -96,71 +97,88 @@ impl App for Showcase {
     }
 }
 
-const PALETTE: [Color; 6] = [
-    Color::from_srgb8(0xE6, 0x4C, 0x4C),
-    Color::from_srgb8(0xE6, 0x9F, 0x4C),
-    Color::from_srgb8(0xE0, 0xD5, 0x4F),
-    Color::from_srgb8(0x5B, 0xB8, 0x5F),
-    Color::from_srgb8(0x4C, 0x9F, 0xE6),
-    Color::from_srgb8(0x8A, 0x6F, 0xD6),
-];
+/// 阶段 1 浅色主题。
+fn theme() -> LightTheme {
+    LightTheme
+}
 
-/// 色板区:6×6 网格, 等分填充。
+/// 品牌强调色样例区:6×6 网格,等分填充。
 fn palette_grid() -> Column {
-    let mut grid = Column::new().gap(8.0);
-    for color in PALETTE {
-        let mut row = Row::new().gap(8.0);
+    let t = theme();
+    let colors = [
+        t.accent(),
+        t.danger(),
+        t.text_primary(),
+        t.text_secondary(),
+        t.divider(),
+        t.border(),
+    ];
+    let mut grid = Column::new().gap(t.spacing_sm());
+    for color in colors {
+        let mut row = Row::new().gap(t.spacing_sm());
         for _ in 0..6 {
-            row = row.fill(UiBox::new(color), 1);
+            row = row.fill(UiBox::new(color).radius(t.radius_sm()), 1);
         }
         grid = grid.fill(row, 1);
     }
     grid
 }
 
-/// 圆角区: 同一颜色、递增圆角半径。
+/// 圆角区:同一颜色、递增圆角半径。
 fn rounded_row() -> Row {
-    let teal = Color::from_srgb8(0x4C, 0xE6, 0xC3);
-    let mut row = Row::new().gap(8.0);
-    for radius in [0.0f32, 8.0, 16.0, 24.0, 36.0, 48.0] {
-        row = row.fill(UiBox::new(teal).radius(radius), 1);
+    let t = theme();
+    let mut row = Row::new().gap(t.spacing_sm());
+    for radius in [
+        0.0f32,
+        t.radius_sm(),
+        t.radius_md(),
+        t.radius_lg(),
+        24.0,
+        36.0,
+    ] {
+        row = row.fill(UiBox::themed(&t).radius(radius), 1);
     }
     row
 }
 
-/// 交互区: 按钮 + 计数文本。
+/// 交互区:按钮 + 计数文本。
 fn counter_row() -> Row {
+    let t = theme();
     Row::new()
-        .gap(16.0)
+        .gap(t.spacing_lg())
         .child(
-            Button::new(Text::new("点击 +1").font_size(20).color(Color::WHITE))
-                .on_click(|| Msg::Increment)
-                .radius(12.0),
+            Button::themed(
+                &t,
+                Text::new("点击 +1")
+                    .font_size(t.font_size_body())
+                    .color(t.surface()),
+            )
+            .on_click(|| Msg::Increment),
         )
         .fill(
             Center::new(
                 Text::bind(|s: &Showcase| format!("已点击 {} 次", s.count))
-                    .font_size(20)
-                    .color(Color::WHITE),
+                    .font_size(t.font_size_body())
+                    .color(t.text_primary()),
             ),
             1,
         )
 }
 
-/// 键盘区: 方向键 /WASD 移动方块, 并回显最后按下的字符键。
+/// 键盘区:方向键 /WASD 移动方块,并回显最后按下的字符键。
 fn keyboard_row() -> Row {
+    let t = theme();
     Row::new()
-        .gap(16.0)
+        .gap(t.spacing_lg())
         .fill(
-            UiBox::new(Color::from_srgb8(0x1A, 0x29, 0x3D))
+            UiBox::themed(&t)
                 .size(KEYBOARD_AREA.width, KEYBOARD_AREA.height)
-                .radius(12.0)
                 .child(
                     Positioned::bind(
                         |s: &Showcase| s.square_pos,
-                        UiBox::new(Color::from_srgb8(0xE6, 0x4C, 0x9F))
+                        UiBox::new(t.accent())
                             .size(SQUARE_SIZE, SQUARE_SIZE)
-                            .radius(8.0),
+                            .radius(t.radius_md()),
                     )
                     .hoverable(false),
                 ),
@@ -169,8 +187,8 @@ fn keyboard_row() -> Row {
         .fill(
             Center::new(
                 Text::bind(|s: &Showcase| format!("最后按键: {}", s.last_key))
-                    .font_size(20)
-                    .color(Color::WHITE),
+                    .font_size(t.font_size_body())
+                    .color(t.text_primary()),
             ),
             1,
         )
@@ -178,20 +196,24 @@ fn keyboard_row() -> Row {
 
 /// 输入区:TextInput + 实时回显。
 fn input_row() -> Row {
+    let t = theme();
     Row::new()
-        .gap(16.0)
-        .child(Text::new("输入:").font_size(20).color(Color::WHITE))
+        .gap(t.spacing_lg())
         .child(
-            TextInput::new()
+            Text::new("输入:")
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+        .child(
+            TextInput::themed(&t)
                 .width(240.0)
-                .font_size(20)
                 .on_change(|s: &str| Msg::InputChanged(s.to_string())),
         )
         .fill(
             Center::new(
                 Text::bind(|s: &Showcase| format!("已输入: {}", s.input_value))
-                    .font_size(20)
-                    .color(Color::WHITE),
+                    .font_size(t.font_size_body())
+                    .color(t.text_primary()),
             ),
             1,
         )
@@ -199,17 +221,21 @@ fn input_row() -> Row {
 
 /// 多行输入区:Scrollable + TextArea + 实时回显字数/行数。
 fn textarea_row() -> Row {
+    let t = theme();
     Row::new()
-        .gap(16.0)
-        .child(Text::new("多行:").font_size(20).color(Color::WHITE))
+        .gap(t.spacing_lg())
         .child(
-            UiBox::new(Color::from_srgb8(0x2A, 0x2A, 0x2A))
+            Text::new("多行:")
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+        .child(
+            UiBox::themed(&t)
                 .size(400.0, 160.0)
-                .radius(8.0)
-                .child(Scrollable::new(
-                    TextArea::new()
+                .child(Scrollable::themed(
+                    &t,
+                    TextArea::themed(&t)
                         .width(400.0)
-                        .font_size(18)
                         .on_change(|s: &str| Msg::TextareaChanged(s.to_string())),
                 )),
         )
@@ -220,20 +246,23 @@ fn textarea_row() -> Row {
                     let lines = s.textarea_value.lines().count();
                     format!("字数:{} 行数:{}", chars, lines)
                 })
-                .font_size(20)
-                .color(Color::WHITE),
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
             ),
             1,
         )
 }
 
-/// 绝对 / 相对定位容器: 把子组件按状态绑定的偏移量平移。
+/// 定位绑定函数类型。
+type PositionBinding = Box<dyn Fn(&Showcase) -> Point>;
+
+/// 绝对 / 相对定位容器:把子组件按状态绑定的偏移量平移。
 ///
-/// 本组件为 showcase 键盘演示专用, 放在示例文件中以保持框架核心精简。
+/// 本组件为 showcase 键盘演示专用,放在示例文件中以保持框架核心精简。
 struct Positioned {
     child: Node,
     offset: Point,
-    binding: Option<Box<dyn Fn(&Showcase) -> Point>>,
+    binding: Option<PositionBinding>,
     child_size: Size,
 }
 
@@ -250,7 +279,7 @@ impl Positioned {
 
     /// 关闭 hover/pressed 交互效果 (键盘区方块不需要)。
     fn hoverable(self, hoverable: bool) -> Self {
-        // 当前实现本身无交互效果, 保留接口以兼容调用链。
+        // 当前实现本身无交互效果,保留接口以兼容调用链。
         let _ = hoverable;
         self
     }
@@ -294,44 +323,47 @@ impl Widget for Positioned {
     }
 }
 
-/// 构建组件树 (保留模式: 树只建一次, 数据每帧同步)。
+/// 构建组件树 (保留模式:树只建一次,数据每帧同步)。
 fn build_tree() -> Node {
-    widget::node(Padding::all(
-        24.0,
+    let t = theme();
+    widget::node(
         Column::new()
-            .gap(16.0)
+            .child(TitleBar::themed(&t, "danqing 丹青"))
             .fill(
-                Center::new(
-                    Text::new("danqing 丹青 — 跨平台自绘 UI 框架")
-                        .font_size(20)
-                        .color(Color::WHITE),
+                Padding::all(
+                    t.spacing_lg(),
+                    Column::new()
+                        .gap(t.spacing_md())
+                        .fill(
+                            Center::new(
+                                Text::new("跨平台自绘 UI 框架 — 阶段 1 设计系统")
+                                    .font_size(t.font_size_heading())
+                                    .color(t.text_primary()),
+                            ),
+                            1,
+                        )
+                        .fill(palette_grid(), 6)
+                        .fill(rounded_row(), 2)
+                        .child(counter_row())
+                        .child(input_row())
+                        .child(textarea_row())
+                        .child(keyboard_row())
+                        .child(
+                            Row::new()
+                                .gap(t.spacing_md())
+                                .fill(UiBox::themed(&t).height(90.0).radius(t.radius_lg()), 2)
+                                .fill(UiBox::themed(&t).height(90.0).radius(t.radius_lg()), 1)
+                                .fill(
+                                    UiBox::new(t.surface_variant())
+                                        .height(90.0)
+                                        .radius(t.radius_lg()),
+                                    1,
+                                ),
+                        ),
                 ),
                 1,
-            )
-            .fill(palette_grid(), 6)
-            .fill(rounded_row(), 2)
-            .child(counter_row())
-            .child(input_row())
-            .child(textarea_row())
-            .child(keyboard_row())
-            .child(
-                Row::new()
-                    .gap(12.0)
-                    .fill(
-                        UiBox::new(Color::from_srgb8(0xE6, 0x4C, 0x9F))
-                            .height(90.0)
-                            .radius(20.0),
-                        2,
-                    )
-                    .fill(
-                        UiBox::new(Color::from_srgb8(0x9F, 0x4C, 0xE6))
-                            .height(90.0)
-                            .radius(40.0),
-                        1,
-                    )
-                    .fill(UiBox::new(Color::WHITE).height(90.0).radius(20.0), 1),
             ),
-    ))
+    )
 }
 
 fn main() -> anyhow::Result<()> {
@@ -345,7 +377,13 @@ fn main() -> anyhow::Result<()> {
         input_value: String::new(),
         textarea_value: String::new(),
     };
-    danqing::run_app(danqing::WindowConfig::default(), &mut app)?;
+
+    let t = theme();
+    let config = danqing::WindowConfig {
+        clear_color: t.background(),
+        ..danqing::WindowConfig::default()
+    };
+    danqing::run_app(config, &mut app)?;
     Ok(())
 }
 

@@ -25,11 +25,11 @@
 - [x] **Task 9** 在 window.rs 设置窗口图标（依赖 2）— showcase 窗口显示新 LOGO
 
 ## Phase 5: Showcase Integration
-- [ ] **Task 10** 整合 showcase 呈现毛玻璃效果（依赖 3/4/5/6/7/8/9）— 视觉验收
+- [x] **Task 10** 整合 showcase 呈现毛玻璃效果（依赖 3/4/5/6/7/8/9）— 视觉验收
 
 ### ⏸ Checkpoint 2: showcase 毛玻璃视觉可运行
-- [ ] `cargo run --example showcase` 无异常
-- [ ] TitleBar、背景、组件圆角/阴影一致
+- [x] `cargo run --example showcase` 无异常
+- [x] TitleBar、背景、组件圆角/阴影一致
 
 ## Phase 6: Testing & Acceptance
 - [ ] **Task 11** 编写设计系统测试 + 最终验收（依赖 10）— `cargo fmt` / `clippy -D warnings` / `test` / `build --release` 全绿
