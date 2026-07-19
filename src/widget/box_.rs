@@ -8,7 +8,7 @@
 use crate::event::Event;
 use crate::render::{RectBatch, TextBatch};
 use crate::widget::{EventResult, MsgQueue, Node, Widget};
-use crate::{Color, Constraints, Rect, Size};
+use crate::{Color, Constraints, Rect, Size, Theme};
 
 /// 背景色块组件。
 ///
@@ -37,6 +37,11 @@ impl Box {
             hovered: false,
             pressed: false,
         }
+    }
+
+    /// 使用主题默认值创建背景色块(表面浮层色 + 中等圆角)。
+    pub fn themed(theme: &impl Theme) -> Self {
+        Self::new(theme.surface()).radius(theme.radius_md())
     }
 
     /// 设置圆角半径(逻辑像素)。
@@ -202,5 +207,40 @@ impl Widget for Box {
             Some(child) => std::slice::from_mut(child),
             None => &mut [],
         }
+    }
+}
+
+#[cfg(test)]
+impl Box {
+    /// 当前背景色(测试用)。
+    pub(crate) fn color(&self) -> Color {
+        self.color
+    }
+
+    /// 当前圆角半径(测试用)。
+    pub(crate) fn radius_value(&self) -> f32 {
+        self.radius
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::LightTheme;
+
+    #[test]
+    fn themed_box_uses_theme_surface_and_medium_radius() {
+        let theme = LightTheme;
+        let box_ = Box::themed(&theme);
+        assert_eq!(box_.color(), theme.surface());
+        assert_eq!(box_.radius_value(), theme.radius_md());
+    }
+
+    #[test]
+    fn new_box_preserves_explicit_color_and_zero_radius() {
+        let color = Color::from_srgb8(255, 0, 0);
+        let box_ = Box::new(color);
+        assert_eq!(box_.color(), color);
+        assert_eq!(box_.radius_value(), 0.0);
     }
 }
