@@ -17,12 +17,12 @@
 - [x] **Task 8** 改造 Scrollable 使用 theme token（依赖 1）— 滚动行为不变
 
 ### ⏸ Checkpoint 1: 组件 token 化完成
-- [ ] `cargo test` 全绿
-- [ ] `cargo clippy -- -D warnings` 零警告
-- [ ] 人工 review 后进入 Phase 4
+- [x] `cargo test` 全绿
+- [x] `cargo clippy -- -D warnings` 零警告
+- [x] 人工 review 后进入 Phase 4
 
 ## Phase 4: Window Integration
-- [ ] **Task 9** 在 window.rs 设置窗口图标（依赖 2）— showcase 窗口显示新 LOGO
+- [x] **Task 9** 在 window.rs 设置窗口图标（依赖 2）— showcase 窗口显示新 LOGO
 
 ## Phase 5: Showcase Integration
 - [ ] **Task 10** 整合 showcase 呈现毛玻璃效果（依赖 3/4/5/6/7/8/9）— 视觉验收
