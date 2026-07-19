@@ -153,10 +153,10 @@ fn load_icon_from_png(path: &std::path::Path) -> Result<Icon, Box<dyn std::error
 
 /// 加载应用窗口图标。
 ///
-/// 尝试读取 `assets/logo/logo_256.png`;失败时记录警告并返回 `None`,
-/// 避免窗口创建因图标问题而 panic。
+/// 尝试读取 `OUT_DIR/assets/logo/logo_256.png`(由 `build.rs` 生成);
+/// 失败时记录警告并返回 `None`,避免窗口创建因图标问题而 panic。
 fn load_window_icon() -> Option<Icon> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let path = std::path::Path::new(env!("OUT_DIR"))
         .join("assets")
         .join("logo")
         .join("logo_256.png");
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn load_icon_from_valid_png_succeeds() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        let path = PathBuf::from(env!("OUT_DIR"))
             .join("assets")
             .join("logo")
             .join("logo_256.png");
@@ -616,7 +616,7 @@ mod tests {
 
     #[test]
     fn load_icon_from_missing_path_returns_error() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        let path = PathBuf::from(env!("OUT_DIR"))
             .join("assets")
             .join("logo")
             .join("nonexistent.png");

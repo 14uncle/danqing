@@ -54,14 +54,14 @@ Task 10 Showcase 整合（依赖 3/4/5/6/7/8/9）
 ### Phase 2: Visual Assets — 品牌视觉
 
 - [ ] **Task 2: 设计并导出 LOGO 与背景图资产**
-  - **Description:** 设计 丹青 LOGO，导出多尺寸 PNG 与 ICO；生成固定渐变/噪声背景图。
+  - **Description:** 在 `build.rs` 中设计并生成 丹青 LOGO(多尺寸 PNG 与 ICO)以及固定渐变/噪声背景图,输出到 `OUT_DIR/assets/`,避免在仓库中提交二进制资产。
   - **Acceptance criteria:**
-    - [ ] `assets/logo/logo_16.png`、`24`、`32`、`48`、`256.png` 存在。
-    - [ ] `assets/logo/logo.ico` 存在。
-    - [ ] `assets/background/gradient.png` 与 `assets/background/noise.png` 存在。
-  - **Verification:** 文件存在且可被运行时读取。
+    - [ ] `OUT_DIR/assets/logo/logo_16.png`、`24`、`32`、`48`、`256.png` 存在。
+    - [ ] `OUT_DIR/assets/logo/logo.ico` 存在。
+    - [ ] `OUT_DIR/assets/background/gradient.png` 与 `OUT_DIR/assets/background/noise.png` 存在。
+  - **Verification:** 集成测试 `tests/assets.rs` 验证文件存在且非空;`cargo test` 通过。
   - **Dependencies:** None
-  - **Files:** `assets/logo/*`, `assets/background/*`
+  - **Files:** `build.rs`, `tests/assets.rs`
   - **Scope:** M
 
 ### Phase 3: Component Theming — 组件 token 化
@@ -130,7 +130,7 @@ Task 10 Showcase 整合（依赖 3/4/5/6/7/8/9）
 ### Phase 4: Window Integration — 窗口图标
 
 - [x] **Task 9: 在 window.rs 中设置窗口图标**
-  - **Description:** 使用 `assets/logo/` 下的 PNG 资源，在 `WindowAttributes` 中设置窗口图标与任务栏图标；提供加载失败 fallback。
+  - **Description:** 使用 `OUT_DIR/assets/logo/` 下由 `build.rs` 生成的 PNG 资源,在 `WindowAttributes` 中设置窗口图标与任务栏图标;提供加载失败 fallback。
   - **Acceptance criteria:**
     - [ ] 窗口左上角显示新 LOGO。
     - [ ] 任务栏显示新 LOGO。
