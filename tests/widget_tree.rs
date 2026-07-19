@@ -4,7 +4,7 @@
 //! 集成测试:组件树构建 + 布局 + 绘制命令收集(纯逻辑,无需 GPU)。
 
 use danqing::widget::{self, Box as UiBox, Button, Center, Column, Row, Text, TextInput, Widget};
-use danqing::{Color, Constraints, Point, Rect, Size};
+use danqing::{Color, Constraints, LightTheme, Point, Rect, Size, Theme};
 
 struct AppState {
     count: u32,
@@ -77,14 +77,14 @@ fn input_row_renders_text_input_background() {
     let mut rects = danqing::RectBatch::new();
     tree.paint(Rect::new(Point::ZERO, size), &mut rects, &mut texts);
 
-    let white = Color::WHITE;
-    let has_white_background = rects.instance_colors().iter().any(|c| {
-        (c[0] - white.r).abs() < 0.001
-            && (c[1] - white.g).abs() < 0.001
-            && (c[2] - white.b).abs() < 0.001
-            && (c[3] - white.a).abs() < 0.001
+    let bg = LightTheme.surface();
+    let has_background = rects.instance_colors().iter().any(|c| {
+        (c[0] - bg.r).abs() < 0.001
+            && (c[1] - bg.g).abs() < 0.001
+            && (c[2] - bg.b).abs() < 0.001
+            && (c[3] - bg.a).abs() < 0.001
     });
-    assert!(has_white_background, "应绘制出 TextInput 的白色背景");
+    assert!(has_background, "应绘制出 TextInput 的背景");
 }
 
 #[test]
@@ -134,16 +134,16 @@ fn showcase_like_column_keeps_text_input_on_screen() {
     let mut rects = danqing::RectBatch::new();
     tree.paint(Rect::new(Point::ZERO, size), &mut rects, &mut texts);
 
-    let white = Color::WHITE;
+    let bg = LightTheme.surface();
     let input_rects: Vec<Rect> = rects
         .instance_rects()
         .into_iter()
         .zip(rects.instance_colors())
         .filter(|(_, c)| {
-            (c[0] - white.r).abs() < 0.001
-                && (c[1] - white.g).abs() < 0.001
-                && (c[2] - white.b).abs() < 0.001
-                && (c[3] - white.a).abs() < 0.001
+            (c[0] - bg.r).abs() < 0.001
+                && (c[1] - bg.g).abs() < 0.001
+                && (c[2] - bg.b).abs() < 0.001
+                && (c[3] - bg.a).abs() < 0.001
         })
         .map(|(r, _)| r)
         .collect();
@@ -152,7 +152,7 @@ fn showcase_like_column_keeps_text_input_on_screen() {
         input_rects
             .iter()
             .any(|r| r.size.width >= 200.0 && r.size.height >= 30.0),
-        "Column 内应存在尺寸合理的 TextInput 白色背景;实际白色矩形 {:?}",
+        "Column 内应存在尺寸合理的 TextInput 背景;实际背景矩形 {:?}",
         input_rects
     );
 

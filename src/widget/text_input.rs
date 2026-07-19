@@ -12,7 +12,7 @@ use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 use crate::render::{RectBatch, TextBatch};
 use crate::widget::text_editor::TextEditor;
 use crate::widget::{EventResult, MsgQueue, Widget};
-use crate::{Color, Constraints, Edges, Rect, Size};
+use crate::{Color, Constraints, Edges, LightTheme, Rect, Size, Theme};
 
 /// 光标闪烁周期(秒)。
 const BLINK_PERIOD: f32 = 0.5;
@@ -35,6 +35,8 @@ pub struct TextInput {
     caret_color: Color,
     /// 内边距。
     padding: Edges,
+    /// 背景圆角半径。
+    radius: f32,
     /// 显式宽度(未指定则按约束上限)。
     width: Option<f32>,
     /// layout/paint 缓存:自身绝对矩形。
@@ -52,17 +54,23 @@ pub struct TextInput {
 }
 
 impl TextInput {
-    /// 创建文本输入框(默认空文本、字号 16、深色文本、浅色背景)。
+    /// 创建文本输入框,使用默认浅色主题 token。
     pub fn new() -> Self {
+        Self::themed(&LightTheme)
+    }
+
+    /// 使用指定主题创建文本输入框。
+    pub fn themed(theme: &impl Theme) -> Self {
         Self {
             editor: TextEditor::new(),
             focused: false,
-            font_size: 16,
-            color: Color::from_srgb8(0x22, 0x22, 0x22),
-            background: Color::WHITE,
-            selection_color: Color::from_srgb8(0xB3, 0xD7, 0xFF),
-            caret_color: Color::from_srgb8(0x1E, 0x90, 0xFF),
-            padding: Edges::symmetric(12.0, 8.0),
+            font_size: theme.font_size_body(),
+            color: theme.text_primary(),
+            background: theme.surface(),
+            selection_color: theme.selection(),
+            caret_color: theme.caret(),
+            padding: Edges::symmetric(theme.spacing_md(), theme.spacing_sm()),
+            radius: theme.radius_sm(),
             width: None,
             area: Cell::new(Rect::default()),
             char_offsets: Vec::new(),
@@ -94,6 +102,12 @@ impl TextInput {
     /// 设置背景色。
     pub fn background(mut self, color: Color) -> Self {
         self.background = color;
+        self
+    }
+
+    /// 设置背景圆角半径。
+    pub fn radius(mut self, radius: f32) -> Self {
+        self.radius = radius;
         self
     }
 
@@ -136,6 +150,24 @@ impl TextInput {
     #[cfg(test)]
     pub(crate) fn set_anchor(&mut self, anchor: usize) {
         self.editor.set_anchor(anchor);
+    }
+
+    /// 当前背景色(测试用)。
+    #[cfg(test)]
+    pub(crate) fn background_color(&self) -> Color {
+        self.background
+    }
+
+    /// 当前文本颜色(测试用)。
+    #[cfg(test)]
+    pub(crate) fn text_color_value(&self) -> Color {
+        self.color
+    }
+
+    /// 当前圆角半径(测试用)。
+    #[cfg(test)]
+    pub(crate) fn radius_value(&self) -> f32 {
+        self.radius
     }
 
     /// 在光标处插入文本。
@@ -240,7 +272,7 @@ impl Widget for TextInput {
         self.area.set(area);
 
         // 背景
-        rects.push_rect(area, self.background, 4.0);
+        rects.push_rect(area, self.background, self.radius);
 
         // 文本起点
         let text_x = area.origin.x + self.padding.left;
@@ -481,6 +513,30 @@ impl Widget for TextInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::LightTheme;
+
+    #[test]
+    fn text_input_uses_theme_defaults() {
+        let input = TextInput::new();
+        assert_eq!(input.text_color_value(), LightTheme.text_primary());
+        assert_eq!(input.background_color(), LightTheme.surface());
+        assert_eq!(input.radius_value(), LightTheme.radius_sm());
+    }
+
+    #[test]
+    fn text_input_themed_uses_provided_theme() {
+        let input = TextInput::themed(&LightTheme);
+        assert_eq!(input.text_color_value(), LightTheme.text_primary());
+        assert_eq!(input.background_color(), LightTheme.surface());
+    }
+
+    #[test]
+    fn text_input_custom_overrides_theme() {
+        let custom_bg = Color::from_srgb8(255, 0, 0);
+        let input = TextInput::new().background(custom_bg).radius(8.0);
+        assert_eq!(input.background_color(), custom_bg);
+        assert_eq!(input.radius_value(), 8.0);
+    }
 
     fn input() -> TextInput {
         TextInput::new().text("Hello")

@@ -294,7 +294,7 @@ mod tests {
         assert_eq!(mgr.current(), Some(&vec![0])); // 初始焦点在 Button
 
         // 点击 TextInput 内部但远离光标的位置,应聚焦到 TextInput([1])。
-        mgr.set_by_click(&tree, crate::Point::new(10.0, 80.0));
+        mgr.set_by_click(&tree, crate::Point::new(10.0, 60.0));
         assert_eq!(mgr.current(), Some(&vec![1]));
     }
 
