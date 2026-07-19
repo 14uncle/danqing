@@ -3,7 +3,7 @@
 
 //! 构建脚本:
 //! 1. 下载 M1 内嵌回退字体(OFL 许可)到 OUT_DIR。
-//! 2. 生成阶段 1 视觉资产(LOGO、背景图)到 OUT_DIR;仓库不提交二进制。
+//! 2. 生成阶段 1 视觉资产(LOGO、背景图)到项目 `assets/` 目录。
 
 use image::{ImageBuffer, Luma, Rgba, RgbaImage};
 use std::{env, fs, io::Write, path::Path, path::PathBuf, process::Command};
@@ -132,9 +132,9 @@ fn generate_assets(manifest_dir: &Path) {
 ///
 /// 设计说明:
 /// - 背景透明,便于不同场景叠加。
-/// - "d" 位于左侧:左侧竖线 + 右侧半圆,开口向右。
+/// - "d" 位于左侧:左侧竖线 + 右侧半圆(开口向右)。
 /// - "q" 位于右侧:完整圆 + 右下竖线尾巴。
-/// - 使用品牌强调色,几何风格,适配小尺寸 favicon。
+/// - 增大间距与笔画,小尺寸下仍可辨。
 fn draw_dq_logo(size: u32) -> RgbaImage {
     let mut img = ImageBuffer::from_pixel(size, size, Rgba([0, 0, 0, 0]));
     if size < 4 {
@@ -143,23 +143,23 @@ fn draw_dq_logo(size: u32) -> RgbaImage {
 
     let s = size as f32;
     let r = s * 0.24; // 字母半径
-    let stroke = (s * 0.16).max(2.0); // 竖线粗细,至少 2px
-    let gap = s * 0.10; // 两个字母之间的间距
-    let cy = s * 0.5; // 垂直居中
+    let stroke = (s * 0.18).max(2.0); // 竖线粗细,至少 2px
+    let gap = s * 0.16; // 两个字母之间的间距
+    let cy = s * 0.46; // 垂直位置略偏上,给 q 尾巴留空间
 
-    // d: 圆心偏左,右侧半圆 + 左侧竖线
+    // d: 左侧竖线(全高) + 右侧半圆
     let cx_d = s * 0.5 - r - gap * 0.5;
-    draw_filled_semicircle_right(&mut img, cx_d, cy, r, BRAND_ACCENT);
     draw_filled_rect(
         &mut img,
-        cx_d - r - stroke * 0.5,
+        cx_d - stroke * 0.5,
         cy - r,
         stroke,
         r * 2.0,
         BRAND_ACCENT,
     );
+    draw_filled_semicircle_right(&mut img, cx_d, cy, r, BRAND_ACCENT);
 
-    // q: 圆心偏右,完整圆 + 右下竖线(从圆底向下延伸)
+    // q: 完整圆 + 右下竖线尾巴(从圆心向下延伸)
     let cx_q = s * 0.5 + r + gap * 0.5;
     draw_filled_circle(&mut img, cx_q, cy, r, BRAND_ACCENT);
     draw_filled_rect(
@@ -167,7 +167,7 @@ fn draw_dq_logo(size: u32) -> RgbaImage {
         cx_q + r - stroke * 0.5,
         cy,
         stroke,
-        r * 1.35,
+        r * 1.4,
         BRAND_ACCENT,
     );
 
