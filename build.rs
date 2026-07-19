@@ -132,8 +132,8 @@ fn generate_assets(manifest_dir: &Path) {
 ///
 /// 设计说明:
 /// - 背景透明,便于不同场景叠加。
-/// - "d" 位于左侧:竖线 + 右侧圆弧。
-/// - "q" 位于右侧:圆弧 + 右下竖线。
+/// - "d" 位于左侧:左侧竖线 + 右侧半圆,开口向右。
+/// - "q" 位于右侧:完整圆 + 右下竖线尾巴。
 /// - 使用品牌强调色,几何风格,适配小尺寸 favicon。
 fn draw_dq_logo(size: u32) -> RgbaImage {
     let mut img = ImageBuffer::from_pixel(size, size, Rgba([0, 0, 0, 0]));
@@ -142,39 +142,56 @@ fn draw_dq_logo(size: u32) -> RgbaImage {
     }
 
     let s = size as f32;
-    // 笔画粗细随尺寸缩放,小尺寸至少 1px
-    let stroke = (s * 0.15).max(1.0);
-    // 字母半径
-    let r = s * 0.22;
-    // 竖线长度(从中心向上/下延伸)
-    let half_h = r * 1.15;
+    let r = s * 0.24; // 字母半径
+    let stroke = (s * 0.16).max(2.0); // 竖线粗细,至少 2px
+    let gap = s * 0.10; // 两个字母之间的间距
+    let cy = s * 0.5; // 垂直居中
 
-    // d: 圆心在左侧,竖线居左
-    let cx_d = s * 0.34;
-    let cy = s * 0.46;
-    draw_filled_circle(&mut img, cx_d, cy, r, BRAND_ACCENT);
+    // d: 圆心偏左,右侧半圆 + 左侧竖线
+    let cx_d = s * 0.5 - r - gap * 0.5;
+    draw_filled_semicircle_right(&mut img, cx_d, cy, r, BRAND_ACCENT);
     draw_filled_rect(
         &mut img,
         cx_d - r - stroke * 0.5,
-        cy - half_h,
+        cy - r,
         stroke,
-        half_h * 2.0,
+        r * 2.0,
         BRAND_ACCENT,
     );
 
-    // q: 圆心在右侧,竖线从底部向右下延伸
-    let cx_q = s * 0.66;
+    // q: 圆心偏右,完整圆 + 右下竖线(从圆底向下延伸)
+    let cx_q = s * 0.5 + r + gap * 0.5;
     draw_filled_circle(&mut img, cx_q, cy, r, BRAND_ACCENT);
     draw_filled_rect(
         &mut img,
         cx_q + r - stroke * 0.5,
         cy,
         stroke,
-        half_h + r * 0.25,
+        r * 1.35,
         BRAND_ACCENT,
     );
 
     img
+}
+
+/// 绘制右半圆(圆心左侧被截断,用于字母 "d")。
+fn draw_filled_semicircle_right(img: &mut RgbaImage, cx: f32, cy: f32, r: f32, color: Rgba<u8>) {
+    let (w, h) = (img.width() as i32, img.height() as i32);
+    let r2 = r * r;
+    let x0 = cx.floor().max(0.0) as i32;
+    let x1 = (cx + r).ceil().min(w as f32) as i32;
+    let y0 = (cy - r).floor().max(0.0) as i32;
+    let y1 = (cy + r).ceil().min(h as f32) as i32;
+
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            if dx >= 0.0 && dx * dx + dy * dy <= r2 {
+                img.put_pixel(x as u32, y as u32, color);
+            }
+        }
+    }
 }
 
 fn draw_filled_circle(img: &mut RgbaImage, cx: f32, cy: f32, r: f32, color: Rgba<u8>) {

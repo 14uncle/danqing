@@ -11,7 +11,7 @@ use std::cell::Cell;
 use crate::event::Event;
 use crate::render::{RectBatch, TextBatch};
 use crate::widget::{EventResult, MsgQueue, Node, Widget};
-use crate::{Constraints, Point, Rect, Size};
+use crate::{Color, Constraints, LightTheme, Point, Rect, Size, Theme};
 
 /// 滚动方向。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,13 +37,26 @@ pub struct Scrollable {
     scroll_speed: f32,
     child_size: Size,
     viewport_size: Size,
+    /// 滚动条轨道颜色。
+    track_color: Color,
+    /// 滚动条滑块颜色。
+    thumb_color: Color,
+    /// 滚动条宽度。
+    track_width: f32,
+    /// 滑块圆角半径。
+    thumb_radius: f32,
     /// 自身绝对矩形,在 paint 阶段缓存,供 hit_area 使用。
     area: Cell<Rect>,
 }
 
 impl Scrollable {
-    /// 创建滚动容器,默认垂直滚动。
+    /// 创建滚动容器,默认垂直滚动,使用默认浅色主题。
     pub fn new(child: impl Widget + 'static) -> Self {
+        Self::themed(&LightTheme, child)
+    }
+
+    /// 使用指定主题创建滚动容器。
+    pub fn themed(theme: &impl Theme, child: impl Widget + 'static) -> Self {
         Self {
             child: Box::new(child),
             axis: ScrollAxis::Vertical,
@@ -51,6 +64,10 @@ impl Scrollable {
             scroll_speed: 40.0,
             child_size: Size::ZERO,
             viewport_size: Size::ZERO,
+            track_color: theme.divider(),
+            thumb_color: theme.text_secondary(),
+            track_width: theme.spacing_xs(),
+            thumb_radius: theme.radius_sm(),
             area: Cell::new(Rect::default()),
         }
     }
@@ -147,9 +164,9 @@ impl Scrollable {
     }
 
     fn draw_scrollbar(&self, area: Rect, rects: &mut RectBatch) {
-        let track_color = crate::Color::from_srgb8(0xD0, 0xD0, 0xD0);
-        let thumb_color = crate::Color::from_srgb8(0x80, 0x80, 0x80);
-        let track_width = 6.0;
+        let track_color = self.track_color;
+        let thumb_color = self.thumb_color;
+        let track_width = self.track_width;
 
         // 垂直滚动条
         if self.child_size.height > self.viewport_size.height {
@@ -175,7 +192,7 @@ impl Scrollable {
                     thumb_height,
                 ),
                 thumb_color,
-                3.0,
+                self.thumb_radius,
             );
         }
 
@@ -203,7 +220,7 @@ impl Scrollable {
                     track_width,
                 ),
                 thumb_color,
-                3.0,
+                self.thumb_radius,
             );
         }
     }
@@ -301,10 +318,42 @@ impl Widget for Scrollable {
 }
 
 #[cfg(test)]
+impl Scrollable {
+    /// 当前轨道颜色(测试用)。
+    pub(crate) fn track_color(&self) -> Color {
+        self.track_color
+    }
+
+    /// 当前滑块颜色(测试用)。
+    pub(crate) fn thumb_color(&self) -> Color {
+        self.thumb_color
+    }
+
+    /// 当前滚动条宽度(测试用)。
+    pub(crate) fn track_width(&self) -> f32 {
+        self.track_width
+    }
+
+    /// 当前滑块圆角(测试用)。
+    pub(crate) fn thumb_radius(&self) -> f32 {
+        self.thumb_radius
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::Color;
     use crate::widget::Box as UiBox;
+
+    #[test]
+    fn scrollable_uses_theme_defaults() {
+        let scroll = Scrollable::new(UiBox::new(Color::BLACK).size(50.0, 500.0));
+        assert_eq!(scroll.track_color(), LightTheme.divider());
+        assert_eq!(scroll.thumb_color(), LightTheme.text_secondary());
+        assert_eq!(scroll.track_width(), LightTheme.spacing_xs());
+        assert_eq!(scroll.thumb_radius(), LightTheme.radius_sm());
+    }
 
     #[test]
     fn vertical_scroll_clamps_offset() {

@@ -13,8 +13,8 @@
 - [x] **Task 4** 改造 Button 使用 theme token（依赖 1）— `cargo test widget::button` 绿
 - [x] **Task 5** 实现自绘 TitleBar（依赖 1, 4）— 命中测试 + showcase 可见
 - [x] **Task 6** 改造 TextInput 使用 theme token（依赖 1）— IME/焦点行为不变
-- [ ] **Task 7** 改造 TextArea 使用 theme token（依赖 1）— IME/焦点行为不变
-- [ ] **Task 8** 改造 Scrollable 使用 theme token（依赖 1）— 滚动行为不变
+- [x] **Task 7** 改造 TextArea 使用 theme token（依赖 1）— IME/焦点行为不变
+- [x] **Task 8** 改造 Scrollable 使用 theme token（依赖 1）— 滚动行为不变
 
 ### ⏸ Checkpoint 1: 组件 token 化完成
 - [ ] `cargo test` 全绿
