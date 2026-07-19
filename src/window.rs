@@ -15,7 +15,7 @@ use winit::{
     event::{ElementState, Ime as WinitIme, MouseButton as WinitMouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{Key as WinitKey, ModifiersState, NamedKey as WinitNamedKey},
-    window::{Window as WinitWindow, WindowAttributes, WindowId},
+    window::{Icon, Window as WinitWindow, WindowAttributes, WindowId},
 };
 
 use crate::app::{AnimationCtx, App};
@@ -138,6 +138,34 @@ fn convert_event(event: &WindowEvent, cursor: Point, modifiers: ModifiersState) 
             })),
         },
         _ => None,
+    }
+}
+
+/// 从 PNG 文件加载 winit 图标。
+///
+/// 将 PNG 解码为 RGBA 后,通过 [`Icon::from_rgba`] 创建图标。
+/// 返回 `Err` 时调用方可选择回退到默认图标。
+fn load_icon_from_png(path: &std::path::Path) -> Result<Icon, Box<dyn std::error::Error>> {
+    let img = image::open(path)?.into_rgba8();
+    let (width, height) = img.dimensions();
+    Icon::from_rgba(img.into_raw(), width, height).map_err(Into::into)
+}
+
+/// 加载应用窗口图标。
+///
+/// 尝试读取 `assets/logo/logo_256.png`;失败时记录警告并返回 `None`,
+/// 避免窗口创建因图标问题而 panic。
+fn load_window_icon() -> Option<Icon> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join("logo")
+        .join("logo_256.png");
+    match load_icon_from_png(&path) {
+        Ok(icon) => Some(icon),
+        Err(err) => {
+            log::warn!("加载窗口图标失败: {err}");
+            None
+        }
     }
 }
 
@@ -373,6 +401,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         let attrs = WindowAttributes::default()
             .with_title(&self.config.title)
             .with_visible(false)
+            .with_window_icon(load_window_icon())
             .with_inner_size(LogicalSize::new(
                 f64::from(self.config.size.width),
                 f64::from(self.config.size.height),
@@ -562,6 +591,8 @@ pub fn run(config: WindowConfig) -> Result<(), WindowError> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     /// 冒烟测试: 仅创建事件循环 (链接触发 shim 生成的导入库)。
@@ -571,5 +602,25 @@ mod tests {
         use winit::platform::windows::EventLoopBuilderExtWindows;
         let event_loop = EventLoop::builder().with_any_thread(true).build();
         drop(event_loop.expect("创建事件循环失败"));
+    }
+
+    #[test]
+    fn load_icon_from_valid_png_succeeds() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("logo")
+            .join("logo_256.png");
+        let icon = load_icon_from_png(&path);
+        assert!(icon.is_ok(), "应能加载有效 PNG 图标: {icon:?}");
+    }
+
+    #[test]
+    fn load_icon_from_missing_path_returns_error() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join("logo")
+            .join("nonexistent.png");
+        let icon = load_icon_from_png(&path);
+        assert!(icon.is_err());
     }
 }
