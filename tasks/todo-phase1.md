@@ -6,12 +6,12 @@
 - [x] **Task 1** 实现 theme.rs 与 Theme trait — `cargo check` / `clippy` 绿
 
 ## Phase 2: Visual Assets
-- [ ] **Task 2** 设计并导出 LOGO 与背景图资产 — 跳过,待用户提供/确认视觉设计
+- [x] **Task 2** 设计并导出 LOGO 与背景图资产 — build.rs 生成 dq LOGO 多尺寸 PNG/ICO 与渐变/噪声背景到 OUT_DIR
 
 ## Phase 3: Component Theming
 - [x] **Task 3** 改造 Box 使用 theme token（依赖 1）— `cargo test widget::box` 绿
 - [x] **Task 4** 改造 Button 使用 theme token（依赖 1）— `cargo test widget::button` 绿
-- [ ] **Task 5** 实现自绘 TitleBar（依赖 1, 4）— 命中测试 + showcase 可见
+- [x] **Task 5** 实现自绘 TitleBar（依赖 1, 4）— 命中测试 + showcase 可见
 - [ ] **Task 6** 改造 TextInput 使用 theme token（依赖 1）— IME/焦点行为不变
 - [ ] **Task 7** 改造 TextArea 使用 theme token（依赖 1）— IME/焦点行为不变
 - [ ] **Task 8** 改造 Scrollable 使用 theme token（依赖 1）— 滚动行为不变

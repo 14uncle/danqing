@@ -24,6 +24,7 @@ mod text;
 mod text_area;
 mod text_editor;
 mod text_input;
+mod title_bar;
 
 pub use box_::Box;
 pub use button::Button;
@@ -36,6 +37,7 @@ pub use scrollable::{ScrollAxis, Scrollable};
 pub use text::Text;
 pub use text_area::TextArea;
 pub use text_input::TextInput;
+pub use title_bar::TitleBar;
 
 use std::any::Any;
 

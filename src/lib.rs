@@ -12,8 +12,8 @@ mod app;
 pub mod event;
 pub mod layout;
 mod render;
-pub mod theme;
 mod text;
+pub mod theme;
 pub mod widget;
 mod window;
 
