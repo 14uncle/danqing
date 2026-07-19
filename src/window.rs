@@ -20,7 +20,7 @@ use winit::{
 
 use crate::app::{AnimationCtx, App};
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
-use crate::render::{Context, RectBatch, TextBatch};
+use crate::render::{BackgroundConfig, Context, RectBatch, TextBatch};
 use crate::widget::{
     FocusManager, MsgQueue, Node, event_at_path, ime_area_at_path, selected_text_at_path,
     wants_ime_at_path,
@@ -47,6 +47,8 @@ pub struct WindowConfig {
     pub size: Size,
     /// 清屏颜色。
     pub clear_color: Color,
+    /// 背景图配置。
+    pub background: BackgroundConfig,
 }
 
 impl Default for WindowConfig {
@@ -56,6 +58,7 @@ impl Default for WindowConfig {
             size: Size::new(1280.0, 800.0),
             // 深蓝灰: 非常量黑 / 白, 用于验证颜色参数通路
             clear_color: Color::rgb(0.10, 0.16, 0.24),
+            background: BackgroundConfig::default(),
         }
     }
 }
@@ -417,7 +420,11 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         log::info!("窗口已创建: {}", self.config.title);
 
         let ctx_start = Instant::now();
-        match Context::new(Arc::clone(&window), self.config.clear_color) {
+        match Context::new(
+            Arc::clone(&window),
+            self.config.clear_color,
+            &self.config.background,
+        ) {
             Ok(context) => {
                 self.context = Some(context);
                 log::info!("渲染上下文初始化耗时: {:?}", ctx_start.elapsed());

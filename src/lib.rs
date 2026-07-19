@@ -20,7 +20,9 @@ mod window;
 pub use app::{AnimationCtx, App};
 pub use event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 pub use layout::{Color, Constraints, Edges, FlowChild, Point, Rect, Size, distribute};
-pub use render::{Context as RenderContext, RectBatch, RenderError, TextBatch};
+pub use render::{
+    BackgroundConfig, Context as RenderContext, RectBatch, RenderError, ScaleMode, TextBatch,
+};
 pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo, Line, break_lines};
 pub use theme::{Easing, LightTheme, Shadow, Theme};
 pub use window::{WindowConfig, WindowError, run, run_app};

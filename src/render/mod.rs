@@ -6,9 +6,11 @@
 // ! 本模块是允许接触图形 API 的适配层之一, 对上层暴露
 // ! "清屏 + 绘制一帧矩形"的能力; 文本管线在后续模块中加入。
 
+mod background;
 mod rect;
 mod text;
 
+pub use background::{BackgroundConfig, BackgroundPipeline, ScaleMode};
 pub use rect::{DrawTarget, RectBatch, RectPipeline};
 pub use text::{TextBatch, TextPipeline};
 
@@ -74,6 +76,8 @@ pub struct Context {
     config: wgpu::SurfaceConfiguration,
     /// 清屏颜色。
     clear_color: Color,
+    /// 背景图管线(可选)。
+    background_pipeline: Option<BackgroundPipeline>,
     /// 矩形渲染管线。
     rect_pipeline: RectPipeline,
     /// 文本渲染管线。
@@ -82,11 +86,19 @@ pub struct Context {
 
 impl Context {
     /// 在指定窗口上初始化 wgpu,surface 尺寸取窗口当前物理尺寸。
-    pub fn new(window: Arc<WinitWindow>, clear_color: Color) -> Result<Self, RenderError> {
-        pollster::block_on(Self::new_async(window, clear_color))
+    pub fn new(
+        window: Arc<WinitWindow>,
+        clear_color: Color,
+        background: &BackgroundConfig,
+    ) -> Result<Self, RenderError> {
+        pollster::block_on(Self::new_async(window, clear_color, background))
     }
 
-    async fn new_async(window: Arc<WinitWindow>, clear_color: Color) -> Result<Self, RenderError> {
+    async fn new_async(
+        window: Arc<WinitWindow>,
+        clear_color: Color,
+        background: &BackgroundConfig,
+    ) -> Result<Self, RenderError> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: DEFAULT_BACKENDS,
@@ -135,6 +147,7 @@ impl Context {
 
         let rect_pipeline = RectPipeline::new(&device, format);
         let text_pipeline = TextPipeline::new(&device, format, crate::GlyphAtlas::DEFAULT_SIZE);
+        let background_pipeline = BackgroundPipeline::new(&device, &queue, format, background);
 
         Ok(Self {
             surface,
@@ -142,6 +155,7 @@ impl Context {
             queue,
             config,
             clear_color,
+            background_pipeline: Some(background_pipeline),
             rect_pipeline,
             text_pipeline,
         })
@@ -158,7 +172,7 @@ impl Context {
         log::debug!("surface 重建: {width}x{height}");
     }
 
-    /// 渲染一帧: 清屏 → 矩形 pass → 文本 pass。
+    /// 渲染一帧: 背景图(如有) → 矩形 pass → 文本 pass。
     /// 返回 false 表示出现致命错误, 应退出。
     pub fn render(&mut self, rects: &RectBatch, texts: &mut TextBatch) -> bool {
         use wgpu::CurrentSurfaceTexture as CST;
@@ -191,30 +205,21 @@ impl Context {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame encoder"),
             });
-        self.rect_pipeline.draw(
-            &self.device,
-            &self.queue,
-            &mut encoder,
-            &DrawTarget {
-                view: &view,
-                width: self.config.width as f32,
-                height: self.config.height as f32,
-                clear_color: self.clear_color,
-            },
-            rects,
-        );
-        self.text_pipeline.draw(
-            &self.device,
-            &self.queue,
-            &mut encoder,
-            &DrawTarget {
-                view: &view,
-                width: self.config.width as f32,
-                height: self.config.height as f32,
-                clear_color: self.clear_color,
-            },
-            texts,
-        );
+        let target = DrawTarget {
+            view: &view,
+            width: self.config.width as f32,
+            height: self.config.height as f32,
+            clear_color: self.clear_color,
+        };
+        if let Some(bg) = self.background_pipeline.as_mut() {
+            if bg.has_background() {
+                bg.draw(&self.queue, &mut encoder, &target);
+            }
+        }
+        self.rect_pipeline
+            .draw(&self.device, &self.queue, &mut encoder, &target, rects);
+        self.text_pipeline
+            .draw(&self.device, &self.queue, &mut encoder, &target, texts);
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
         true
