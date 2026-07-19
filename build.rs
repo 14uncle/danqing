@@ -23,6 +23,8 @@ const BRAND_ACCENT: Rgba<u8> = Rgba([59, 130, 246, 255]);
 
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR 未设置"));
+    let manifest_dir =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR 未设置"));
 
     // 1. 回退字体
     let font_dest = out_dir.join("fallback-font.ttf");
@@ -32,7 +34,7 @@ fn main() {
     verify_font(&font_dest);
 
     // 2. 视觉资产(LOGO、背景图)
-    generate_assets(&out_dir);
+    generate_assets(&manifest_dir);
 
     println!("cargo:rerun-if-changed=build.rs");
 }
@@ -97,9 +99,9 @@ fn verify_font(dest: &Path) {
 // 视觉资产生成
 // ---------------------------------------------------------------------------
 
-fn generate_assets(out_dir: &Path) {
-    let logo_dir = out_dir.join("assets").join("logo");
-    let bg_dir = out_dir.join("assets").join("background");
+fn generate_assets(manifest_dir: &Path) {
+    let logo_dir = manifest_dir.join("assets").join("logo");
+    let bg_dir = manifest_dir.join("assets").join("background");
     fs::create_dir_all(&logo_dir).expect("创建 logo 目录失败");
     fs::create_dir_all(&bg_dir).expect("创建 background 目录失败");
 
