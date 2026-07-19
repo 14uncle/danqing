@@ -10,7 +10,7 @@
 
 ## Phase 3: Component Theming
 - [x] **Task 3** 改造 Box 使用 theme token（依赖 1）— `cargo test widget::box` 绿
-- [ ] **Task 4** 改造 Button 使用 theme token（依赖 1）— `cargo test widget::button` 绿
+- [x] **Task 4** 改造 Button 使用 theme token（依赖 1）— `cargo test widget::button` 绿
 - [ ] **Task 5** 实现自绘 TitleBar（依赖 1, 4）— 命中测试 + showcase 可见
 - [ ] **Task 6** 改造 TextInput 使用 theme token（依赖 1）— IME/焦点行为不变
 - [ ] **Task 7** 改造 TextArea 使用 theme token（依赖 1）— IME/焦点行为不变

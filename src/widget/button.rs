@@ -8,7 +8,7 @@ use std::any::Any;
 use crate::event::{Event, Key, NamedKey};
 use crate::render::{RectBatch, TextBatch};
 use crate::widget::{EventResult, Node, Widget};
-use crate::{Color, Constraints, Edges, Point, Rect, Size};
+use crate::{Color, Constraints, Edges, LightTheme, Point, Rect, Size, Theme};
 
 /// 消息工厂:点击时产出一条应用消息。
 type MsgFactory = std::boxed::Box<dyn Fn() -> std::boxed::Box<dyn Any>>;
@@ -22,6 +22,7 @@ pub struct Button {
     on_click: Option<MsgFactory>,
     color: Color,
     hover_color: Option<Color>,
+    focus_color: Color,
     radius: f32,
     padding: Edges,
     hovered: bool,
@@ -34,15 +35,21 @@ pub struct Button {
 }
 
 impl Button {
-    /// 创建按钮(默认青色背景、8px 圆角、12×20 内边距)。
+    /// 创建按钮,使用默认浅色主题 token。
     pub fn new(child: impl Widget + 'static) -> Self {
+        Self::themed(&LightTheme, child)
+    }
+
+    /// 使用指定主题创建按钮。
+    pub fn themed(theme: &impl Theme, child: impl Widget + 'static) -> Self {
         Self {
             child: std::boxed::Box::new(child),
             on_click: None,
-            color: Color::from_srgb8(0x2E, 0xB8, 0xA5),
+            color: theme.accent(),
             hover_color: None,
-            radius: 8.0,
-            padding: Edges::symmetric(20.0, 12.0),
+            focus_color: theme.text_primary(),
+            radius: theme.radius_md(),
+            padding: Edges::symmetric(theme.spacing_lg(), theme.spacing_md()),
             hovered: false,
             pressed: false,
             focused: false,
@@ -139,7 +146,7 @@ impl Widget for Button {
                     area.size.height - inset * 2.0,
                 ),
             );
-            rects.push_rounded_border(focus_rect, Color::WHITE, self.radius, 1.0);
+            rects.push_rounded_border(focus_rect, self.focus_color, self.radius, 1.0);
         }
         let inner = Rect::new(
             Point::new(
@@ -237,5 +244,61 @@ impl Widget for Button {
 
     fn hit_area(&self) -> Option<Rect> {
         Some(self.area)
+    }
+}
+
+#[cfg(test)]
+impl Button {
+    /// 当前背景色(测试用)。
+    pub(crate) fn color_value(&self) -> Color {
+        self.color
+    }
+
+    /// 当前焦点环颜色(测试用)。
+    pub(crate) fn focus_color_value(&self) -> Color {
+        self.focus_color
+    }
+
+    /// 当前圆角半径(测试用)。
+    pub(crate) fn radius_value(&self) -> f32 {
+        self.radius
+    }
+
+    /// 当前内边距(测试用)。
+    pub(crate) fn padding_value(&self) -> Edges {
+        self.padding
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::widget::Text;
+
+    #[test]
+    fn button_new_uses_light_theme_defaults() {
+        let button = Button::new(Text::new("OK"));
+        assert_eq!(button.color_value(), LightTheme.accent());
+        assert_eq!(button.focus_color_value(), LightTheme.text_primary());
+        assert_eq!(button.radius_value(), LightTheme.radius_md());
+        assert_eq!(
+            button.padding_value(),
+            Edges::symmetric(LightTheme.spacing_lg(), LightTheme.spacing_md())
+        );
+    }
+
+    #[test]
+    fn button_themed_uses_provided_theme() {
+        let button = Button::themed(&LightTheme, Text::new("OK"));
+        assert_eq!(button.color_value(), LightTheme.accent());
+        assert_eq!(button.radius_value(), LightTheme.radius_md());
+    }
+
+    #[test]
+    fn button_custom_overrides_theme() {
+        let custom = Color::from_srgb8(255, 0, 0);
+        let button = Button::new(Text::new("OK")).color(custom).radius(16.0);
+        assert_eq!(button.color_value(), custom);
+        assert_eq!(button.radius_value(), 16.0);
     }
 }
