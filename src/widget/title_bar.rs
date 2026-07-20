@@ -234,45 +234,115 @@ impl TitleBar {
         self.last_left_press = Some((Instant::now(), position));
     }
 
-    /// 用几何线段绘制第 i 个按钮的符号(0=关闭,1=最大化,2=最小化)。
+    /// 用纯轴对齐几何图形绘制第 i 个按钮的符号(0=关闭,1=最大化,2=最小化)。
+    ///
+    /// 为避开旋转实例在部分 GPU 驱动下的表现不一致,所有符号均用
+    /// `push_rect` 实现:水平/垂直线段用细长矩形,对角线用小圆点队列近似。
     fn paint_button_symbol(&self, rects: &mut RectBatch, index: usize, rect: Rect, color: Color) {
         let cx = rect.origin.x + rect.size.width * 0.5;
         let cy = rect.origin.y + rect.size.height * 0.5;
         // 符号占用按钮内接正方形的约 55%,线粗约 9%。
         let extent = rect.size.width.min(rect.size.height) * 0.55 * 0.5;
         let thickness = rect.size.width.min(rect.size.height) * 0.09;
+        let half_thick = thickness * 0.5;
 
         match index {
-            // 关闭:× 形两条对角线。
+            // 关闭:× 形两条对角线,用小圆点队列近似。
             0 => {
-                let tl = Point::new(cx - extent, cy - extent);
-                let tr = Point::new(cx + extent, cy - extent);
-                let bl = Point::new(cx - extent, cy + extent);
-                let br = Point::new(cx + extent, cy + extent);
-                rects.push_line(tl, br, thickness, color);
-                rects.push_line(bl, tr, thickness, color);
-            }
-            // 最大化:□ 形方框。
-            1 => {
-                let half = extent;
-                let top_left = Point::new(cx - half, cy - half);
-                let top_right = Point::new(cx + half, cy - half);
-                let bottom_right = Point::new(cx + half, cy + half);
-                let bottom_left = Point::new(cx - half, cy + half);
-                rects.push_line(top_left, top_right, thickness, color);
-                rects.push_line(top_right, bottom_right, thickness, color);
-                rects.push_line(bottom_right, bottom_left, thickness, color);
-                rects.push_line(bottom_left, top_left, thickness, color);
-            }
-            // 最小化:水平线段。
-            _ => {
-                rects.push_line(
-                    Point::new(cx - extent, cy),
-                    Point::new(cx + extent, cy),
+                self.push_axis_aligned_diagonal(
+                    rects,
+                    Point::new(cx - extent, cy - extent),
+                    Point::new(cx + extent, cy + extent),
+                    thickness,
+                    color,
+                );
+                self.push_axis_aligned_diagonal(
+                    rects,
+                    Point::new(cx - extent, cy + extent),
+                    Point::new(cx + extent, cy - extent),
                     thickness,
                     color,
                 );
             }
+            // 最大化:□ 形方框,四条直边。
+            1 => {
+                let side = extent * 2.0;
+                let top = cy - extent;
+                let left = cx - extent;
+                // 上
+                rects.push_rect(
+                    Rect::from_xywh(left, top, side, thickness),
+                    color,
+                    half_thick,
+                );
+                // 下
+                rects.push_rect(
+                    Rect::from_xywh(left, top + side - thickness, side, thickness),
+                    color,
+                    half_thick,
+                );
+                // 左
+                rects.push_rect(
+                    Rect::from_xywh(left, top + thickness, thickness, side - 2.0 * thickness),
+                    color,
+                    half_thick,
+                );
+                // 右
+                rects.push_rect(
+                    Rect::from_xywh(
+                        left + side - thickness,
+                        top + thickness,
+                        thickness,
+                        side - 2.0 * thickness,
+                    ),
+                    color,
+                    half_thick,
+                );
+            }
+            // 最小化:水平线段。
+            _ => {
+                rects.push_rect(
+                    Rect::from_xywh(cx - extent, cy - half_thick, extent * 2.0, thickness),
+                    color,
+                    half_thick,
+                );
+            }
+        }
+    }
+
+    /// 用轴对齐小圆点队列近似一条对角线。
+    ///
+    /// 每个步进放置一个 `thickness × thickness` 的圆角矩形,
+    /// 圆角半径为 `thickness/2` 使其呈圆形,彼此重叠形成平滑线段。
+    fn push_axis_aligned_diagonal(
+        &self,
+        rects: &mut RectBatch,
+        p1: Point,
+        p2: Point,
+        thickness: f32,
+        color: Color,
+    ) {
+        if thickness <= 0.0 {
+            return;
+        }
+        let dx = p2.x - p1.x;
+        let dy = p2.y - p1.y;
+        let length = (dx * dx + dy * dy).sqrt();
+        if length < 1e-6 {
+            return;
+        }
+        let half = thickness * 0.5;
+        let step = thickness * 0.65;
+        let count = (length / step).ceil().max(1.0) as usize;
+        for i in 0..=count {
+            let t = i as f32 / count as f32;
+            let x = p1.x + dx * t;
+            let y = p1.y + dy * t;
+            rects.push_rect(
+                Rect::from_xywh(x - half, y - half, thickness, thickness),
+                color,
+                half,
+            );
         }
     }
 }
