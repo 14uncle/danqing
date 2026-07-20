@@ -388,10 +388,6 @@ fn main() -> anyhow::Result<()> {
             .join("background")
             .join("gradient.png"),
     )
-    .with_noise(
-        out_dir.join("assets").join("background").join("noise.png"),
-        0.08,
-    )
     .scale(ScaleMode::Cover);
     let config = danqing::WindowConfig {
         clear_color: t.background(),
