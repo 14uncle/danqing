@@ -267,6 +267,7 @@ fn window_config_can_use_theme_and_background() {
         size: Size::new(800.0, 600.0),
         clear_color: t.background(),
         background: bg,
+        ..WindowConfig::default()
     };
 
     assert!(color_eq(cfg.clear_color, t.background()));

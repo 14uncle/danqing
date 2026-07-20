@@ -52,8 +52,12 @@ pub struct TitleBar {
     button_hover_color: Color,
     /// 关闭按钮悬停色。
     close_hover_color: Color,
-    /// LOGO 色。
-    logo_color: Color,
+    /// LOGO 外框色。
+    logo_frame_color: Color,
+    /// LOGO 内部填充色。
+    logo_fill_color: Color,
+    /// LOGO 颜料点色。
+    logo_dot_color: Color,
     /// 三个按钮状态(0=关闭,1=最大化,2=最小化,从右往左)。
     buttons: [TitleButton; 3],
     /// 关闭按钮回调。
@@ -91,7 +95,9 @@ impl TitleBar {
             button_color: theme.text_secondary(),
             button_hover_color: theme.text_primary(),
             close_hover_color: theme.danger(),
-            logo_color: theme.accent(),
+            logo_frame_color: theme.accent(),
+            logo_fill_color: theme.surface(),
+            logo_dot_color: theme.accent(),
             buttons: [TitleButton::default(); 3],
             on_close: None,
             on_minimize: None,
@@ -148,6 +154,16 @@ impl TitleBar {
     /// 返回鼠标位置命中的按钮索引,无命中返回 `None`。
     fn hit_button(&self, area: Rect, position: Point) -> Option<usize> {
         (0..self.buttons.len()).find(|i| self.button_rect(area, *i).contains(position))
+    }
+
+    /// 第 i 个按钮的图形符号(0=关闭,1=最大化,2=最小化)。
+    fn button_symbol(index: usize) -> &'static str {
+        match index {
+            0 => "×",
+            1 => "□",
+            2 => "_",
+            _ => "",
+        }
     }
 
     /// 第 i 个按钮当前应绘制的颜色。
@@ -221,9 +237,30 @@ impl Widget for TitleBar {
         // 背景条。
         rects.push_rect(area, self.bg, 0.0);
 
-        // LOGO:品牌色圆角矩形。
+        // LOGO:玻璃画布 + 颜料滴。
         let logo_rect = self.logo_rect(area);
-        rects.push_rect(logo_rect, self.logo_color, self.logo_size * 0.25);
+        let logo_size = logo_rect.size.width;
+
+        // 外框：accent 描边效果的圆角矩形。
+        let frame_radius = logo_size * 0.25;
+        rects.push_rect(logo_rect, self.logo_frame_color, frame_radius);
+
+        // 内部填充：白色半透明，形成“环+面”。
+        let stroke = logo_size * 0.10;
+        let fill_rect = logo_rect.inset(stroke);
+        let fill_radius = (frame_radius - stroke).max(0.0);
+        rects.push_rect(fill_rect, self.logo_fill_color, fill_radius);
+
+        // 颜料滴：实心 accent 圆，偏右下。
+        let dot_size = logo_size * 0.30;
+        let dot_offset = logo_size * 0.58;
+        let dot_rect = Rect::from_xywh(
+            logo_rect.origin.x + dot_offset - dot_size / 2.0,
+            logo_rect.origin.y + dot_offset - dot_size / 2.0,
+            dot_size,
+            dot_size,
+        );
+        rects.push_rect(dot_rect, self.logo_dot_color, dot_size / 2.0);
 
         // 标题文字,垂直居中。
         let font_size = LightTheme.font_size_body();
@@ -237,11 +274,24 @@ impl Widget for TitleBar {
             self.text_color,
         );
 
-        // 三个按钮绘制成圆形。
+        // 三个按钮:圆形背景 + 图形符号。
         for i in 0..self.buttons.len() {
             let rect = self.button_rect(area, i);
             let radius = self.button_size / 2.0;
             rects.push_rect(rect, self.button_color(i), radius);
+
+            let symbol = Self::button_symbol(i);
+            let symbol_size = (self.button_size * 0.55) as u16;
+            let symbol_width = texts.measure(symbol, symbol_size);
+            let symbol_baseline =
+                rect.origin.y + rect.size.height / 2.0 + texts.ascent(f32::from(symbol_size)) / 2.0;
+            texts.push_text(
+                symbol,
+                rect.origin.x + (rect.size.width - symbol_width) / 2.0,
+                symbol_baseline,
+                symbol_size,
+                self.bg,
+            );
         }
     }
 
@@ -344,6 +394,9 @@ mod tests {
         );
         assert_eq!(bar.button_size, LightTheme.spacing_md());
         assert_eq!(bar.bg, LightTheme.surface());
+        assert_eq!(bar.logo_frame_color, LightTheme.accent());
+        assert_eq!(bar.logo_fill_color, LightTheme.surface());
+        assert_eq!(bar.logo_dot_color, LightTheme.accent());
     }
 
     #[test]

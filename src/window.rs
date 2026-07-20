@@ -49,6 +49,12 @@ pub struct WindowConfig {
     pub clear_color: Color,
     /// 背景图配置。
     pub background: BackgroundConfig,
+    /// 窗口边框颜色(无边框窗口时自绘)。
+    pub border_color: Color,
+    /// 窗口边框圆角半径(配合自绘边框与 DWM 圆角)。
+    pub border_radius: f32,
+    /// 窗口边框粗细。
+    pub border_thickness: f32,
 }
 
 impl Default for WindowConfig {
@@ -59,6 +65,10 @@ impl Default for WindowConfig {
             // 深蓝灰: 非常量黑 / 白, 用于验证颜色参数通路
             clear_color: Color::rgb(0.10, 0.16, 0.24),
             background: BackgroundConfig::default(),
+            // 浅灰边框,与浅色毛玻璃主题协调
+            border_color: Color::rgba(0.0, 0.0, 0.0, 0.12),
+            border_radius: 12.0,
+            border_thickness: 1.0,
         }
     }
 }
@@ -152,6 +162,22 @@ fn load_icon_from_png(path: &std::path::Path) -> Result<Icon, Box<dyn std::error
     let img = image::open(path)?.into_rgba8();
     let (width, height) = img.dimensions();
     Icon::from_rgba(img.into_raw(), width, height).map_err(Into::into)
+}
+
+/// Windows 下为无边框窗口恢复圆角与阴影。
+///
+/// 使用 winit 公开的平台扩展 API,避免手写 unsafe DWM 调用。
+/// 若设置失败仅记录警告,不影响窗口功能。
+#[cfg(target_os = "windows")]
+fn apply_windows_undecorated_style(window: &WinitWindow) {
+    use winit::platform::windows::{CornerPreference, WindowExtWindows};
+
+    if let Err(err) = std::panic::catch_unwind(|| {
+        window.set_undecorated_shadow(true);
+        window.set_corner_preference(CornerPreference::Round);
+    }) {
+        log::warn!("设置 Windows 无边框窗口样式失败: {err:?}");
+    }
 }
 
 /// 加载应用窗口图标。
@@ -449,6 +475,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         };
         log::info!("窗口已创建: {}", self.config.title);
 
+        #[cfg(target_os = "windows")]
+        apply_windows_undecorated_style(&window);
+
         let ctx_start = Instant::now();
         match Context::new(
             Arc::clone(&window),
@@ -569,6 +598,15 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                         .layout(crate::Constraints::tight(screen), &mut self.texts);
                     self.root_area = Rect::new(Point::ZERO, size);
                     self.tree.paint(self.root_area, &mut rects, &mut self.texts);
+                    // 无边框窗口下自绘边框与圆角。
+                    if self.config.border_thickness > 0.0 {
+                        rects.push_rounded_border(
+                            self.root_area,
+                            self.config.border_color,
+                            self.config.border_radius,
+                            self.config.border_thickness,
+                        );
+                    }
                     self.update_ime();
                 }
                 if let Some(context) = &mut self.context
