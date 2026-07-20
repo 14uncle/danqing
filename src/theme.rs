@@ -105,7 +105,7 @@ impl Theme for LightTheme {
     }
 
     fn surface(&self) -> Color {
-        Color::rgba(1.0, 1.0, 1.0, 0.60)
+        Color::rgba(1.0, 1.0, 1.0, 0.85)
     }
 
     fn surface_variant(&self) -> Color {
