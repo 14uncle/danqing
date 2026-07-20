@@ -58,12 +58,9 @@ fn vs_main(
     );
     var out: VsOut;
     out.clip = clip;
-    // local 需用逆旋转,使 SDF 在矩形本地(未旋转)坐标系中计算。
-    let rd_local = vec2<f32>(
-        d.x * cos_r + d.y * sin_r,
-        -d.x * sin_r + d.y * cos_r
-    );
-    out.local = rd_local * size;
+    // local 保持未旋转的本地坐标;顶点位置旋转后,线性插值会自动
+    // 把 screen-space 点映射回未旋转本地坐标,使 SDF 正确判定。
+    out.local = d * size;
     out.half_size = size * 0.5;
     out.color = color;
     out.radius = radius;
