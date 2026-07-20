@@ -52,6 +52,8 @@ pub struct TitleBar {
     button_hover_color: Color,
     /// 关闭按钮悬停色。
     close_hover_color: Color,
+    /// 按钮背景悬停/按下色。
+    button_bg_color: Color,
     /// LOGO 外框色。
     logo_frame_color: Color,
     /// LOGO 内部填充色。
@@ -85,9 +87,9 @@ impl TitleBar {
         Self {
             title: title.into(),
             height: theme.spacing_xl() + theme.spacing_lg(),
-            button_size: theme.spacing_md(),
-            button_gap: theme.spacing_sm(),
-            margin: theme.spacing_md(),
+            button_size: theme.spacing_xl(),
+            button_gap: theme.spacing_md(),
+            margin: theme.spacing_lg(),
             logo_size: theme.spacing_md(),
             logo_gap: theme.spacing_sm(),
             bg: theme.surface(),
@@ -95,6 +97,7 @@ impl TitleBar {
             button_color: theme.text_secondary(),
             button_hover_color: theme.text_primary(),
             close_hover_color: theme.danger(),
+            button_bg_color: theme.border(),
             logo_frame_color: theme.accent(),
             logo_fill_color: theme.surface(),
             logo_dot_color: theme.accent(),
@@ -166,8 +169,8 @@ impl TitleBar {
         }
     }
 
-    /// 第 i 个按钮当前应绘制的颜色。
-    fn button_color(&self, index: usize) -> Color {
+    /// 第 i 个按钮的图形符号颜色。
+    fn button_symbol_color(&self, index: usize) -> Color {
         let base = if self.buttons[index].hovered {
             if index == 0 {
                 self.close_hover_color
@@ -178,9 +181,25 @@ impl TitleBar {
             self.button_color
         };
         if self.buttons[index].pressed {
-            Color::rgba(base.r * 0.8, base.g * 0.8, base.b * 0.8, base.a)
+            Color::rgba(base.r * 0.7, base.g * 0.7, base.b * 0.7, base.a)
         } else {
             base
+        }
+    }
+
+    /// 第 i 个按钮的背景颜色(正常状态透明,悬停/按下时显示)。
+    fn button_background_color(&self, _index: usize) -> Option<Color> {
+        if self.buttons[_index].pressed {
+            Some(Color::rgba(
+                self.button_bg_color.r * 0.85,
+                self.button_bg_color.g * 0.85,
+                self.button_bg_color.b * 0.85,
+                self.button_bg_color.a,
+            ))
+        } else if self.buttons[_index].hovered {
+            Some(self.button_bg_color)
+        } else {
+            None
         }
     }
 
@@ -274,14 +293,16 @@ impl Widget for TitleBar {
             self.text_color,
         );
 
-        // 三个按钮:圆形背景 + 图形符号。
+        // 三个按钮:正常仅显示符号,悬停/按下时显示背景圆盘。
         for i in 0..self.buttons.len() {
             let rect = self.button_rect(area, i);
             let radius = self.button_size / 2.0;
-            rects.push_rect(rect, self.button_color(i), radius);
+            if let Some(bg) = self.button_background_color(i) {
+                rects.push_rect(rect, bg, radius);
+            }
 
             let symbol = Self::button_symbol(i);
-            let symbol_size = (self.button_size * 0.55) as u16;
+            let symbol_size = (self.button_size * 0.55).max(14.0) as u16;
             let symbol_width = texts.measure(symbol, symbol_size);
             let symbol_baseline =
                 rect.origin.y + rect.size.height / 2.0 + texts.ascent(f32::from(symbol_size)) / 2.0;
@@ -290,7 +311,7 @@ impl Widget for TitleBar {
                 rect.origin.x + (rect.size.width - symbol_width) / 2.0,
                 symbol_baseline,
                 symbol_size,
-                self.bg,
+                self.button_symbol_color(i),
             );
         }
     }
@@ -392,7 +413,8 @@ mod tests {
             bar.height,
             LightTheme.spacing_xl() + LightTheme.spacing_lg()
         );
-        assert_eq!(bar.button_size, LightTheme.spacing_md());
+        assert_eq!(bar.button_size, LightTheme.spacing_xl());
+        assert_eq!(bar.button_gap, LightTheme.spacing_md());
         assert_eq!(bar.bg, LightTheme.surface());
         assert_eq!(bar.logo_frame_color, LightTheme.accent());
         assert_eq!(bar.logo_fill_color, LightTheme.surface());
