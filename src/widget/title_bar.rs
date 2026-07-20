@@ -159,16 +159,6 @@ impl TitleBar {
         (0..self.buttons.len()).find(|i| self.button_rect(area, *i).contains(position))
     }
 
-    /// 第 i 个按钮的图形符号(0=关闭,1=最大化,2=最小化)。
-    fn button_symbol(index: usize) -> &'static str {
-        match index {
-            0 => "×",
-            1 => "□",
-            2 => "_",
-            _ => "",
-        }
-    }
-
     /// 第 i 个按钮的图形符号颜色。
     fn button_symbol_color(&self, index: usize) -> Color {
         let base = if self.buttons[index].hovered {
@@ -243,6 +233,48 @@ impl TitleBar {
         }
         self.last_left_press = Some((Instant::now(), position));
     }
+
+    /// 用几何线段绘制第 i 个按钮的符号(0=关闭,1=最大化,2=最小化)。
+    fn paint_button_symbol(&self, rects: &mut RectBatch, index: usize, rect: Rect, color: Color) {
+        let cx = rect.origin.x + rect.size.width * 0.5;
+        let cy = rect.origin.y + rect.size.height * 0.5;
+        // 符号占用按钮内接正方形的约 55%,线粗约 9%。
+        let extent = rect.size.width.min(rect.size.height) * 0.55 * 0.5;
+        let thickness = rect.size.width.min(rect.size.height) * 0.09;
+
+        match index {
+            // 关闭:× 形两条对角线。
+            0 => {
+                let tl = Point::new(cx - extent, cy - extent);
+                let tr = Point::new(cx + extent, cy - extent);
+                let bl = Point::new(cx - extent, cy + extent);
+                let br = Point::new(cx + extent, cy + extent);
+                rects.push_line(tl, br, thickness, color);
+                rects.push_line(bl, tr, thickness, color);
+            }
+            // 最大化:□ 形方框。
+            1 => {
+                let half = extent;
+                let top_left = Point::new(cx - half, cy - half);
+                let top_right = Point::new(cx + half, cy - half);
+                let bottom_right = Point::new(cx + half, cy + half);
+                let bottom_left = Point::new(cx - half, cy + half);
+                rects.push_line(top_left, top_right, thickness, color);
+                rects.push_line(top_right, bottom_right, thickness, color);
+                rects.push_line(bottom_right, bottom_left, thickness, color);
+                rects.push_line(bottom_left, top_left, thickness, color);
+            }
+            // 最小化:水平线段。
+            _ => {
+                rects.push_line(
+                    Point::new(cx - extent, cy),
+                    Point::new(cx + extent, cy),
+                    thickness,
+                    color,
+                );
+            }
+        }
+    }
 }
 
 impl Widget for TitleBar {
@@ -261,17 +293,20 @@ impl Widget for TitleBar {
         let logo_size = logo_rect.size.width;
 
         // 外框：accent 描边效果的圆角矩形。
+        // 与 assets/logo/logo.svg 比例对应：外框内缩 6%，描边 16%，圆角 25%。
+        let outer_inset = logo_size * 0.06;
+        let frame_rect = logo_rect.inset(outer_inset);
         let frame_radius = logo_size * 0.25;
-        rects.push_rect(logo_rect, self.logo_frame_color, frame_radius);
+        rects.push_rect(frame_rect, self.logo_frame_color, frame_radius);
 
         // 内部填充：白色半透明，形成“环+面”。
-        let stroke = logo_size * 0.10;
-        let fill_rect = logo_rect.inset(stroke);
+        let stroke = logo_size * 0.16;
+        let fill_rect = frame_rect.inset(stroke);
         let fill_radius = (frame_radius - stroke).max(0.0);
         rects.push_rect(fill_rect, self.logo_fill_color, fill_radius);
 
         // 颜料滴：实心 accent 圆，偏右下。
-        let dot_size = logo_size * 0.30;
+        let dot_size = logo_size * 0.38;
         let dot_offset = logo_size * 0.58;
         let dot_rect = Rect::from_xywh(
             logo_rect.origin.x + dot_offset - dot_size / 2.0,
@@ -293,26 +328,14 @@ impl Widget for TitleBar {
             self.text_color,
         );
 
-        // 三个按钮:正常仅显示符号,悬停/按下时显示背景圆盘。
+        // 三个按钮:正常仅显示几何符号,悬停/按下时才出现背景圆盘。
         for i in 0..self.buttons.len() {
             let rect = self.button_rect(area, i);
             let radius = self.button_size / 2.0;
             if let Some(bg) = self.button_background_color(i) {
                 rects.push_rect(rect, bg, radius);
             }
-
-            let symbol = Self::button_symbol(i);
-            let symbol_size = (self.button_size * 0.55).max(14.0) as u16;
-            let symbol_width = texts.measure(symbol, symbol_size);
-            let symbol_baseline =
-                rect.origin.y + rect.size.height / 2.0 + texts.ascent(f32::from(symbol_size)) / 2.0;
-            texts.push_text(
-                symbol,
-                rect.origin.x + (rect.size.width - symbol_width) / 2.0,
-                symbol_baseline,
-                symbol_size,
-                self.button_symbol_color(i),
-            );
+            self.paint_button_symbol(rects, i, rect, self.button_symbol_color(i));
         }
     }
 

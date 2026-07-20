@@ -1,6 +1,6 @@
 // 矩形族渲染管线:实例化 quad + fragment SDF 圆角/抗锯齿。
 //
-// 每个实例:屏幕像素坐标 pos/size、RGBA 颜色、圆角半径。
+// 每个实例:屏幕像素坐标 pos/size、RGBA 颜色、圆角半径、旋转角度。
 // 顶点着色器用 vertex_index 生成单位 quad,像素坐标 → clip 空间;
 // 片元着色器用 SDF 求圆角矩形有向距离,smoothstep 做边缘抗锯齿。
 
@@ -30,7 +30,7 @@ fn vs_main(
     @location(1) size: vec2<f32>,
     @location(2) color: vec4<f32>,
     @location(3) radius: f32,
-    @location(4) _pad: f32,
+    @location(4) rotation: f32,
     @location(5) clip_min: vec2<f32>,
     @location(6) clip_max: vec2<f32>,
 ) -> VsOut {
@@ -39,7 +39,16 @@ fn vs_main(
         vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0), vec2<f32>(0.0, 1.0),
     );
     let c = corners[vi];
-    let px = pos + c * size;
+    let cos_r = cos(rotation);
+    let sin_r = sin(rotation);
+    // 绕矩形中心 (0.5,0.5) 旋转单位角点,再映射到像素坐标。
+    let d = c - vec2<f32>(0.5, 0.5);
+    let rd = vec2<f32>(
+        d.x * cos_r - d.y * sin_r,
+        d.x * sin_r + d.y * cos_r
+    );
+    let rc = vec2<f32>(0.5, 0.5) + rd;
+    let px = pos + rc * size;
     // 像素坐标(原点左上,y 向下)→ clip(中心原点,y 向上)
     let clip = vec4<f32>(
         px.x / u.screen_size.x * 2.0 - 1.0,
@@ -49,7 +58,7 @@ fn vs_main(
     );
     var out: VsOut;
     out.clip = clip;
-    out.local = (c - vec2<f32>(0.5, 0.5)) * size;
+    out.local = rd * size;
     out.half_size = size * 0.5;
     out.color = color;
     out.radius = radius;
