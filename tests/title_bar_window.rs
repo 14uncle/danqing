@@ -20,7 +20,7 @@ fn button_center(theme: &impl Theme, width: f32, index: usize) -> Point {
     let height = theme.spacing_xl() + theme.spacing_lg();
     let margin = theme.spacing_md();
     let button_size = theme.spacing_lg() + theme.spacing_xs();
-    let button_gap = theme.spacing_sm();
+    let button_gap = theme.spacing_md();
 
     let right = width - margin;
     let x = right - (index as f32 + 0.5) * button_size - index as f32 * button_gap;

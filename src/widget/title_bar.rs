@@ -88,7 +88,7 @@ impl TitleBar {
             title: title.into(),
             height: theme.spacing_xl() + theme.spacing_lg(),
             button_size: theme.spacing_lg() + theme.spacing_xs(),
-            button_gap: theme.spacing_sm(),
+            button_gap: theme.spacing_md(),
             margin: theme.spacing_md(),
             logo_size: theme.spacing_md(),
             logo_gap: theme.spacing_sm(),
@@ -511,7 +511,7 @@ mod tests {
             bar.button_size,
             LightTheme.spacing_lg() + LightTheme.spacing_xs()
         );
-        assert_eq!(bar.button_gap, LightTheme.spacing_sm());
+        assert_eq!(bar.button_gap, LightTheme.spacing_md());
         assert_eq!(bar.margin, LightTheme.spacing_md());
         assert_eq!(bar.bg, LightTheme.surface());
         assert_eq!(bar.logo_frame_color, LightTheme.accent());
