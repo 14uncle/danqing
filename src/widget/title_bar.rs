@@ -87,9 +87,9 @@ impl TitleBar {
         Self {
             title: title.into(),
             height: theme.spacing_xl() + theme.spacing_lg(),
-            button_size: theme.spacing_xl(),
-            button_gap: theme.spacing_md(),
-            margin: theme.spacing_lg(),
+            button_size: theme.spacing_lg() + theme.spacing_xs(),
+            button_gap: theme.spacing_sm(),
+            margin: theme.spacing_md(),
             logo_size: theme.spacing_md(),
             logo_gap: theme.spacing_sm(),
             bg: theme.surface(),
@@ -241,9 +241,9 @@ impl TitleBar {
     fn paint_button_symbol(&self, rects: &mut RectBatch, index: usize, rect: Rect, color: Color) {
         let cx = rect.origin.x + rect.size.width * 0.5;
         let cy = rect.origin.y + rect.size.height * 0.5;
-        // 符号占用按钮内接正方形的约 60%,线粗约 10%,视觉更饱满。
-        let extent = rect.size.width.min(rect.size.height) * 0.60 * 0.5;
-        let thickness = rect.size.width.min(rect.size.height) * 0.10;
+        // 符号占用按钮内接正方形的约 58%,线粗约 7.5%,更纤细。
+        let extent = rect.size.width.min(rect.size.height) * 0.58 * 0.5;
+        let thickness = rect.size.width.min(rect.size.height) * 0.075;
         let half_thick = thickness * 0.5;
 
         match index {
@@ -507,8 +507,12 @@ mod tests {
             bar.height,
             LightTheme.spacing_xl() + LightTheme.spacing_lg()
         );
-        assert_eq!(bar.button_size, LightTheme.spacing_xl());
-        assert_eq!(bar.button_gap, LightTheme.spacing_md());
+        assert_eq!(
+            bar.button_size,
+            LightTheme.spacing_lg() + LightTheme.spacing_xs()
+        );
+        assert_eq!(bar.button_gap, LightTheme.spacing_sm());
+        assert_eq!(bar.margin, LightTheme.spacing_md());
         assert_eq!(bar.bg, LightTheme.surface());
         assert_eq!(bar.logo_frame_color, LightTheme.accent());
         assert_eq!(bar.logo_fill_color, LightTheme.surface());
