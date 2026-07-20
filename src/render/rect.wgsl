@@ -43,11 +43,11 @@ fn vs_main(
     let sin_r = sin(rotation);
     // 绕矩形中心 (0.5,0.5) 旋转单位角点,再映射到像素坐标。
     let d = c - vec2<f32>(0.5, 0.5);
-    let rd = vec2<f32>(
+    let rd_pos = vec2<f32>(
         d.x * cos_r - d.y * sin_r,
         d.x * sin_r + d.y * cos_r
     );
-    let rc = vec2<f32>(0.5, 0.5) + rd;
+    let rc = vec2<f32>(0.5, 0.5) + rd_pos;
     let px = pos + rc * size;
     // 像素坐标(原点左上,y 向下)→ clip(中心原点,y 向上)
     let clip = vec4<f32>(
@@ -58,7 +58,12 @@ fn vs_main(
     );
     var out: VsOut;
     out.clip = clip;
-    out.local = rd * size;
+    // local 需用逆旋转,使 SDF 在矩形本地(未旋转)坐标系中计算。
+    let rd_local = vec2<f32>(
+        d.x * cos_r + d.y * sin_r,
+        -d.x * sin_r + d.y * cos_r
+    );
+    out.local = rd_local * size;
     out.half_size = size * 0.5;
     out.color = color;
     out.radius = radius;
