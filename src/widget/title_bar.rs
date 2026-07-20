@@ -241,9 +241,9 @@ impl TitleBar {
     fn paint_button_symbol(&self, rects: &mut RectBatch, index: usize, rect: Rect, color: Color) {
         let cx = rect.origin.x + rect.size.width * 0.5;
         let cy = rect.origin.y + rect.size.height * 0.5;
-        // 符号占用按钮内接正方形的约 55%,线粗约 9%。
-        let extent = rect.size.width.min(rect.size.height) * 0.55 * 0.5;
-        let thickness = rect.size.width.min(rect.size.height) * 0.09;
+        // 符号占用按钮内接正方形的约 60%,线粗约 10%,视觉更饱满。
+        let extent = rect.size.width.min(rect.size.height) * 0.60 * 0.5;
+        let thickness = rect.size.width.min(rect.size.height) * 0.10;
         let half_thick = thickness * 0.5;
 
         match index {
@@ -332,7 +332,8 @@ impl TitleBar {
             return;
         }
         let half = thickness * 0.5;
-        let step = thickness * 0.65;
+        // 步长取 thickness 的一半,让小圆点高度重叠,对角线看起来更实心。
+        let step = thickness * 0.5;
         let count = (length / step).ceil().max(1.0) as usize;
         for i in 0..=count {
             let t = i as f32 / count as f32;
