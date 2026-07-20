@@ -13,6 +13,7 @@ use danqing::widget::{
 };
 use danqing::{
     App, BackgroundConfig, Event, Key, LightTheme, NamedKey, Point, ScaleMode, Size, Theme,
+    WindowAction,
 };
 use std::io::Write;
 
@@ -330,7 +331,13 @@ fn build_tree() -> Node {
     let t = theme();
     widget::node(
         Column::new()
-            .child(TitleBar::themed(&t, "danqing 丹青"))
+            .child(
+                TitleBar::themed(&t, "danqing 丹青")
+                    .on_close(|| WindowAction::Close)
+                    .on_minimize(|| WindowAction::Minimize)
+                    .on_maximize(|| WindowAction::MaximizeOrRestore)
+                    .on_drag(|| WindowAction::Drag),
+            )
             .fill(
                 Padding::all(
                     t.spacing_lg(),
@@ -381,14 +388,8 @@ fn main() -> anyhow::Result<()> {
     };
 
     let t = theme();
-    let out_dir = std::path::PathBuf::from(env!("OUT_DIR"));
-    let background = BackgroundConfig::with_image(
-        out_dir
-            .join("assets")
-            .join("background")
-            .join("gradient.png"),
-    )
-    .scale(ScaleMode::Cover);
+    let background =
+        BackgroundConfig::with_image("assets/background/gradient.png").scale(ScaleMode::Cover);
     let config = danqing::WindowConfig {
         clear_color: t.background(),
         background,

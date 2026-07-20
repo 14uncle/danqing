@@ -3,8 +3,11 @@
 
 //! 自绘标题栏组件。
 //!
-//! 左侧显示窗口标题,右侧提供最小化/最大化/关闭三个按钮的视觉反馈。
-//! 阶段 1 不调用窗口控制 API,按钮仅产生悬停/按下状态变化。
+//! 左侧显示窗口 LOGO 与标题,右侧提供最小化/最大化/关闭三个按钮。
+//! 阶段 1 按钮产出 `WindowAction` 消息,由 `window.rs` 的 `Handler` 调用 OS 窗口 API。
+
+use std::any::Any;
+use std::time::{Duration, Instant};
 
 use crate::event::{Event, MouseButton};
 use crate::render::{RectBatch, TextBatch};
@@ -20,6 +23,9 @@ struct TitleButton {
     pressed: bool,
 }
 
+/// 窗口动作回调工厂。
+type ActionFactory = Box<dyn Fn() -> Box<dyn Any>>;
+
 /// 自绘标题栏组件。
 pub struct TitleBar {
     /// 窗口标题。
@@ -32,6 +38,10 @@ pub struct TitleBar {
     button_gap: f32,
     /// 左右边距。
     margin: f32,
+    /// LOGO 尺寸。
+    logo_size: f32,
+    /// LOGO 与标题间距。
+    logo_gap: f32,
     /// 背景色。
     bg: Color,
     /// 标题文字颜色。
@@ -42,10 +52,22 @@ pub struct TitleBar {
     button_hover_color: Color,
     /// 关闭按钮悬停色。
     close_hover_color: Color,
+    /// LOGO 色。
+    logo_color: Color,
     /// 三个按钮状态(0=关闭,1=最大化,2=最小化,从右往左)。
     buttons: [TitleButton; 3],
+    /// 关闭按钮回调。
+    on_close: Option<ActionFactory>,
+    /// 最小化按钮回调。
+    on_minimize: Option<ActionFactory>,
+    /// 最大化/还原按钮回调。
+    on_maximize: Option<ActionFactory>,
+    /// 标题栏拖拽回调。
+    on_drag: Option<ActionFactory>,
     /// 自身绝对矩形缓存。
     area: Rect,
+    /// 上次在非按钮区按下左键的时间与位置,用于识别双击最大化。
+    last_left_press: Option<(Instant, Point)>,
 }
 
 impl TitleBar {
@@ -62,14 +84,46 @@ impl TitleBar {
             button_size: theme.spacing_md(),
             button_gap: theme.spacing_sm(),
             margin: theme.spacing_md(),
+            logo_size: theme.spacing_md(),
+            logo_gap: theme.spacing_sm(),
             bg: theme.surface(),
             text_color: theme.text_primary(),
             button_color: theme.text_secondary(),
             button_hover_color: theme.text_primary(),
             close_hover_color: theme.danger(),
+            logo_color: theme.accent(),
             buttons: [TitleButton::default(); 3],
+            on_close: None,
+            on_minimize: None,
+            on_maximize: None,
+            on_drag: None,
             area: Rect::default(),
+            last_left_press: None,
         }
+    }
+
+    /// 设置关闭按钮产出的消息。
+    pub fn on_close<M: 'static>(mut self, f: impl Fn() -> M + 'static) -> Self {
+        self.on_close = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
+        self
+    }
+
+    /// 设置最小化按钮产出的消息。
+    pub fn on_minimize<M: 'static>(mut self, f: impl Fn() -> M + 'static) -> Self {
+        self.on_minimize = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
+        self
+    }
+
+    /// 设置最大化/还原按钮产出的消息。
+    pub fn on_maximize<M: 'static>(mut self, f: impl Fn() -> M + 'static) -> Self {
+        self.on_maximize = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
+        self
+    }
+
+    /// 设置标题栏拖拽时产出的消息。
+    pub fn on_drag<M: 'static>(mut self, f: impl Fn() -> M + 'static) -> Self {
+        self.on_drag = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
+        self
     }
 
     /// 计算第 i 个按钮的矩形(0=关闭,1=最大化,2=最小化)。
@@ -78,6 +132,17 @@ impl TitleBar {
         let x = right - (index as f32 + 1.0) * self.button_size - index as f32 * self.button_gap;
         let y = area.origin.y + (self.height - self.button_size) / 2.0;
         Rect::from_xywh(x, y, self.button_size, self.button_size)
+    }
+
+    /// 计算 LOGO 矩形。
+    fn logo_rect(&self, area: Rect) -> Rect {
+        let y = area.origin.y + (self.height - self.logo_size) / 2.0;
+        Rect::from_xywh(
+            area.origin.x + self.margin,
+            y,
+            self.logo_size,
+            self.logo_size,
+        )
     }
 
     /// 返回鼠标位置命中的按钮索引,无命中返回 `None`。
@@ -102,6 +167,47 @@ impl TitleBar {
             base
         }
     }
+
+    /// 触发指定索引按钮的回调。
+    fn emit_button_action(&self, index: usize, msgs: &mut MsgQueue) {
+        let factory = match index {
+            0 => &self.on_close,
+            1 => &self.on_maximize,
+            2 => &self.on_minimize,
+            _ => &None,
+        };
+        if let Some(factory) = factory {
+            msgs.push(factory());
+        }
+    }
+
+    /// 尝试触发拖拽或识别双击最大化。
+    fn handle_drag_or_double_click(&mut self, position: Point, msgs: &mut MsgQueue) {
+        const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(300);
+        const DOUBLE_CLICK_DISTANCE: f32 = 4.0;
+
+        if let Some((last_time, last_pos)) = self.last_left_press {
+            let dt = Instant::now().duration_since(last_time);
+            let dist = Point::new(position.x - last_pos.x, position.y - last_pos.y);
+            if dt < DOUBLE_CLICK_INTERVAL
+                && dist.x.abs() < DOUBLE_CLICK_DISTANCE
+                && dist.y.abs() < DOUBLE_CLICK_DISTANCE
+            {
+                // 双击:最大化/还原
+                if let Some(factory) = &self.on_maximize {
+                    msgs.push(factory());
+                }
+                self.last_left_press = None;
+                return;
+            }
+        }
+
+        // 单击开始拖拽
+        if let Some(factory) = &self.on_drag {
+            msgs.push(factory());
+        }
+        self.last_left_press = Some((Instant::now(), position));
+    }
 }
 
 impl Widget for TitleBar {
@@ -115,13 +221,17 @@ impl Widget for TitleBar {
         // 背景条。
         rects.push_rect(area, self.bg, 0.0);
 
+        // LOGO:品牌色圆角矩形。
+        let logo_rect = self.logo_rect(area);
+        rects.push_rect(logo_rect, self.logo_color, self.logo_size * 0.25);
+
         // 标题文字,垂直居中。
-        let font_size = 14;
+        let font_size = LightTheme.font_size_body();
         let baseline =
             area.origin.y + area.size.height / 2.0 + texts.ascent(f32::from(font_size)) / 2.0;
         texts.push_text(
             &self.title,
-            area.origin.x + self.margin,
+            logo_rect.origin.x + logo_rect.size.width + self.logo_gap,
             baseline,
             font_size,
             self.text_color,
@@ -135,7 +245,7 @@ impl Widget for TitleBar {
         }
     }
 
-    fn event(&mut self, event: &Event, area: Rect, _msgs: &mut MsgQueue) -> EventResult {
+    fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
         self.area = area;
         match event {
             Event::CursorMoved(p) => {
@@ -154,28 +264,45 @@ impl Widget for TitleBar {
                     btn.hovered = false;
                     btn.pressed = false;
                 }
+                self.last_left_press = None;
                 EventResult::Ignored
             }
             Event::MouseInput {
                 button: MouseButton::Left,
-                pressed,
+                pressed: true,
                 position,
             } => {
                 let hit = self.hit_button(area, *position);
-                if *pressed {
+                if let Some(idx) = hit {
                     for (i, btn) in self.buttons.iter_mut().enumerate() {
-                        btn.pressed = hit == Some(i) && btn.hovered;
+                        btn.pressed = i == idx;
                     }
-                } else {
-                    for btn in &mut self.buttons {
-                        btn.pressed = false;
-                    }
-                }
-                if hit.is_some() {
                     EventResult::Consumed
                 } else {
-                    EventResult::Ignored
+                    // 非按钮区:拖拽或双击最大化
+                    self.handle_drag_or_double_click(*position, msgs);
+                    EventResult::Consumed
                 }
+            }
+            Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: false,
+                position,
+            } => {
+                let hit = self.hit_button(area, *position);
+                let mut triggered = [false; 3];
+                for (i, btn) in self.buttons.iter_mut().enumerate() {
+                    if btn.pressed && hit == Some(i) {
+                        triggered[i] = true;
+                    }
+                    btn.pressed = false;
+                }
+                for (i, was_triggered) in triggered.into_iter().enumerate() {
+                    if was_triggered {
+                        self.emit_button_action(i, msgs);
+                    }
+                }
+                EventResult::Consumed
             }
             _ => EventResult::Ignored,
         }
@@ -202,6 +329,7 @@ impl TitleBar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::WindowAction;
 
     fn title_bar_area() -> Rect {
         Rect::from_xywh(0.0, 0.0, 400.0, 40.0)
@@ -304,5 +432,62 @@ mod tests {
 
         assert_eq!(result, EventResult::Ignored);
         assert!(!bar.button_hovered(0));
+    }
+
+    #[test]
+    fn close_button_emits_message_on_click() {
+        let mut bar = TitleBar::new("丹青").on_close(|| WindowAction::Close);
+        let area = title_bar_area();
+        let origin = bar.button_rect(area, 0).origin;
+        let close_center = crate::Point::new(
+            origin.x + bar.button_size / 2.0,
+            origin.y + bar.button_size / 2.0,
+        );
+        let mut msgs = MsgQueue::new();
+
+        bar.event(&Event::CursorMoved(close_center), area, &mut msgs);
+        bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: close_center,
+            },
+            area,
+            &mut msgs,
+        );
+        bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: false,
+                position: close_center,
+            },
+            area,
+            &mut msgs,
+        );
+
+        assert_eq!(msgs.len(), 1);
+        let action = msgs[0].downcast_ref::<WindowAction>().unwrap();
+        assert_eq!(*action, WindowAction::Close);
+    }
+
+    #[test]
+    fn drag_area_emits_drag_message() {
+        let mut bar = TitleBar::new("丹青").on_drag(|| WindowAction::Drag);
+        let area = title_bar_area();
+        let mut msgs = MsgQueue::new();
+
+        bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: crate::Point::new(50.0, 20.0),
+            },
+            area,
+            &mut msgs,
+        );
+
+        assert_eq!(msgs.len(), 1);
+        let action = msgs[0].downcast_ref::<WindowAction>().unwrap();
+        assert_eq!(*action, WindowAction::Drag);
     }
 }

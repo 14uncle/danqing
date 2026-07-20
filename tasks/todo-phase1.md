@@ -6,7 +6,7 @@
 - [x] **Task 1** 实现 theme.rs 与 Theme trait — `cargo check` / `clippy` 绿
 
 ## Phase 2: Visual Assets
-- [x] **Task 2** 设计并导出 LOGO 与背景图资产 — build.rs 生成 dq LOGO 多尺寸 PNG/ICO 与渐变/噪声背景到 OUT_DIR
+- [x] **Task 2** 设计并导出 LOGO 与背景图资产 — 生成 dq LOGO 多尺寸 PNG/ICO 与渐变/噪声背景,提交到 `assets/`
 
 ## Phase 3: Component Theming
 - [x] **Task 3** 改造 Box 使用 theme token（依赖 1）— `cargo test widget::box` 绿
@@ -34,7 +34,10 @@
 ## Phase 6: Testing & Acceptance
 - [x] **Task 11** 编写设计系统测试 + 最终验收（依赖 10）— `cargo fmt` / `clippy -D warnings` / `test` / `build --release` 全绿
 
+## Phase 7: TitleBar 接管原生标题栏
+- [x] **Task 12** 自绘标题栏窗口控制（依赖 5, 11）— Windows 去装饰、按钮可用、可拖拽 ✅ 2026-07-20（代码/测试/构建绿；showcase 人工 GUI 验证待补）
+
 ### ⏸ Checkpoint Complete: 阶段 1 关闭
-- [x] spec Success Criteria 10/10 通过
-- [x] 全部 Commands 绿；`tasks/todo-phase1.md` 全部勾选
-- [x] 人工终审，阶段 1 关闭
+- [ ] spec Success Criteria 10/10 通过
+- [ ] 全部 Commands 绿；`tasks/todo-phase1.md` 全部勾选
+- [ ] 人工终审，阶段 1 关闭

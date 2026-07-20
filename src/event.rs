@@ -154,3 +154,19 @@ impl Event {
         }
     }
 }
+
+/// 窗口控制动作。
+///
+/// 由自绘标题栏等组件产出,经 `window.rs` 的 `Handler` 识别后调用 OS 窗口 API。
+/// 保持纯逻辑,不依赖 `winit`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowAction {
+    /// 关闭窗口。
+    Close,
+    /// 最小化窗口。
+    Minimize,
+    /// 最大化或还原窗口。
+    MaximizeOrRestore,
+    /// 开始拖拽移动窗口。
+    Drag,
+}

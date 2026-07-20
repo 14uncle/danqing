@@ -6,7 +6,7 @@
 //! 验证阶段 1 设计系统对外 API 的行为:
 //! - `LightTheme` token 自洽;
 //! - 主题化组件(`Box`/`Button`/`TextInput`/`TextArea`/`Scrollable`)实际使用 theme token 绘制;
-//! - `TitleBar` 提供命中区域并消费按钮区鼠标事件;
+//! - `TitleBar` 提供命中区域，消费按钮区与拖拽区鼠标事件并产出 `WindowAction`;
 //! - `BackgroundConfig` 与 `ScaleMode` 构造符合预期。
 
 use danqing::widget::{
@@ -15,7 +15,7 @@ use danqing::widget::{
 };
 use danqing::{
     BackgroundConfig, Color, Constraints, Event, LightTheme, MouseButton, Point, Rect, ScaleMode,
-    Size, Theme, WindowConfig,
+    Size, Theme, WindowAction, WindowConfig,
 };
 
 fn approx_eq(a: f32, b: f32) -> bool {
@@ -197,9 +197,9 @@ fn title_bar_close_button_consumes_mouse_event() {
 }
 
 #[test]
-fn title_bar_left_click_outside_buttons_is_ignored() {
+fn title_bar_left_click_outside_buttons_emits_drag() {
     let t = LightTheme;
-    let mut bar = TitleBar::themed(&t, "丹青");
+    let mut bar = TitleBar::themed(&t, "丹青").on_drag(|| WindowAction::Drag);
     let mut texts = danqing::TextBatch::new();
     bar.layout(Constraints::tight(Size::new(400.0, 40.0)), &mut texts);
 
@@ -217,7 +217,10 @@ fn title_bar_left_click_outside_buttons_is_ignored() {
         &mut msgs,
     );
 
-    assert_eq!(result, EventResult::Ignored);
+    assert_eq!(result, EventResult::Consumed);
+    assert_eq!(msgs.len(), 1);
+    let action = msgs[0].downcast_ref::<WindowAction>().unwrap();
+    assert_eq!(*action, WindowAction::Drag);
 }
 
 #[test]

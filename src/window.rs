@@ -19,7 +19,7 @@ use winit::{
 };
 
 use crate::app::{AnimationCtx, App};
-use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
+use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey, WindowAction};
 use crate::render::{BackgroundConfig, Context, RectBatch, TextBatch};
 use crate::widget::{
     FocusManager, MsgQueue, Node, event_at_path, ime_area_at_path, selected_text_at_path,
@@ -156,11 +156,10 @@ fn load_icon_from_png(path: &std::path::Path) -> Result<Icon, Box<dyn std::error
 
 /// 加载应用窗口图标。
 ///
-/// 尝试读取 `OUT_DIR/assets/logo/logo_256.png`(由 `build.rs` 生成);
+/// 尝试读取 `assets/logo/logo_256.png`;
 /// 失败时记录警告并返回 `None`,避免窗口创建因图标问题而 panic。
 fn load_window_icon() -> Option<Icon> {
-    let path = std::path::Path::new(env!("OUT_DIR"))
-        .join("assets")
+    let path = std::path::Path::new("assets")
         .join("logo")
         .join("logo_256.png");
     match load_icon_from_png(&path) {
@@ -371,6 +370,34 @@ impl<A: App> Handler<'_, A> {
         self.clipboard().map(|cb| cb.get_text().unwrap_or_default())
     }
 
+    /// 处理自绘标题栏等组件产出的窗口控制动作。
+    fn handle_window_action(&mut self, action: WindowAction, event_loop: &ActiveEventLoop) {
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        match action {
+            WindowAction::Close => {
+                log::info!("标题栏关闭窗口");
+                window.set_visible(false);
+                event_loop.exit();
+            }
+            WindowAction::Minimize => {
+                log::info!("标题栏最小化窗口");
+                window.set_minimized(true);
+            }
+            WindowAction::MaximizeOrRestore => {
+                let maximized = window.is_maximized();
+                log::info!("标题栏最大化/还原窗口: {}", !maximized);
+                window.set_maximized(!maximized);
+            }
+            WindowAction::Drag => {
+                if let Err(err) = window.drag_window() {
+                    log::warn!("拖拽窗口失败: {err}");
+                }
+            }
+        }
+    }
+
     /// 根据当前焦点更新 IME 状态与光标区域。
     fn update_ime(&self) {
         let Some(window) = self.window.as_ref() else {
@@ -409,6 +436,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 f64::from(self.config.size.width),
                 f64::from(self.config.size.height),
             ));
+        // Windows 使用自绘标题栏,其他平台保留原生标题栏作为降级。
+        #[cfg(target_os = "windows")]
+        let attrs = attrs.with_decorations(false);
         let window = match event_loop.create_window(attrs) {
             Ok(window) => Arc::new(window),
             Err(err) => {
@@ -486,7 +516,16 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         }
 
         // 消费组件产出的消息
-        for boxed in self.msgs.drain(..) {
+        let msgs: Vec<_> = self.msgs.drain(..).collect();
+        for boxed in msgs {
+            // 先尝试识别窗口控制动作(如自绘标题栏发出的 Close/Minimize/Maximize/Drag)
+            let boxed = match boxed.downcast::<WindowAction>() {
+                Ok(action) => {
+                    self.handle_window_action(*action, event_loop);
+                    continue;
+                }
+                Err(b) => b,
+            };
             match boxed.downcast::<A::Msg>() {
                 Ok(msg) => self.app.update(*msg),
                 Err(_) => log::warn!("丢弃类型不匹配的消息"),
@@ -613,20 +652,14 @@ mod tests {
 
     #[test]
     fn load_icon_from_valid_png_succeeds() {
-        let path = PathBuf::from(env!("OUT_DIR"))
-            .join("assets")
-            .join("logo")
-            .join("logo_256.png");
+        let path = PathBuf::from("assets").join("logo").join("logo_256.png");
         let icon = load_icon_from_png(&path);
         assert!(icon.is_ok(), "应能加载有效 PNG 图标: {icon:?}");
     }
 
     #[test]
     fn load_icon_from_missing_path_returns_error() {
-        let path = PathBuf::from(env!("OUT_DIR"))
-            .join("assets")
-            .join("logo")
-            .join("nonexistent.png");
+        let path = PathBuf::from("assets").join("logo").join("nonexistent.png");
         let icon = load_icon_from_png(&path);
         assert!(icon.is_err());
     }
