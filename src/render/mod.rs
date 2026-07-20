@@ -211,13 +211,23 @@ impl Context {
             height: self.config.height as f32,
             clear_color: self.clear_color,
         };
+        let has_background = self
+            .background_pipeline
+            .as_ref()
+            .is_some_and(|bg| bg.has_background());
         if let Some(bg) = self.background_pipeline.as_mut() {
             if bg.has_background() {
                 bg.draw(&self.queue, &mut encoder, &target);
             }
         }
-        self.rect_pipeline
-            .draw(&self.device, &self.queue, &mut encoder, &target, rects);
+        self.rect_pipeline.draw(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &target,
+            rects,
+            !has_background,
+        );
         self.text_pipeline
             .draw(&self.device, &self.queue, &mut encoder, &target, texts);
         self.queue.submit([encoder.finish()]);

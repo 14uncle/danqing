@@ -578,7 +578,10 @@ impl RectPipeline {
         self.capacity = new_capacity;
     }
 
-    /// 开始 render pass(以 clear_color 清屏)并绘制收集到的全部矩形。
+    /// 开始 render pass 并绘制收集到的全部矩形。
+    ///
+    /// `clear` 为 true 时以 `target.clear_color` 清屏; 为 false 时保留已有内容,
+    /// 用于背景图已绘制的情况。
     pub fn draw(
         &mut self,
         device: &wgpu::Device,
@@ -586,6 +589,7 @@ impl RectPipeline {
         encoder: &mut wgpu::CommandEncoder,
         target: &DrawTarget,
         batch: &RectBatch,
+        clear: bool,
     ) {
         self.write_screen_uniform(queue, target.width, target.height);
         self.ensure_capacity(device, batch.len());
@@ -597,18 +601,24 @@ impl RectPipeline {
             );
         }
 
+        let load = if clear {
+            wgpu::LoadOp::Clear(wgpu::Color {
+                r: f64::from(target.clear_color.r),
+                g: f64::from(target.clear_color.g),
+                b: f64::from(target.clear_color.b),
+                a: f64::from(target.clear_color.a),
+            })
+        } else {
+            wgpu::LoadOp::Load
+        };
+
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("rect pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target.view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: f64::from(target.clear_color.r),
-                        g: f64::from(target.clear_color.g),
-                        b: f64::from(target.clear_color.b),
-                        a: f64::from(target.clear_color.a),
-                    }),
+                    load,
                     store: wgpu::StoreOp::Store,
                 },
                 depth_slice: None,
