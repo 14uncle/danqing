@@ -442,3 +442,43 @@ fn load_texture(
         height,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn background_config_default_is_empty() {
+        let cfg = BackgroundConfig::default();
+        assert!(cfg.image.is_none());
+        assert!(cfg.noise.is_none());
+        assert_eq!(cfg.scale, ScaleMode::Stretch);
+        assert!((cfg.noise_opacity - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn background_config_chaining() {
+        let cfg = BackgroundConfig::with_image("gradient.png")
+            .with_noise("noise.png", 0.08)
+            .scale(ScaleMode::Cover);
+
+        assert_eq!(cfg.image.as_ref().unwrap().as_os_str(), "gradient.png");
+        assert_eq!(cfg.noise.as_ref().unwrap().as_os_str(), "noise.png");
+        assert_eq!(cfg.scale, ScaleMode::Cover);
+        assert!((cfg.noise_opacity - 0.08).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn background_config_noise_opacity_is_clamped() {
+        let high = BackgroundConfig::with_image("bg.png").with_noise("noise.png", 1.5);
+        assert!((high.noise_opacity - 1.0).abs() < f32::EPSILON);
+
+        let low = BackgroundConfig::with_image("bg.png").with_noise("noise.png", -0.5);
+        assert!((low.noise_opacity - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scale_mode_default_is_stretch() {
+        assert_eq!(ScaleMode::default(), ScaleMode::Stretch);
+    }
+}

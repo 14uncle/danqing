@@ -1,11 +1,11 @@
-// ! @author 十四叔
-// ! @date 2026/07/19
+//! @author 十四叔
+//! @date 2026/07/19
 
-// ! 丹青 showcase —— 阶段 1 毛玻璃演示页。
-// !
-// ! 本示例是唯一且持续生长的演示程序: 框架每落地一项能力,
-// ! 就在这里展示一项 (以用代测)。当前使用 LightTheme 与主题化组件,
-// ! 呈现统一的浅色毛玻璃视觉。
+//! 丹青 showcase —— 阶段 1 毛玻璃演示页。
+//!
+//! 本示例是唯一且持续生长的演示程序: 框架每落地一项能力,
+//! 就在这里展示一项 (以用代测)。当前使用 LightTheme 与主题化组件,
+//! 呈现统一的浅色毛玻璃视觉。
 
 use danqing::widget::{
     self, Box as UiBox, Button, Center, Column, EventResult, MsgQueue, Node, Padding, Row,

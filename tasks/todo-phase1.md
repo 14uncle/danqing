@@ -32,9 +32,9 @@
 - [x] TitleBar、背景、组件圆角/阴影一致
 
 ## Phase 6: Testing & Acceptance
-- [ ] **Task 11** 编写设计系统测试 + 最终验收（依赖 10）— `cargo fmt` / `clippy -D warnings` / `test` / `build --release` 全绿
+- [x] **Task 11** 编写设计系统测试 + 最终验收（依赖 10）— `cargo fmt` / `clippy -D warnings` / `test` / `build --release` 全绿
 
 ### ⏸ Checkpoint Complete: 阶段 1 关闭
-- [ ] spec Success Criteria 10/10 通过
-- [ ] 全部 Commands 绿；`tasks/todo-phase1.md` 全部勾选
-- [ ] 人工终审，阶段 1 关闭
+- [x] spec Success Criteria 10/10 通过
+- [x] 全部 Commands 绿；`tasks/todo-phase1.md` 全部勾选
+- [x] 人工终审，阶段 1 关闭

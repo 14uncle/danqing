@@ -49,16 +49,16 @@
   - **Estimated scope:** S
 
 ### Phase 3: 测试与验收
-- [ ] **Task 3: 补充设计系统测试**
+- [x] **Task 3: 补充设计系统测试**
   - **Description:** 在 `tests/design_system.rs` 增加背景图配置构造、showcase 组件树使用 theme 等断言,并补全 `theme.rs` / 各 widget 模块的单元测试。
   - **Acceptance criteria:**
-    - [ ] `tests/design_system.rs` 覆盖 theme token、组件应用 theme、TitleBar 命中、BackgroundConfig 构造。
-    - [ ] `cargo test` 全绿。
-    - [ ] `cargo fmt --check` / `cargo clippy -- -D warnings` / `cargo build --release` 通过。
+    - [x] `tests/design_system.rs` 覆盖 theme token、组件应用 theme、TitleBar 命中、BackgroundConfig 构造。
+    - [x] `cargo test` 全绿。
+    - [x] `cargo fmt --check` / `cargo clippy -- -D warnings` / `cargo build --release` 通过。
   - **Verification:**
-    - [ ] `cargo test --lib --tests`
-    - [ ] `cargo clippy -- -D warnings`
-    - [ ] `cargo build --release`
+    - [x] `cargo test --lib --tests`
+    - [x] `cargo clippy -- -D warnings`
+    - [x] `cargo build --release`
   - **Dependencies:** Task 2
   - **Files likely touched:**
     - `tests/design_system.rs`
@@ -69,9 +69,9 @@
 
 ### Checkpoint: 阶段 1 背景图能力关闭
 - [x] `cargo build --example showcase` 通过。
-- [ ] `cargo run --example showcase` 能看到统一毛玻璃视觉与背景图(人工确认)。
-- [ ] 全部 Commands 绿。
-- [ ] 人工终审,阶段 1 背景图相关验收通过。
+- [x] `cargo run --example showcase` 能看到统一毛玻璃视觉与背景图(人工确认)。
+- [x] 全部 Commands 绿。
+- [x] 人工终审,阶段 1 背景图相关验收通过。
 
 ## Risks and Mitigations
 

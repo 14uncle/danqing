@@ -4,20 +4,20 @@
 //! 丹青设计系统 token。
 //!
 //! 本模块定义 `Theme` trait、`LightTheme` 实现及颜色、字体、间距、圆角、阴影、动效曲线等 token。
-//! 所有值为纯逻辑,不依赖平台或图形 API。
+//! 所有值为纯逻辑, 不依赖平台或图形 API。
 
 use crate::{Color, Point};
 
 /// 阴影描述。
 ///
-/// 目前由偏移、模糊半径与颜色组成;后续渲染管线可据此生成阴影实例。
+/// 目前由偏移、模糊半径与颜色组成; 后续渲染管线可据此生成阴影实例。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shadow {
     /// 阴影相对于组件的偏移。
     pub offset: Point,
-    /// 模糊半径(逻辑像素)。
+    /// 模糊半径 (逻辑像素)。
     pub blur_radius: f32,
-    /// 阴影颜色(通常含透明度)。
+    /// 阴影颜色 (通常含透明度)。
     pub color: Color,
 }
 
@@ -32,21 +32,21 @@ pub enum Easing {
 
 /// 主题接口。
 ///
-/// 定义一套面向效率工具的现代毛玻璃浅色设计 token;后续可扩展 `DarkTheme`。
+/// 定义一套面向效率工具的现代毛玻璃浅色设计 token; 后续可扩展 `DarkTheme`。
 pub trait Theme: Clone + Copy + std::fmt::Debug {
-    /// 窗口/页面背景色。
+    /// 窗口 / 页面背景色。
     fn background(&self) -> Color;
-    /// 表面浮层色(卡片、输入框背景)。
+    /// 表面浮层色 (卡片、输入框背景)。
     fn surface(&self) -> Color;
-    /// 次级表面色(悬停、禁用背景)。
+    /// 次级表面色 (悬停、禁用背景)。
     fn surface_variant(&self) -> Color;
-    /// 主强调色(按钮、光标、选区)。
+    /// 主强调色 (按钮、光标、选区)。
     fn accent(&self) -> Color;
     /// 主要文字色。
     fn text_primary(&self) -> Color;
-    /// 次级文字色(提示、占位)。
+    /// 次级文字色 (提示、占位)。
     fn text_secondary(&self) -> Color;
-    /// 分割线/边框色。
+    /// 分割线 / 边框色。
     fn divider(&self) -> Color;
     /// 组件边框色。
     fn border(&self) -> Color;
@@ -54,10 +54,10 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     fn selection(&self) -> Color;
     /// 光标色。
     fn caret(&self) -> Color;
-    /// 危险/关闭按钮色。
+    /// 危险 / 关闭按钮色。
     fn danger(&self) -> Color;
 
-    /// 小字号(如提示、标签)。
+    /// 小字号 (如提示、标签)。
     fn font_size_small(&self) -> u16;
     /// 正文字号。
     fn font_size_body(&self) -> u16;
@@ -75,16 +75,16 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     /// 超大间距。
     fn spacing_xl(&self) -> f32;
 
-    /// 小圆角(如输入框)。
+    /// 小圆角 (如输入框)。
     fn radius_sm(&self) -> f32;
-    /// 中圆角(如按钮)。
+    /// 中圆角 (如按钮)。
     fn radius_md(&self) -> f32;
-    /// 大圆角(如卡片)。
+    /// 大圆角 (如卡片)。
     fn radius_lg(&self) -> f32;
 
-    /// 小阴影(如输入框)。
+    /// 小阴影 (如输入框)。
     fn shadow_sm(&self) -> Shadow;
-    /// 中阴影(如卡片、浮层)。
+    /// 中阴影 (如卡片、浮层)。
     fn shadow_md(&self) -> Shadow;
 
     /// 标准动效曲线。
@@ -95,7 +95,7 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
 
 /// 浅色主题。
 ///
-/// 采用毛玻璃风格:低饱和度背景 + 半透明白色表面 + 蓝色强调。
+/// 采用毛玻璃风格: 低饱和度背景 + 半透明白色表面 + 蓝色强调。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LightTheme;
 

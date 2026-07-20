@@ -156,7 +156,7 @@ Task 10 Showcase 整合（依赖 3/4/5/6/7/8/9）
 
 ### Phase 6: Testing & Acceptance — 验收
 
-- [ ] **Task 11: 编写设计系统测试并做最终验收**
+- [x] **Task 11: 编写设计系统测试并做最终验收**
   - **Description:** 新增 `tests/design_system.rs` 集成测试；补充各模块单元测试；最终运行 fmt/clippy/test。
   - **Acceptance criteria:**
     - [ ] `tests/design_system.rs` 覆盖 theme token 非空、组件应用 theme、标题栏命中区域。
