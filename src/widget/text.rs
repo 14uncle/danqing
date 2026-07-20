@@ -7,7 +7,7 @@ use std::any::Any;
 
 use crate::render::{RectBatch, TextBatch};
 use crate::widget::Widget;
-use crate::{Color, Constraints, Rect, Size};
+use crate::{Color, Constraints, LightTheme, Rect, Size, Theme};
 
 /// 文本绑定闭包:从类型擦除的应用状态产出显示内容。
 type TextBinding = Box<dyn Fn(&dyn Any) -> String>;
@@ -24,12 +24,12 @@ pub struct Text {
 }
 
 impl Text {
-    /// 创建静态文本组件,默认字号 16、颜色为不透明黑色。
+    /// 创建静态文本组件,默认字号为浅色主题正文字号、颜色为不透明黑色。
     pub fn new(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
             binding: None,
-            font_size: 16,
+            font_size: LightTheme.font_size_body(),
             color: Color::BLACK,
         }
     }
