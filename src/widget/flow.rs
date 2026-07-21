@@ -72,6 +72,25 @@ impl Axis {
             },
         }
     }
+
+    /// 交叉轴拉伸约束(开启 cross_stretch 的 Fit 子项):
+    /// 交叉轴固定为容器交叉尺寸,主轴保持宽松以保留自然主轴尺寸。
+    fn stretch_constraints(self, main_max: f32, cross: f32) -> Constraints {
+        match self {
+            Axis::Horizontal => Constraints {
+                min_width: 0.0,
+                max_width: main_max,
+                min_height: cross,
+                max_height: cross,
+            },
+            Axis::Vertical => Constraints {
+                min_width: cross,
+                max_width: cross,
+                min_height: 0.0,
+                max_height: main_max,
+            },
+        }
+    }
 }
 
 /// 单轴流式容器的状态(Column/Row 共用)。
@@ -82,6 +101,8 @@ pub struct Flow {
     weights: Vec<u32>,
     /// 子项间距。
     gap: f32,
+    /// 是否把 Fit 子项拉伸到容器交叉尺寸(默认 false,保持自然尺寸)。
+    cross_stretch: bool,
     /// layout 阶段缓存:各子组件相对容器原点的摆放矩形。
     areas: Vec<Rect>,
 }
@@ -92,8 +113,19 @@ impl Flow {
             children: Vec::new(),
             weights: Vec::new(),
             gap,
+            cross_stretch: false,
             areas: Vec::new(),
         }
+    }
+
+    /// 设置子项间距。
+    pub fn set_gap(&mut self, gap: f32) {
+        self.gap = gap;
+    }
+
+    /// 开关 Fit 子项的交叉轴拉伸。
+    pub fn set_cross_stretch(&mut self, cross_stretch: bool) {
+        self.cross_stretch = cross_stretch;
     }
 
     pub fn push(&mut self, child: Node, weight: u32) {
@@ -152,7 +184,14 @@ impl Flow {
         {
             let (offset, main_size) = dist[i];
             let child_size = if *weight == 0 {
-                axis.make_size(main_size, fit_cross[i])
+                if self.cross_stretch {
+                    // Fit 子项拉伸:交叉轴 tight 为容器交叉尺寸,重新布局。
+                    // 主轴保持宽松,绝大多数组件的主轴尺寸与交叉轴无关,
+                    // 因此第一遍算出的主轴分配仍然成立。
+                    child.layout(axis.stretch_constraints(main_max, cross_max), texts)
+                } else {
+                    axis.make_size(main_size, fit_cross[i])
+                }
             } else {
                 has_fill = true;
                 child.layout(axis.fill_constraints(main_size, cross_max), texts)
@@ -185,11 +224,27 @@ impl Flow {
             event,
             crate::event::Event::CursorMoved(_) | crate::event::Event::CursorLeft
         );
+        if broadcast {
+            // 广播必须送达每个子组件 (各自维护 hover 等状态);
+            // 某个子组件消费事件不得阻止其余子组件接收。
+            let mut consumed = false;
+            for (child, area) in self.children.iter_mut().zip(self.areas.iter()).rev() {
+                let child_area = area.translate(origin.x, origin.y);
+                if child.event(event, child_area, msgs) == EventResult::Consumed {
+                    consumed = true;
+                }
+            }
+            return if consumed {
+                EventResult::Consumed
+            } else {
+                EventResult::Ignored
+            };
+        }
         // 后绘制者(z 序靠上)优先命中
         for (child, area) in self.children.iter_mut().zip(self.areas.iter()).rev() {
             let child_area = area.translate(origin.x, origin.y);
             let hit = event.position().is_none_or(|p| child_area.contains(p));
-            if (broadcast || hit) && child.event(event, child_area, msgs) == EventResult::Consumed {
+            if hit && child.event(event, child_area, msgs) == EventResult::Consumed {
                 return EventResult::Consumed;
             }
         }
@@ -201,10 +256,131 @@ impl Flow {
 mod tests {
     use super::*;
     use crate::Color;
-    use crate::widget::{Box as UiBox, node};
+    use crate::event::{Event, MouseButton};
+    use crate::widget::{Box as UiBox, EventResult, MsgQueue, Widget, node};
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     fn screen(w: f32, h: f32) -> Constraints {
         Constraints::tight(Size::new(w, h))
+    }
+
+    /// 测试用记录组件: 记录是否收到事件, 并按配置返回消费结果。
+    struct Recorder {
+        received: Rc<RefCell<bool>>,
+        consume: bool,
+    }
+
+    impl Widget for Recorder {
+        fn layout(&mut self, constraints: Constraints, _texts: &mut TextBatch) -> Size {
+            constraints.constrain(Size::new(10.0, 10.0))
+        }
+
+        fn paint(&self, _area: Rect, _rects: &mut crate::RectBatch, _texts: &mut TextBatch) {}
+
+        fn event(&mut self, _event: &Event, _area: Rect, _msgs: &mut MsgQueue) -> EventResult {
+            *self.received.borrow_mut() = true;
+            if self.consume {
+                EventResult::Consumed
+            } else {
+                EventResult::Ignored
+            }
+        }
+    }
+
+    #[test]
+    fn broadcast_reaches_all_children_even_if_one_consumes() {
+        let mut texts = TextBatch::new();
+        let mut flow = Flow::new(0.0);
+        let first_seen = Rc::new(RefCell::new(false));
+        let second_seen = Rc::new(RefCell::new(false));
+        // 先压入的先绘制; 广播按 rev 顺序, 后压入者先收到事件并消费。
+        flow.push(
+            node(Recorder {
+                received: Rc::clone(&first_seen),
+                consume: false,
+            }),
+            0,
+        );
+        flow.push(
+            node(Recorder {
+                received: Rc::clone(&second_seen),
+                consume: true,
+            }),
+            0,
+        );
+        flow.layout(Axis::Vertical, screen(100.0, 100.0), &mut texts);
+
+        let mut msgs = MsgQueue::new();
+        let result = flow.event(
+            crate::Point::ZERO,
+            &Event::CursorMoved(crate::Point::new(5.0, 15.0)),
+            &mut msgs,
+        );
+
+        assert!(*second_seen.borrow(), "后绘制的子组件应先收到广播并消费");
+        assert!(
+            *first_seen.borrow(),
+            "广播不得因兄弟组件消费而中断 (标题栏 hover 依赖此语义)"
+        );
+        assert_eq!(result, EventResult::Consumed);
+    }
+
+    #[test]
+    fn hit_dispatch_skips_children_outside_position() {
+        let mut texts = TextBatch::new();
+        let mut flow = Flow::new(0.0);
+        let first_seen = Rc::new(RefCell::new(false));
+        let second_seen = Rc::new(RefCell::new(false));
+        flow.push(
+            node(Recorder {
+                received: Rc::clone(&first_seen),
+                consume: false,
+            }),
+            0,
+        );
+        flow.push(
+            node(Recorder {
+                received: Rc::clone(&second_seen),
+                consume: true,
+            }),
+            0,
+        );
+        flow.layout(Axis::Vertical, screen(100.0, 100.0), &mut texts);
+
+        let mut msgs = MsgQueue::new();
+        // 命中第一个子组件 (y 0..10), 第二个 (y 10..20) 不应收到。
+        let result = flow.event(
+            crate::Point::ZERO,
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: crate::Point::new(5.0, 5.0),
+            },
+            &mut msgs,
+        );
+
+        assert!(*first_seen.borrow(), "被命中的子组件应收到事件");
+        assert!(!*second_seen.borrow(), "未命中的子组件不应收到事件");
+        assert_eq!(result, EventResult::Ignored);
+    }
+
+    #[test]
+    fn column_cross_stretch_expands_fit_children() {
+        // 开启交叉轴拉伸后,Fit 子项的交叉尺寸扩到容器交叉尺寸(最宽子项)。
+        let mut texts = TextBatch::new();
+        let mut flow = Flow::new(10.0);
+        flow.set_cross_stretch(true);
+        flow.push(node(UiBox::new(Color::BLACK).size(50.0, 30.0)), 0);
+        flow.push(node(UiBox::new(Color::BLACK).size(80.0, 20.0)), 0);
+        let size = flow.layout(
+            Axis::Vertical,
+            Constraints::loose(Size::new(200.0, 400.0)),
+            &mut texts,
+        );
+        assert_eq!(size, Size::new(80.0, 60.0));
+        assert_eq!(flow.areas[0], Rect::from_xywh(0.0, 0.0, 80.0, 30.0));
+        assert_eq!(flow.areas[1], Rect::from_xywh(0.0, 40.0, 80.0, 20.0));
     }
 
     #[test]
