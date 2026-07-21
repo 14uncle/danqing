@@ -19,9 +19,6 @@ log = "0.4"
 arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-[build-dependencies]
-image = { version = "0.25", default-features = false, features = ["png", "ico"] }
-
 [dev-dependencies]
 anyhow = "1"
 env_logger = "0.11"

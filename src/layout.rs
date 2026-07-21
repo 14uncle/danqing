@@ -123,6 +123,16 @@ impl Rect {
         self.size.width <= 0.0 || self.size.height <= 0.0
     }
 
+    /// 将矩形四边各内缩指定量。
+    pub fn inset(&self, amount: f32) -> Self {
+        Self::from_xywh(
+            self.origin.x + amount,
+            self.origin.y + amount,
+            (self.size.width - amount * 2.0).max(0.0),
+            (self.size.height - amount * 2.0).max(0.0),
+        )
+    }
+
     /// 求两个矩形的交集。
     ///
     /// 若不相交或仅边界接触,返回 `None`。
@@ -331,6 +341,17 @@ mod tests {
         assert!(Rect::from_xywh(0.0, 0.0, 0.0, 10.0).is_empty());
         assert!(Rect::from_xywh(0.0, 0.0, 10.0, 0.0).is_empty());
         assert!(!Rect::from_xywh(0.0, 0.0, 10.0, 10.0).is_empty());
+    }
+
+    #[test]
+    fn rect_inset() {
+        let rect = Rect::from_xywh(10.0, 20.0, 100.0, 80.0);
+        let inset = rect.inset(10.0);
+        assert_eq!(inset, Rect::from_xywh(20.0, 30.0, 80.0, 60.0));
+
+        // 内缩量过大时夹到零,避免负尺寸。
+        let clamped = rect.inset(60.0);
+        assert_eq!(clamped, Rect::from_xywh(70.0, 80.0, 0.0, 0.0));
     }
 
     #[test]

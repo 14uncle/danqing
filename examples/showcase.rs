@@ -1,11 +1,11 @@
-// ! @author 十四叔
-// ! @date 2026/07/19
+//! @author 十四叔
+//! @date 2026/07/19
 
-// ! 丹青 showcase —— 阶段 1 毛玻璃演示页。
-// !
-// ! 本示例是唯一且持续生长的演示程序: 框架每落地一项能力,
-// ! 就在这里展示一项 (以用代测)。当前使用 LightTheme 与主题化组件,
-// ! 呈现统一的浅色毛玻璃视觉。
+//! 丹青 showcase —— 阶段 1 毛玻璃演示页。
+//!
+//! 本示例是唯一且持续生长的演示程序: 框架每落地一项能力,
+//! 就在这里展示一项 (以用代测)。当前使用 LightTheme 与主题化组件,
+//! 呈现统一的浅色毛玻璃视觉。
 
 use danqing::widget::{
     self, Box as UiBox, Button, Column, EventResult, MsgQueue, Node, Padding, Row, Scrollable,
@@ -254,15 +254,12 @@ fn keyboard_card(t: &LightTheme) -> impl Widget + 'static {
         .child(
             UiBox::themed(t)
                 .size(KEYBOARD_AREA.width, KEYBOARD_AREA.height)
-                .child(
-                    Positioned::bind(
-                        |s: &Showcase| s.square_pos,
-                        UiBox::new(t.accent())
-                            .size(SQUARE_SIZE, SQUARE_SIZE)
-                            .radius(t.radius_md()),
-                    )
-                    .hoverable(false),
-                ),
+                .child(Positioned::bind(
+                    |s: &Showcase| s.square_pos,
+                    UiBox::new(t.accent())
+                        .size(SQUARE_SIZE, SQUARE_SIZE)
+                        .radius(t.radius_md()),
+                )),
         )
         .child(
             Text::bind(|s: &Showcase| format!("最后按键: {}", s.last_key))
@@ -271,16 +268,16 @@ fn keyboard_card(t: &LightTheme) -> impl Widget + 'static {
         )
 }
 
-/// 定位绑定函数类型。
-type PositionBinding = Box<dyn Fn(&Showcase) -> Point>;
-
 /// 绝对 / 相对定位容器: 把子组件按状态绑定的偏移量平移。
 ///
 /// 本组件为 showcase 键盘演示专用, 放在示例文件中以保持框架核心精简。
+///
+/// 注意: 本组件的绘制与事件区域随偏移量平移, 可能超出自身布局矩形;
+/// 父容器不得按布局矩形对其裁剪。
 struct Positioned {
     child: Node,
     offset: Point,
-    binding: Option<PositionBinding>,
+    binding: std::boxed::Box<dyn Fn(&Showcase) -> Point>,
     child_size: Size,
 }
 
@@ -290,28 +287,19 @@ impl Positioned {
         Self {
             child: Box::new(child),
             offset: Point::ZERO,
-            binding: Some(Box::new(f)),
+            binding: Box::new(f),
             child_size: Size::ZERO,
         }
-    }
-
-    /// 关闭 hover/pressed 交互效果 (键盘区方块不需要)。
-    fn hoverable(self, hoverable: bool) -> Self {
-        // 当前实现本身无交互效果, 保留接口以兼容调用链。
-        let _ = hoverable;
-        self
     }
 }
 
 impl Widget for Positioned {
     fn sync(&mut self, state: &dyn std::any::Any) {
         self.child.sync(state);
-        if let Some(binding) = &self.binding {
-            let state = state
-                .downcast_ref::<Showcase>()
-                .expect("Positioned 绑定状态类型不匹配");
-            self.offset = binding(state);
-        }
+        let state = state
+            .downcast_ref::<Showcase>()
+            .expect("Positioned 绑定状态类型不匹配");
+        self.offset = (self.binding)(state);
     }
 
     fn layout(
@@ -338,6 +326,14 @@ impl Widget for Positioned {
         let origin = Point::new(area.origin.x + self.offset.x, area.origin.y + self.offset.y);
         self.child
             .event(event, danqing::Rect::new(origin, self.child_size), msgs)
+    }
+
+    fn children(&self) -> &[Node] {
+        std::slice::from_ref(&self.child)
+    }
+
+    fn children_mut(&mut self) -> &mut [Node] {
+        std::slice::from_mut(&mut self.child)
     }
 }
 

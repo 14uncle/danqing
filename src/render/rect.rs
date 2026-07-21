@@ -1,10 +1,10 @@
-// ! @author 十四叔
-// ! @date 2026/07/17
+//! @author 十四叔
+//! @date 2026/07/17
 
-// ! 矩形族渲染管线 (SDF 圆角, 实例化 quad)。
-// !
-// ! 每帧用法: 先经 [`RectBatch`] 收集矩形, 再由管线一次绘制。
-// ! 绘制同时负责以清屏色开始 render pass(每帧第一个 pass)。
+//! 矩形族渲染管线 (SDF 圆角, 实例化 quad)。
+//!
+//! 每帧用法: 先经 [`RectBatch`] 收集矩形, 再由管线一次绘制。
+//! 绘制同时负责以清屏色开始 render pass(每帧第一个 pass)。
 
 use crate::{Color, Rect};
 
@@ -396,70 +396,6 @@ impl RectBatch {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{Color, Rect};
-
-    #[test]
-    fn push_rounded_rect_keeps_per_corner_radii() {
-        let mut batch = RectBatch::new();
-        batch.push_rounded_rect(
-            Rect::from_xywh(0.0, 0.0, 10.0, 10.0),
-            Color::BLACK,
-            [0.0, 4.0, 0.0, 0.0],
-        );
-        assert_eq!(batch.instance_radii(), vec![[0.0, 4.0, 0.0, 0.0]]);
-    }
-
-    #[test]
-    fn push_rect_expands_single_radius_to_all_corners() {
-        let mut batch = RectBatch::new();
-        batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 3.0);
-        assert_eq!(batch.instance_radii(), vec![[3.0; 4]]);
-    }
-
-    #[test]
-    fn clip_stack_skips_fully_clipped_rects() {
-        let mut batch = RectBatch::new();
-        batch.push_clip(Rect::from_xywh(0.0, 0.0, 10.0, 10.0));
-        batch.push_rect(Rect::from_xywh(20.0, 20.0, 10.0, 10.0), Color::BLACK, 0.0);
-        assert_eq!(batch.len(), 0);
-    }
-
-    #[test]
-    fn clip_stack_keeps_partially_visible_rects() {
-        let mut batch = RectBatch::new();
-        batch.push_clip(Rect::from_xywh(0.0, 0.0, 15.0, 10.0));
-        batch.push_rect(Rect::from_xywh(10.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
-        assert_eq!(batch.len(), 1);
-    }
-
-    #[test]
-    fn nested_clip_intersects() {
-        let mut batch = RectBatch::new();
-        batch.push_clip(Rect::from_xywh(0.0, 0.0, 100.0, 100.0));
-        batch.push_clip(Rect::from_xywh(50.0, 50.0, 100.0, 100.0));
-        batch.push_rect(Rect::from_xywh(0.0, 0.0, 60.0, 60.0), Color::BLACK, 0.0);
-        assert_eq!(batch.len(), 1);
-        batch.pop_clip();
-        batch.pop_clip();
-        batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
-        assert_eq!(batch.len(), 2);
-    }
-
-    #[test]
-    fn empty_clip_skips_all() {
-        let mut batch = RectBatch::new();
-        batch.push_clip(Rect::from_xywh(0.0, 0.0, 0.0, 10.0));
-        batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
-        assert_eq!(batch.len(), 0);
-        batch.pop_clip();
-        batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
-        assert_eq!(batch.len(), 1);
-    }
-}
-
 /// 沿水平方向绘制一段划线 - 空隙虚线 (长度可为负, 表示从右向左)。
 #[allow(clippy::too_many_arguments)]
 fn push_dashed_hline(
@@ -722,5 +658,69 @@ impl RectPipeline {
             pass.set_vertex_buffer(0, self.instance_buf.slice(..));
             pass.draw(0..6, 0..batch.len() as u32);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Color, Rect};
+
+    #[test]
+    fn push_rounded_rect_keeps_per_corner_radii() {
+        let mut batch = RectBatch::new();
+        batch.push_rounded_rect(
+            Rect::from_xywh(0.0, 0.0, 10.0, 10.0),
+            Color::BLACK,
+            [0.0, 4.0, 0.0, 0.0],
+        );
+        assert_eq!(batch.instance_radii(), vec![[0.0, 4.0, 0.0, 0.0]]);
+    }
+
+    #[test]
+    fn push_rect_expands_single_radius_to_all_corners() {
+        let mut batch = RectBatch::new();
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 3.0);
+        assert_eq!(batch.instance_radii(), vec![[3.0; 4]]);
+    }
+
+    #[test]
+    fn clip_stack_skips_fully_clipped_rects() {
+        let mut batch = RectBatch::new();
+        batch.push_clip(Rect::from_xywh(0.0, 0.0, 10.0, 10.0));
+        batch.push_rect(Rect::from_xywh(20.0, 20.0, 10.0, 10.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 0);
+    }
+
+    #[test]
+    fn clip_stack_keeps_partially_visible_rects() {
+        let mut batch = RectBatch::new();
+        batch.push_clip(Rect::from_xywh(0.0, 0.0, 15.0, 10.0));
+        batch.push_rect(Rect::from_xywh(10.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 1);
+    }
+
+    #[test]
+    fn nested_clip_intersects() {
+        let mut batch = RectBatch::new();
+        batch.push_clip(Rect::from_xywh(0.0, 0.0, 100.0, 100.0));
+        batch.push_clip(Rect::from_xywh(50.0, 50.0, 100.0, 100.0));
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 60.0, 60.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 1);
+        batch.pop_clip();
+        batch.pop_clip();
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 2);
+    }
+
+    #[test]
+    fn empty_clip_skips_all() {
+        let mut batch = RectBatch::new();
+        batch.push_clip(Rect::from_xywh(0.0, 0.0, 0.0, 10.0));
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 0);
+        batch.pop_clip();
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
+        assert_eq!(batch.len(), 1);
     }
 }

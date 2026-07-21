@@ -9,6 +9,11 @@ use crate::widget::{EventResult, MsgQueue, Node, Widget};
 use crate::{Constraints, Point, Rect, Size};
 
 /// 居中容器:自身占满约束上限,子组件按内容尺寸居中。
+///
+/// 注意:仅在 tight 约束(如 Fill 子项分得的空间,或父容器开启
+/// `cross_stretch` 后的交叉轴)下才真正占满并居中;loose 约束下
+/// 退化为包裹子组件内容尺寸,居中效果消失(避免独占父约束上限、
+/// 把后续兄弟挤出屏幕)。
 pub struct Center {
     child: Node,
     /// layout 缓存:子组件尺寸。
@@ -35,10 +40,20 @@ impl Widget for Center {
     }
 
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
-        self.child_size = self
-            .child
-            .layout(Constraints::loose(constraints.max()), texts);
-        constraints.constrain(constraints.max())
+        // Center 在 tight 约束(如 Fill 子项分得的空间)下占满该空间;
+        // 在 loose 约束(如 Column/Row 中按内容布局的 child)下按内容自然尺寸,
+        // 避免把后续兄弟组件挤出父容器。
+        let is_tight = constraints.min_width == constraints.max_width
+            && constraints.min_height == constraints.max_height;
+        if is_tight {
+            self.child_size = self
+                .child
+                .layout(Constraints::loose(constraints.max()), texts);
+            constraints.constrain(constraints.max())
+        } else {
+            self.child_size = self.child.layout(constraints, texts);
+            constraints.constrain(self.child_size)
+        }
     }
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {

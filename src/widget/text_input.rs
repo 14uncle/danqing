@@ -37,6 +37,12 @@ pub struct TextInput {
     padding: Edges,
     /// 背景圆角半径。
     radius: f32,
+    /// 边框颜色。
+    border_color: Color,
+    /// 获得焦点时的边框颜色。
+    focus_border_color: Color,
+    /// 边框粗细。
+    border_width: f32,
     /// 显式宽度(未指定则按约束上限)。
     width: Option<f32>,
     /// layout/paint 缓存:自身绝对矩形。
@@ -71,6 +77,9 @@ impl TextInput {
             caret_color: theme.caret(),
             padding: Edges::symmetric(theme.spacing_md(), theme.spacing_sm()),
             radius: theme.radius_sm(),
+            border_color: theme.border(),
+            focus_border_color: theme.accent(),
+            border_width: 1.0,
             width: None,
             area: Cell::new(Rect::default()),
             char_offsets: Vec::new(),
@@ -273,6 +282,14 @@ impl Widget for TextInput {
 
         // 背景
         rects.push_rect(area, self.background, self.radius);
+
+        // 边框: 聚焦时使用 accent,否则使用默认边框色。
+        let border_color = if self.focused {
+            self.focus_border_color
+        } else {
+            self.border_color
+        };
+        rects.push_rounded_border(area, border_color, self.radius, self.border_width);
 
         // 文本起点
         let text_x = area.origin.x + self.padding.left;

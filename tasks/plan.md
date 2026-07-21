@@ -1,6 +1,6 @@
 # Implementation Plan: 丹青 (danqing) M1 — 最小闭环
 
-> 依据 `docs/spec.md`(已批准,2026-07-16)与 `docs/plan.md` 细化而来。
+> 依据 `docs/specs/spec.md`(已批准,2026-07-16)与 `docs/plan.md` 细化而来。
 > 本文档将 plan.md 的 11 个步骤重排为 **14 个可验证任务**,按垂直切片组织:
 > 每个任务交付一条"从代码到像素/行为"的完整路径,而非水平分层。
 >
@@ -253,8 +253,8 @@ Task 1  脚手架 + 基础值类型 (Cargo.toml, lib.rs, layout.rs 值类型)
 ## Open Questions(阻塞性已标注)
 
 1. **[阻塞 Task 5] 内嵌回退字体如何进仓库?** spec Boundaries 写"Never 提交字体等二进制大文件",但已决方案要求"内嵌 OFL 字体兜底",二者冲突。选项:
-   - (a) **build.rs 构建期下载**(固定 URL + sha256 校验),仓库零二进制 —— 推荐,不违反边界
-   - (b) 提交得意黑(Smiley Sans,OFL,~2MB)作为**书面豁免**的唯一例外
+   - (a) ~~build.rs 构建期下载~~(已废弃:资产统一提交到 `assets/fonts/`)
+   - (b) 提交 ZCOOL XiaoWei OFL 字体到 `assets/fonts/fallback-font.ttf` 作为**书面豁免**的唯一例外 —— 当前方案
    - (c) 不内嵌,回退=用户自带路径(放弃 OQ2 的兜底决策)
 2. [不阻塞,Task 1 定] 值类型放 `src/layout.rs` 是否符合你对 spec 项目结构的理解?还是想单开 `src/geom.rs`?
 3. [不阻塞,Task 11 定] `App` trait 形态偏好:`update(msg)+view()` Elm 风格,还是 `on_event()/build()` 回调风格?docs/plan.md 的消息模型倾向前者。

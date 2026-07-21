@@ -23,7 +23,7 @@ fn deep_hover_changes_paint_color() {
             .child(
                 Row::new()
                     .gap(12.0)
-                    .fill(UiBox::new(pink).height(90.0), 2)
+                    .fill(UiBox::new(pink).height(90.0).hoverable(true), 2)
                     .fill(UiBox::new(Color::WHITE).height(90.0), 1),
             ),
     ));

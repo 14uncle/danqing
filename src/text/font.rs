@@ -5,8 +5,8 @@
 //!
 //! 本模块为纯逻辑(CPU),不接触 GPU;字形栅格化由 fontdue 完成。
 
-/// 内嵌回退字体字节(build.rs 构建期下载,仓库零二进制)。
-const FALLBACK_FONT_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/fallback-font.ttf"));
+/// 内嵌回退字体字节(位于 `assets/fonts/fallback-font.ttf`,提交在版本控制中)。
+const FALLBACK_FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/fallback-font.ttf");
 
 /// 中文系统字体候选(按优先级,覆盖 Windows/macOS/Linux)。
 const SYSTEM_CJK_CANDIDATES: &[&str] = &[

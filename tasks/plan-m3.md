@@ -1,6 +1,6 @@
 # Plan: 丹青 M3 — 滚动容器与多行文本域
 
-> 依据 `docs/spec-m3.md`（已批准，2026-07-18）  
+> 依据 `docs/specs/spec-m3.md`（已批准，2026-07-18）  
 > 状态：**已实现**（2026-07-18）
 
 ## 架构变化
@@ -54,7 +54,7 @@ M3 新增：
 - `src/widget/mod.rs`
 - `src/lib.rs`
 - `examples/showcase.rs`
-- `docs/spec-m3.md`、`tasks/todo-m3.md`、`docs/plan-m3.md`
+- `docs/specs/spec-m3.md`、`tasks/todo-m3.md`、`tasks/plan-m3.md`
 - `README.md`
 
 ## 验证命令

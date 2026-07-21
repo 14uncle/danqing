@@ -1,10 +1,10 @@
-// ! @author 十四叔
-// ! @date 2026/07/19
+//! @author 十四叔
+//! @date 2026/07/19
 
-// ! 自绘标题栏组件。
-// !
-// ! 左侧显示窗口 LOGO 与标题, 右侧提供最小化 / 最大化 / 关闭三个按钮。
-// ! 阶段 1 按钮产出 `WindowAction` 消息, 由 `window.rs` 的 `Handler` 调用 OS 窗口 API。
+//! 自绘标题栏组件。
+//!
+//! 左侧显示窗口 LOGO 与标题, 右侧提供最小化 / 最大化 / 关闭三个按钮。
+//! 阶段 1 按钮产出 `WindowAction` 消息, 由 `window.rs` 的 `Handler` 调用 OS 窗口 API。
 
 use std::any::Any;
 use std::time::{Duration, Instant};

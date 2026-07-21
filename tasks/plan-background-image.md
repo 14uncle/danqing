@@ -2,7 +2,7 @@
 
 ## Overview
 
-当前 `examples/showcase.rs` 已使用 `LightTheme` 与主题化组件呈现浅色毛玻璃风格,但窗口背景仍依赖 `clear_color` 的纯色填充,未能真正使用 `build.rs` 生成的 `gradient.png` / `noise.png`。本计划旨在增加最简的图片纹理渲染能力,使 showcase 能够将生成的背景图作为底层渲染,从而完整满足阶段 1 规格中“窗口背景使用固定渐变/噪声图营造半透明 + 模糊质感”的要求。
+当前 `examples/showcase.rs` 已使用 `LightTheme` 与主题化组件呈现浅色毛玻璃风格,但窗口背景仍依赖 `clear_color` 的纯色填充,未能真正使用 `assets/background/gradient.png` / `noise.png`。本计划旨在增加最简的图片纹理渲染能力,使 showcase 能够将背景图作为底层渲染,从而完整满足阶段 1 规格中“窗口背景使用固定渐变/噪声图营造半透明 + 模糊质感”的要求。
 
 ## Architecture Decisions
 
@@ -35,7 +35,7 @@
 
 ### Phase 2: Showcase 接入
 - [x] **Task 2: 在 showcase 中使用背景图**
-  - **Description:** 更新 `examples/showcase.rs`,通过 `WindowConfig.background` 加载 `OUT_DIR/assets/background/gradient.png` 与 `noise.png`,主图使用 Cover 缩放,噪声图以低透明度叠加。
+  - **Description:** 更新 `examples/showcase.rs`,通过 `WindowConfig.background` 加载 `assets/background/gradient.png` 与 `assets/background/noise.png`,主图使用 Cover 缩放,噪声图以低透明度叠加。
   - **Acceptance criteria:**
     - [x] showcase 窗口背景显示渐变图。
     - [x] 背景之上正确绘制 `TitleBar` 与主题化组件。

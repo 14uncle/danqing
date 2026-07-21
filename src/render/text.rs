@@ -1,10 +1,10 @@
-// ! @author 十四叔
-// ! @date 2026/07/17
+//! @author 十四叔
+//! @date 2026/07/17
 
-// ! 文本渲染管线: 图集纹理 + 实例化字形 quad。
-// !
-// ! [`TextBatch`] 是 CPU 侧: 持有字体与图集, 负责按字排版并收集实例;
-// ! [`TextPipeline`] 是 GPU 侧: 负责把图集脏区域上传纹理并绘制实例。
+//! 文本渲染管线: 图集纹理 + 实例化字形 quad。
+//!
+//! [`TextBatch`] 是 CPU 侧: 持有字体与图集, 负责按字排版并收集实例;
+//! [`TextPipeline`] 是 GPU 侧: 负责把图集脏区域上传纹理并绘制实例。
 
 use crate::Color;
 use crate::render::DrawTarget;
@@ -472,7 +472,7 @@ mod tests {
         let mut batch = TextBatch::new();
         batch.push_clip(Rect::from_xywh(0.0, 0.0, 100.0, 100.0));
         batch.push_text("A", 0.0, 20.0, 16, Color::BLACK);
-        assert!(batch.len() > 0);
+        assert!(!batch.is_empty());
     }
 
     #[test]
@@ -485,6 +485,6 @@ mod tests {
         batch.pop_clip();
         batch.pop_clip();
         batch.push_text("A", 0.0, 20.0, 16, Color::BLACK);
-        assert!(batch.len() > 0);
+        assert!(!batch.is_empty());
     }
 }

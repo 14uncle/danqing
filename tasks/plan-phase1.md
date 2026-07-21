@@ -11,7 +11,7 @@
 
 - **Theme  trait 体系**：`Theme` trait + `LightTheme` 结构体，预留 `DarkTheme` 扩展；token 通过 trait 方法暴露，组件按 `theme.background()` 等方式读取。
 - **纯逻辑层不依赖平台**：`theme.rs`、`widget/` 仍为纯逻辑，不引入 `winit`/`wgpu`。
-- **资源可提交仓库**：LOGO PNG/ICO 与背景噪声图作为静态资产提交到 `assets/`，由运行时或 `build.rs` 引用。
+- **资源可提交仓库**：LOGO PNG/ICO、回退字体与背景噪声图作为静态资产提交到 `assets/`，由运行时或 `include_bytes!` 直接引用。
 - **自绘标题栏仅视觉**：阶段 1 不接管窗口控制，三个按钮只做悬停/按下状态，不调用最小化/最大化/关闭 API。
 - **以用代测**：所有组件改造完成后必须体现在 `examples/showcase.rs` 中。
 
@@ -53,15 +53,16 @@ Task 10 Showcase 整合（依赖 3/4/5/6/7/8/9）
 
 ### Phase 2: Visual Assets — 品牌视觉
 
-- [ ] **Task 2: 设计并导出 LOGO 与背景图资产**
-  - **Description:** 在 `build.rs` 中设计并生成 丹青 LOGO(多尺寸 PNG 与 ICO)以及固定渐变/噪声背景图,输出到 `OUT_DIR/assets/`,避免在仓库中提交二进制资产。
+- [x] **Task 2: 设计并导出 LOGO 与背景图资产**
+  - **Description:** 设计并生成 丹青 LOGO(多尺寸 PNG 与 ICO)以及固定渐变/噪声背景图,作为静态资产提交到 `assets/`,与源码一起版本控制。
   - **Acceptance criteria:**
-    - [ ] `OUT_DIR/assets/logo/logo_16.png`、`24`、`32`、`48`、`256.png` 存在。
-    - [ ] `OUT_DIR/assets/logo/logo.ico` 存在。
-    - [ ] `OUT_DIR/assets/background/gradient.png` 与 `OUT_DIR/assets/background/noise.png` 存在。
+    - [x] `assets/logo/logo_16.png`、`24`、`32`、`48`、`256.png` 存在。
+    - [x] `assets/logo/logo.ico` 存在。
+    - [x] `assets/background/gradient.png` 与 `assets/background/noise.png` 存在。
+    - [x] `assets/fonts/fallback-font.ttf` 存在。
   - **Verification:** 集成测试 `tests/assets.rs` 验证文件存在且非空;`cargo test` 通过。
   - **Dependencies:** None
-  - **Files:** `build.rs`, `tests/assets.rs`
+  - **Files:** `tests/assets.rs`
   - **Scope:** M
 
 ### Phase 3: Component Theming — 组件 token 化
@@ -130,7 +131,7 @@ Task 10 Showcase 整合（依赖 3/4/5/6/7/8/9）
 ### Phase 4: Window Integration — 窗口图标
 
 - [x] **Task 9: 在 window.rs 中设置窗口图标**
-  - **Description:** 使用 `OUT_DIR/assets/logo/` 下由 `build.rs` 生成的 PNG 资源,在 `WindowAttributes` 中设置窗口图标与任务栏图标;提供加载失败 fallback。
+  - **Description:** 使用 `assets/logo/` 下的 PNG 资源,在 `WindowAttributes` 中设置窗口图标与任务栏图标;提供加载失败 fallback。
   - **Acceptance criteria:**
     - [ ] 窗口左上角显示新 LOGO。
     - [ ] 任务栏显示新 LOGO。
@@ -167,6 +168,21 @@ Task 10 Showcase 整合（依赖 3/4/5/6/7/8/9）
   - **Verification:** 逐条执行验收命令。
   - **Dependencies:** Task 10
   - **Files:** `tests/design_system.rs`, 各 `#[cfg(test)]` 模块
+  - **Scope:** M
+
+### Phase 7: TitleBar 接管原生标题栏
+
+- [ ] **Task 12: 自绘标题栏窗口控制**
+  - **Description:** 依据 `docs/specs/title-bar-window-controls.md`,让 `TitleBar` 替代原生标题栏:绘制 LOGO/标题、三个按钮调用窗口 API、支持拖拽移动与双击最大化;Windows 去装饰,其他平台保留原生降级。
+  - **Acceptance criteria:**
+    - [ ] Windows 上 `showcase` 无原生标题栏。
+    - [ ] 标题栏左侧显示品牌色 LOGO 占位和标题文本。
+    - [ ] 关闭/最小化/最大化按钮行为正确。
+    - [ ] 标题栏非按钮区可拖拽、双击最大化/还原。
+    - [ ] `cargo fmt` / `clippy -D warnings` / `test` / `build --release` 全绿。
+  - **Verification:** `cargo run --example showcase` 人工确认;`cargo test title_bar`。
+  - **Dependencies:** Task 5, Task 11
+  - **Files:** `src/event.rs`, `src/widget/title_bar.rs`, `src/window.rs`, `examples/showcase.rs`, `tests/title_bar_window.rs`
   - **Scope:** M
 
 ## Checkpoints

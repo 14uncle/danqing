@@ -1,6 +1,6 @@
 # Todo: 丹青 (danqing) M2
 
-> 详见 `docs/spec-m2.md` 与 `docs/plan-m2.md`。
+> 详见 `docs/specs/spec-m2.md` 与 `tasks/plan-m2.md`。
 
 ## Phase 1: 焦点与事件路由基础设施
 - [x] 扩展 `Event` 枚举(Ime/Copy/Cut/Paste/FocusIn/FocusOut,Key 携带 shift/ctrl)
@@ -36,7 +36,7 @@
 - [x] `cargo fmt --check` 通过
 - [x] `cargo build --release` 成功
 - [x] `cargo run --example showcase` 启动无 wgpu 校验错误
-- [x] 更新 `docs/spec-m2.md` 为已实现状态
+- [x] 更新 `docs/specs/spec-m2.md` 为已实现状态
 
 ---
 
@@ -50,4 +50,4 @@
 - [x] 默认关闭 wgpu 校验层,提供 `DANQING_WGPU_VALIDATION=1` opt-in。
 - [x] 窗口初始化期间隐藏,渲染上下文就绪后再显示,避免白屏。
 - [x] 关闭窗口时立即隐藏,提升关闭响应感。
-- [x] 更新 `docs/spec-m2.md` 与 `CLAUDE.md`。
+- [x] 更新 `docs/specs/spec-m2.md` 与 `CLAUDE.md`。

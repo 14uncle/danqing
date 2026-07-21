@@ -1,10 +1,10 @@
-// ! @author 十四叔
-// ! @date 2026/07/17
+//! @author 十四叔
+//! @date 2026/07/17
 
-// ! 窗口与事件循环封装 (winit 平台适配层)。
-// !
-// ! 本模块是唯一允许接触 OS 窗口 API 的地方: 负责窗口创建、
-// ! 事件循环驱动, 并把 winit 事件转换为平台无关的内部事件。
+//! 窗口与事件循环封装 (winit 平台适配层)。
+//!
+//! 本模块是唯一允许接触 OS 窗口 API 的地方: 负责窗口创建、
+//! 事件循环驱动, 并把 winit 事件转换为平台无关的内部事件。
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -49,9 +49,9 @@ pub struct WindowConfig {
     pub clear_color: Color,
     /// 背景图配置。
     pub background: BackgroundConfig,
-    /// 窗口边框颜色(无边框窗口时自绘)。
+    /// 窗口边框颜色 (无边框窗口时自绘)。
     pub border_color: Color,
-    /// 窗口边框圆角半径(配合自绘边框与 DWM 圆角)。
+    /// 窗口边框圆角半径 (配合自绘边框与 DWM 圆角)。
     pub border_radius: f32,
     /// 窗口边框粗细。
     pub border_thickness: f32,
@@ -65,7 +65,7 @@ impl Default for WindowConfig {
             // 深蓝灰: 非常量黑 / 白, 用于验证颜色参数通路
             clear_color: Color::rgb(0.10, 0.16, 0.24),
             background: BackgroundConfig::default(),
-            // 浅灰边框,与浅色毛玻璃主题协调
+            // 浅灰边框, 与浅色毛玻璃主题协调
             border_color: Color::rgba(0.0, 0.0, 0.0, 0.12),
             border_radius: 12.0,
             border_thickness: 1.0,
@@ -156,7 +156,7 @@ fn convert_event(event: &WindowEvent, cursor: Point, modifiers: ModifiersState) 
 
 /// 从 PNG 文件加载 winit 图标。
 ///
-/// 将 PNG 解码为 RGBA 后,通过 [`Icon::from_rgba`] 创建图标。
+/// 将 PNG 解码为 RGBA 后, 通过 [`Icon::from_rgba`] 创建图标。
 /// 返回 `Err` 时调用方可选择回退到默认图标。
 fn load_icon_from_png(path: &std::path::Path) -> Result<Icon, Box<dyn std::error::Error>> {
     let img = image::open(path)?.into_rgba8();
@@ -166,8 +166,8 @@ fn load_icon_from_png(path: &std::path::Path) -> Result<Icon, Box<dyn std::error
 
 /// Windows 下为无边框窗口恢复圆角与阴影。
 ///
-/// 使用 winit 公开的平台扩展 API,避免手写 unsafe DWM 调用。
-/// 若设置失败仅记录警告,不影响窗口功能。
+/// 使用 winit 公开的平台扩展 API, 避免手写 unsafe DWM 调用。
+/// 若设置失败仅记录警告, 不影响窗口功能。
 #[cfg(target_os = "windows")]
 fn apply_windows_undecorated_style(window: &WinitWindow) {
     use winit::platform::windows::{CornerPreference, WindowExtWindows};
@@ -183,7 +183,7 @@ fn apply_windows_undecorated_style(window: &WinitWindow) {
 /// 加载应用窗口图标。
 ///
 /// 尝试读取 `assets/logo/logo_256.png`;
-/// 失败时记录警告并返回 `None`,避免窗口创建因图标问题而 panic。
+/// 失败时记录警告并返回 `None`, 避免窗口创建因图标问题而 panic。
 fn load_window_icon() -> Option<Icon> {
     let path = std::path::Path::new("assets")
         .join("logo")
@@ -222,7 +222,7 @@ struct Handler<'a, A: App> {
     start: Instant,
     /// 系统剪贴板 (懒加载)。
     clipboard: Option<arboard::Clipboard>,
-    /// 是否已完成首帧渲染(用于一次性诊断计时)。
+    /// 是否已完成首帧渲染 (用于一次性诊断计时)。
     first_frame_done: bool,
 }
 
@@ -280,6 +280,22 @@ impl<A: App> Handler<'_, A> {
 
     /// 将键盘 /IME/ 剪贴板事件路由到当前焦点组件。
     fn dispatch_focused_event(&mut self, event: &Event) {
+        // Tab 遍历与当前焦点状态无关,必须最先处理:
+        // 清焦(点击空白/Escape)后键盘仍能借此重回焦点链。
+        if let Event::Key {
+            key: Key::Named(NamedKey::Tab),
+            pressed: true,
+            ..
+        } = event
+        {
+            if self.modifiers.shift_key() {
+                self.focus.prev();
+            } else {
+                self.focus.next();
+            }
+            return;
+        }
+
         let Some(path) = self.focus.current().map(|p| p.to_vec()) else {
             // 无焦点时回退到应用层
             self.app.event(event);
@@ -289,11 +305,20 @@ impl<A: App> Handler<'_, A> {
         match event {
             Event::Key { key, pressed, .. } if *pressed => {
                 match key {
-                    Key::Named(NamedKey::Tab) => {
-                        if self.modifiers.shift_key() {
-                            self.focus.prev();
-                        } else {
-                            self.focus.next();
+                    Key::Named(NamedKey::Escape) => {
+                        // 焦点组件未消费 Escape 时清除焦点,
+                        // 键盘事件随后回退到应用层。
+                        let consumed = event_at_path(
+                            &mut self.tree,
+                            &path,
+                            event,
+                            self.root_area,
+                            &mut self.msgs,
+                        ) == crate::widget::EventResult::Consumed;
+                        if !consumed {
+                            self.focus.clear_focus();
+                            self.dispatch_focus_changes(Some(&path), None);
+                            self.focus.acknowledge();
                         }
                         return;
                     }
@@ -462,7 +487,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 f64::from(self.config.size.width),
                 f64::from(self.config.size.height),
             ));
-        // Windows 使用自绘标题栏,其他平台保留原生标题栏作为降级。
+        // Windows 使用自绘标题栏, 其他平台保留原生标题栏作为降级。
         #[cfg(target_os = "windows")]
         let attrs = attrs.with_decorations(false);
         let window = match event_loop.create_window(attrs) {
@@ -547,7 +572,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 消费组件产出的消息
         let msgs: Vec<_> = self.msgs.drain(..).collect();
         for boxed in msgs {
-            // 先尝试识别窗口控制动作(如自绘标题栏发出的 Close/Minimize/Maximize/Drag)
+            // 先尝试识别窗口控制动作 (如自绘标题栏发出的 Close/Minimize/Maximize/Drag)
             let boxed = match boxed.downcast::<WindowAction>() {
                 Ok(action) => {
                     self.handle_window_action(*action, event_loop);
@@ -564,7 +589,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         match event {
             WindowEvent::CloseRequested => {
                 log::info!("收到关闭请求,退出事件循环");
-                // 立即隐藏窗口,让关闭感觉更快(资源释放仍在后台完成)。
+                // 立即隐藏窗口, 让关闭感觉更快 (资源释放仍在后台完成)。
                 if let Some(window) = &self.window {
                     window.set_visible(false);
                 }

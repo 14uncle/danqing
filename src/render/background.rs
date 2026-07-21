@@ -1,9 +1,10 @@
 //! @author 十四叔
 //! @date 2026/07/19
 
-//! 窗口背景图渲染: 将 `build.rs` 生成的渐变/噪声图绘制在组件树之下。
+//! 窗口背景图渲染: 将 `assets/background/` 下的渐变 / 光晕 / 噪声图
+//! 绘制在组件树之下。
 //!
-//! 当前支持一张主背景图与一张可选噪声叠加图,并提供 Stretch/Fit/Cover
+//! 当前支持一张主背景图与可选的光晕、噪声叠加图, 并提供 Stretch/Fit/Cover
 //! 三种缩放模式。图片在 `Context` 初始化时解码并上传为 wgpu 纹理,
 //! 每帧按窗口尺寸重新计算顶点坐标与 UV。
 
@@ -14,12 +15,12 @@ use crate::render::DrawTarget;
 /// 背景图缩放模式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScaleMode {
-    /// 拉伸填满整个窗口(可能改变宽高比)。
+    /// 拉伸填满整个窗口 (可能改变宽高比)。
     #[default]
     Stretch,
-    /// 完整显示图片,留白处显示清屏色。
+    /// 完整显示图片, 留白处显示清屏色。
     Fit,
-    /// 等比缩放并裁切,不留黑边。
+    /// 等比缩放并裁切, 不留黑边。
     Cover,
 }
 
@@ -28,23 +29,34 @@ pub enum ScaleMode {
 /// 由 `WindowConfig` 持有;`Context` 在初始化时读取并上传纹理。
 #[derive(Debug, Clone, Default)]
 pub struct BackgroundConfig {
-    /// 主背景图路径(通常为 `OUT_DIR/assets/background/gradient.png`)。
+    /// 主背景图路径 (通常为 `assets/background/gradient.png`)。
     pub image: Option<PathBuf>,
-    /// 可选噪声叠加图路径(通常为 `OUT_DIR/assets/background/noise.png`)。
+    /// 可选光晕叠加图路径 (通常为 `assets/background/glow.png`)。
+    pub glow: Option<PathBuf>,
+    /// 可选噪声叠加图路径 (通常为 `assets/background/noise.png`)。
     pub noise: Option<PathBuf>,
     /// 主背景图缩放模式。
     pub scale: ScaleMode,
+    /// 光晕图叠加不透明度 (0.0 ..= 1.0)。
+    pub glow_opacity: f32,
     /// 噪声图叠加不透明度 (0.0 ..= 1.0)。
     pub noise_opacity: f32,
 }
 
 impl BackgroundConfig {
-    /// 使用指定主背景图创建配置,其余为默认值。
+    /// 使用指定主背景图创建配置, 其余为默认值。
     pub fn with_image(path: impl Into<PathBuf>) -> Self {
         Self {
             image: Some(path.into()),
             ..Self::default()
         }
+    }
+
+    /// 叠加光晕图。
+    pub fn with_glow(mut self, path: impl Into<PathBuf>, opacity: f32) -> Self {
+        self.glow = Some(path.into());
+        self.glow_opacity = opacity.clamp(0.0, 1.0);
+        self
     }
 
     /// 叠加噪声图。
@@ -71,19 +83,32 @@ struct BackgroundTexture {
     height: u32,
 }
 
+/// 叠加层数量 (主背景 / 光晕 / 噪声)。
+const LAYER_COUNT: usize = 3;
+/// 每层 quad 的顶点数。
+const VERTS_PER_LAYER: usize = 6;
+
 /// 背景渲染管线。
+///
+/// 每层使用独立的 uniform buffer 与顶点区段: `Queue::write_buffer`
+/// 在单次 submit 前统一生效, 同一帧内多次写同一块 buffer 时
+/// 只有最后一次写入可见, 因此跨 draw 复用会导致所有层参数相同。
 pub struct BackgroundPipeline {
     pipeline: wgpu::RenderPipeline,
-    uniform_buf: wgpu::Buffer,
-    uniform_bind: wgpu::BindGroup,
+    /// 每层一个 uniform buffer (不透明度)。
+    uniform_bufs: [wgpu::Buffer; LAYER_COUNT],
+    uniform_binds: [wgpu::BindGroup; LAYER_COUNT],
+    /// 三层 quad 共用的顶点缓冲 (每层 [`VERTS_PER_LAYER`] 个顶点)。
     vertex_buf: wgpu::Buffer,
     background: Option<BackgroundTexture>,
+    glow: Option<BackgroundTexture>,
     noise: Option<BackgroundTexture>,
     scale: ScaleMode,
+    glow_opacity: f32,
     noise_opacity: f32,
 }
 
-/// 单个顶点:归一化位置 (0..1) + UV。
+/// 单个顶点: 归一化位置 (0..1) + UV。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
@@ -92,7 +117,7 @@ struct Vertex {
 }
 
 impl BackgroundPipeline {
-    /// 创建管线并按配置加载纹理;加载失败时记录警告并继续(回退到清屏色)。
+    /// 创建管线并按配置加载纹理; 加载失败时记录警告并继续 (回退到清屏色)。
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -117,19 +142,23 @@ impl BackgroundPipeline {
                 count: None,
             }],
         });
-        let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("background uniform buffer"),
-            size: 16,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+        let uniform_bufs: [wgpu::Buffer; LAYER_COUNT] = std::array::from_fn(|_| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("background uniform buffer"),
+                size: 16,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
         });
-        let uniform_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("background uniform bind group"),
-            layout: &uniform_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buf.as_entire_binding(),
-            }],
+        let uniform_binds: [wgpu::BindGroup; LAYER_COUNT] = std::array::from_fn(|i| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("background uniform bind group"),
+                layout: &uniform_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_bufs[i].as_entire_binding(),
+                }],
+            })
         });
 
         let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -194,7 +223,7 @@ impl BackgroundPipeline {
 
         let vertex_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("background vertex buffer"),
-            size: (6 * size_of::<Vertex>()) as u64,
+            size: (LAYER_COUNT * VERTS_PER_LAYER * size_of::<Vertex>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -203,6 +232,10 @@ impl BackgroundPipeline {
             .image
             .as_deref()
             .and_then(|p| load_texture(device, queue, &texture_layout, p, "background"));
+        let glow = config
+            .glow
+            .as_deref()
+            .and_then(|p| load_texture(device, queue, &texture_layout, p, "glow"));
         let noise = config
             .noise
             .as_deref()
@@ -210,12 +243,14 @@ impl BackgroundPipeline {
 
         Self {
             pipeline,
-            uniform_buf,
-            uniform_bind,
+            uniform_bufs,
+            uniform_binds,
             vertex_buf,
             background,
+            glow,
             noise,
             scale: config.scale,
+            glow_opacity: config.glow_opacity.clamp(0.0, 1.0),
             noise_opacity: config.noise_opacity.clamp(0.0, 1.0),
         }
     }
@@ -225,7 +260,7 @@ impl BackgroundPipeline {
         self.background.is_some()
     }
 
-    /// 绘制背景层(在 RectBatch 之前调用)。
+    /// 绘制背景层 (在 RectBatch 之前调用)。
     pub fn draw(
         &mut self,
         queue: &wgpu::Queue,
@@ -259,34 +294,68 @@ impl BackgroundPipeline {
         });
 
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.uniform_bind, &[]);
         pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
 
-        // 主背景图
-        self.upload_quad(queue, target, bg.width, bg.height, self.scale, 1.0);
-        pass.set_bind_group(1, &bg.bind_group, &[]);
-        pass.draw(0..6, 0..1);
-
-        // 噪声叠加图
-        if let Some(noise) = &self.noise {
-            self.upload_quad(
+        // 层 0 主背景图 / 层 1 光晕 / 层 2 噪声
+        self.draw_layer(&mut pass, queue, target, 0, bg, self.scale, 1.0);
+        if let Some(glow) = &self.glow {
+            self.draw_layer(
+                &mut pass,
                 queue,
                 target,
-                noise.width,
-                noise.height,
+                1,
+                glow,
+                ScaleMode::Cover,
+                self.glow_opacity,
+            );
+        }
+        if let Some(noise) = &self.noise {
+            self.draw_layer(
+                &mut pass,
+                queue,
+                target,
+                2,
+                noise,
                 ScaleMode::Stretch,
                 self.noise_opacity,
             );
-            pass.set_bind_group(1, &noise.bind_group, &[]);
-            pass.draw(0..6, 0..1);
         }
     }
 
-    /// 按缩放模式计算顶点与 UV,上传到 vertex buffer。
+    /// 绘制单个叠加层: 上传该层顶点与不透明度, 绑定资源后绘制。
+    #[allow(clippy::too_many_arguments)]
+    fn draw_layer(
+        &self,
+        pass: &mut wgpu::RenderPass,
+        queue: &wgpu::Queue,
+        target: &DrawTarget,
+        layer: usize,
+        texture: &BackgroundTexture,
+        scale: ScaleMode,
+        opacity: f32,
+    ) {
+        self.upload_quad(
+            queue,
+            target,
+            layer,
+            texture.width,
+            texture.height,
+            scale,
+            opacity,
+        );
+        pass.set_bind_group(0, &self.uniform_binds[layer], &[]);
+        pass.set_bind_group(1, &texture.bind_group, &[]);
+        let first = (layer * VERTS_PER_LAYER) as u32;
+        pass.draw(first..first + VERTS_PER_LAYER as u32, 0..1);
+    }
+
+    /// 按缩放模式计算顶点与 UV, 写入指定层的顶点区段与 uniform buffer。
+    #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
         queue: &wgpu::Queue,
         target: &DrawTarget,
+        layer: usize,
         img_w: u32,
         img_h: u32,
         scale: ScaleMode,
@@ -349,16 +418,20 @@ impl BackgroundPipeline {
                 uv: [u0, v1],
             },
         ];
-        queue.write_buffer(&self.vertex_buf, 0, bytemuck::cast_slice(&verts));
         queue.write_buffer(
-            &self.uniform_buf,
+            &self.vertex_buf,
+            (layer * VERTS_PER_LAYER * size_of::<Vertex>()) as u64,
+            bytemuck::cast_slice(&verts),
+        );
+        queue.write_buffer(
+            &self.uniform_bufs[layer],
             0,
             bytemuck::cast_slice(&[opacity, 0.0, 0.0, 0.0f32]),
         );
     }
 }
 
-/// 加载 PNG 并创建纹理与 bind group;失败时返回 None 并记录警告。
+/// 加载 PNG 并创建纹理与 bind group; 失败时返回 None 并记录警告。
 fn load_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -451,30 +524,41 @@ mod tests {
     fn background_config_default_is_empty() {
         let cfg = BackgroundConfig::default();
         assert!(cfg.image.is_none());
+        assert!(cfg.glow.is_none());
         assert!(cfg.noise.is_none());
         assert_eq!(cfg.scale, ScaleMode::Stretch);
+        assert!((cfg.glow_opacity - 0.0).abs() < f32::EPSILON);
         assert!((cfg.noise_opacity - 0.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn background_config_chaining() {
         let cfg = BackgroundConfig::with_image("gradient.png")
+            .with_glow("glow.png", 0.15)
             .with_noise("noise.png", 0.08)
             .scale(ScaleMode::Cover);
 
         assert_eq!(cfg.image.as_ref().unwrap().as_os_str(), "gradient.png");
+        assert_eq!(cfg.glow.as_ref().unwrap().as_os_str(), "glow.png");
         assert_eq!(cfg.noise.as_ref().unwrap().as_os_str(), "noise.png");
         assert_eq!(cfg.scale, ScaleMode::Cover);
+        assert!((cfg.glow_opacity - 0.15).abs() < f32::EPSILON);
         assert!((cfg.noise_opacity - 0.08).abs() < f32::EPSILON);
     }
 
     #[test]
-    fn background_config_noise_opacity_is_clamped() {
-        let high = BackgroundConfig::with_image("bg.png").with_noise("noise.png", 1.5);
-        assert!((high.noise_opacity - 1.0).abs() < f32::EPSILON);
+    fn background_config_opacity_is_clamped() {
+        let high = BackgroundConfig::with_image("bg.png").with_glow("glow.png", 1.5);
+        assert!((high.glow_opacity - 1.0).abs() < f32::EPSILON);
 
-        let low = BackgroundConfig::with_image("bg.png").with_noise("noise.png", -0.5);
-        assert!((low.noise_opacity - 0.0).abs() < f32::EPSILON);
+        let low = BackgroundConfig::with_image("bg.png").with_glow("glow.png", -0.5);
+        assert!((low.glow_opacity - 0.0).abs() < f32::EPSILON);
+
+        let high_noise = BackgroundConfig::with_image("bg.png").with_noise("noise.png", 1.5);
+        assert!((high_noise.noise_opacity - 1.0).abs() < f32::EPSILON);
+
+        let low_noise = BackgroundConfig::with_image("bg.png").with_noise("noise.png", -0.5);
+        assert!((low_noise.noise_opacity - 0.0).abs() < f32::EPSILON);
     }
 
     #[test]

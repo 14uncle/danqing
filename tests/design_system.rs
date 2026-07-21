@@ -76,11 +76,17 @@ fn box_paints_with_theme_surface() {
         &mut texts,
     );
 
-    assert_eq!(rects.len(), 1);
+    assert!(rects.len() >= 2);
     assert!(color_eq(
         color_from_array(rects.instance_colors()[0]),
         t.surface()
     ));
+    assert!(
+        rects
+            .instance_colors()
+            .iter()
+            .any(|c| color_eq(color_from_array(*c), t.border()))
+    );
 }
 
 #[test]

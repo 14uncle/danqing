@@ -1,6 +1,6 @@
 # Plan: 丹青 M2 — 焦点系统与文本输入
 
-> 依据 `docs/spec-m2.md`(已确认,2026-07-16)
+> 依据 `docs/specs/spec-m2.md`(已确认,2026-07-16)
 > 目标:在 M1 保留模式组件树上实现焦点管理、单行 `TextInput`、剪贴板与 IME。
 
 ## 架构变化
@@ -156,7 +156,7 @@ pub struct Flow {
 2. Task 2 后:`TextInput` 单测覆盖插入/删除/光标移动/选区。
 3. Task 3 后:剪贴板集成测试通过(可 mock 剪贴板 trait)。
 4. Task 4 后:showcase 能调起输入法并显示 preedit/commit。
-5. Task 6 后:对照 `spec-m2.md` Success Criteria 全过,全部 Commands 绿。
+5. Task 6 后:对照 `docs/specs/spec-m2.md` Success Criteria 全过,全部 Commands 绿。
 
 ## 开放问题(进入 Task 前确认)
 

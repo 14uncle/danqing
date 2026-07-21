@@ -20,9 +20,9 @@
 - **语言**：Rust 2021 edition
 - **窗口/事件**：`winit` 0.30
 - **自绘**：`wgpu` 0.30
-- **字体**：OFL 回退字体 `ZCOOL XiaoWei`（由 `build.rs` 下载）
-- **位图加载**：阶段 1 使用固定渐变/噪声图作为毛玻璃背景，若采用程序化生成可暂不外部位图库；LOGO 使用提交到 `assets/` 的 PNG/ICO。
-- **构建工具**：`cargo` + 自定义 `build.rs`
+- **字体**：OFL 回退字体 `ZCOOL XiaoWei`（位于 `assets/fonts/`，提交在版本控制中）
+- **位图加载**：阶段 1 使用固定渐变/噪声图作为毛玻璃背景，位图资源提交到 `assets/`。
+- **构建工具**：`cargo`
 
 ## Commands
 
@@ -135,7 +135,7 @@ impl Theme for LightTheme {
 
 - **Ask first：**
   - 新增外部依赖（如 `image`、`vello` 等）。
-  - 修改 `build.rs` 下载逻辑或字体回退策略。
+  - 改变字体回退策略或新增字体文件。
   - 改变 `examples/showcase.rs` 的整体页面结构或导航。
   - 引入暗色模式的完整实现（本阶段仅预留接口）。
 
@@ -163,12 +163,12 @@ impl Theme for LightTheme {
 2. **暗色模式接口**：采用 `trait Theme` + `struct LightTheme/DarkTheme`。
 3. **静态预渲染模糊背景**：使用固定渐变/噪声图作为背景，不截图桌面壁纸。
 4. **标题栏按钮**：最大化/最小化/关闭只需视觉反馈，不调用窗口控制 API。
-5. **资源目录**：`assets/` 接受提交 PNG/ICO。
+5. **资源目录**：字体、LOGO、背景图统一放 `assets/` 并提交版本控制。
 
 ## Related Documents
 
 - `docs/ideas/danqing-efficiency-tool-glassmorphism.md` — 丹青战略定位与阶段划分
 - `CLAUDE.md` — 项目约定与命令
 - `tasks/plan.md` — M1 实现计划
-- `docs/plan-m2.md` — M2 焦点与输入计划
-- `docs/plan-m3.md` — M3 滚动与多行文本计划
+- `tasks/plan-m2.md` — M2 焦点与输入计划
+- `tasks/plan-m3.md` — M3 滚动与多行文本计划

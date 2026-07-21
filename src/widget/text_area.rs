@@ -14,7 +14,7 @@ use crate::render::{RectBatch, TextBatch};
 use crate::text::{Line, break_lines};
 use crate::widget::text_editor::{TextEditor, char_to_byte};
 use crate::widget::{EventResult, MsgQueue, Widget};
-use crate::{Color, Constraints, Edges, Point, Rect, Size};
+use crate::{Color, Constraints, Edges, LightTheme, Point, Rect, Size, Theme};
 
 /// 光标闪烁周期(秒)。
 const BLINK_PERIOD: f32 = 0.5;
@@ -37,6 +37,14 @@ pub struct TextArea {
     caret_color: Color,
     /// 内边距。
     padding: Edges,
+    /// 背景圆角半径。
+    radius: f32,
+    /// 边框颜色。
+    border_color: Color,
+    /// 获得焦点时的边框颜色。
+    focus_border_color: Color,
+    /// 边框粗细。
+    border_width: f32,
     /// 显式宽度(未指定则按约束上限)。
     width: Option<f32>,
     /// layout/paint 缓存:自身绝对矩形。
@@ -56,17 +64,26 @@ pub struct TextArea {
 }
 
 impl TextArea {
-    /// 创建多行文本输入框(默认空文本、字号 16、深色文本、浅色背景)。
+    /// 创建多行文本输入框,使用默认浅色主题 token。
     pub fn new() -> Self {
+        Self::themed(&LightTheme)
+    }
+
+    /// 使用指定主题创建多行文本输入框。
+    pub fn themed(theme: &impl Theme) -> Self {
         Self {
             editor: TextEditor::new(),
             focused: false,
-            font_size: 16,
-            color: Color::from_srgb8(0x22, 0x22, 0x22),
-            background: Color::WHITE,
-            selection_color: Color::from_srgb8(0xB3, 0xD7, 0xFF),
-            caret_color: Color::from_srgb8(0x1E, 0x90, 0xFF),
-            padding: Edges::symmetric(12.0, 8.0),
+            font_size: theme.font_size_body(),
+            color: theme.text_primary(),
+            background: theme.surface(),
+            selection_color: theme.selection(),
+            caret_color: theme.caret(),
+            padding: Edges::symmetric(theme.spacing_md(), theme.spacing_sm()),
+            radius: theme.radius_sm(),
+            border_color: theme.border(),
+            focus_border_color: theme.accent(),
+            border_width: 1.0,
             width: None,
             area: Cell::new(Rect::default()),
             lines: vec![Line::empty()],
@@ -99,6 +116,12 @@ impl TextArea {
     /// 设置背景色。
     pub fn background(mut self, color: Color) -> Self {
         self.background = color;
+        self
+    }
+
+    /// 设置背景圆角半径。
+    pub fn radius(mut self, radius: f32) -> Self {
+        self.radius = radius;
         self
     }
 
@@ -141,6 +164,24 @@ impl TextArea {
     #[cfg(test)]
     pub(crate) fn set_anchor(&mut self, anchor: usize) {
         self.editor.set_anchor(anchor);
+    }
+
+    /// 当前背景色(测试用)。
+    #[cfg(test)]
+    pub(crate) fn background_color(&self) -> Color {
+        self.background
+    }
+
+    /// 当前文本颜色(测试用)。
+    #[cfg(test)]
+    pub(crate) fn text_color_value(&self) -> Color {
+        self.color
+    }
+
+    /// 当前圆角半径(测试用)。
+    #[cfg(test)]
+    pub(crate) fn radius_value(&self) -> f32 {
+        self.radius
     }
 
     /// 重新计算行排版与每行字符偏移。
@@ -301,7 +342,15 @@ impl Widget for TextArea {
         self.area.set(area);
 
         // 背景
-        rects.push_rect(area, self.background, 4.0);
+        rects.push_rect(area, self.background, self.radius);
+
+        // 边框: 聚焦时使用 accent,否则使用默认边框色。
+        let border_color = if self.focused {
+            self.focus_border_color
+        } else {
+            self.border_color
+        };
+        rects.push_rounded_border(area, border_color, self.radius, self.border_width);
 
         let text_x = area.origin.x + self.padding.left;
         let ascent = texts.ascent(f32::from(self.font_size));
@@ -567,6 +616,30 @@ impl Widget for TextArea {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::LightTheme;
+
+    #[test]
+    fn text_area_uses_theme_defaults() {
+        let area = TextArea::new();
+        assert_eq!(area.text_color_value(), LightTheme.text_primary());
+        assert_eq!(area.background_color(), LightTheme.surface());
+        assert_eq!(area.radius_value(), LightTheme.radius_sm());
+    }
+
+    #[test]
+    fn text_area_themed_uses_provided_theme() {
+        let area = TextArea::themed(&LightTheme);
+        assert_eq!(area.text_color_value(), LightTheme.text_primary());
+        assert_eq!(area.background_color(), LightTheme.surface());
+    }
+
+    #[test]
+    fn text_area_custom_overrides_theme() {
+        let custom_bg = Color::from_srgb8(255, 0, 0);
+        let area = TextArea::new().background(custom_bg).radius(8.0);
+        assert_eq!(area.background_color(), custom_bg);
+        assert_eq!(area.radius_value(), 8.0);
+    }
 
     fn area() -> Rect {
         Rect::from_xywh(0.0, 0.0, 500.0, 500.0)

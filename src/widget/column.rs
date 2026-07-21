@@ -27,7 +27,16 @@ impl Column {
 
     /// 设置子项间距。
     pub fn gap(mut self, gap: f32) -> Self {
-        self.flow = Flow::new(gap);
+        self.flow.set_gap(gap);
+        self
+    }
+
+    /// 把 Fit 子项拉伸到容器宽度(最宽子项的自然宽),使卡片等宽。
+    ///
+    /// 注意:Fit 子项会被布局两遍(先量自然尺寸,再按拉伸约束重排);
+    /// 要求子项的高度不随宽度增大而增大(如保持宽高比的图片组件不适用)。
+    pub fn cross_stretch(mut self) -> Self {
+        self.flow.set_cross_stretch(true);
         self
     }
 

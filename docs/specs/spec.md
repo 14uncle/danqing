@@ -65,7 +65,7 @@ src/widget/mod.rs    → Widget trait、组件树(Node)
 src/widget/*.rs      → 内建组件:Box/Text/Column/Row/Padding/Center/Button
 examples/showcase.rs → M1 演示页
 tests/               → 集成测试(布局/事件等纯逻辑,不需要 GPU)
-docs/spec.md         → 本规格
+docs/specs/spec.md         → 本规格
 ```
 
 约束:`window.rs` 与 `render/` 以下可以碰平台/图形 API;`widget/` `layout.rs` 必须是纯逻辑。

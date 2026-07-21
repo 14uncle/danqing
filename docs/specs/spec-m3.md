@@ -1,7 +1,7 @@
 # Spec: 丹青 (danqing) M3 — 滚动容器与多行文本域
 
 > 状态：**已实现**（2026-07-18）  
-> 依据：`docs/spec-m2.md` 已实现并关闭；M1/M2 查漏补缺无阻塞性代码缺陷。
+> 依据：`docs/specs/spec-m2.md` 已实现并关闭；M1/M2 查漏补缺无阻塞性代码缺陷。
 
 ## Objective
 
@@ -51,7 +51,7 @@ cargo build --release
 M3 新增/修改：
 
 ```
-docs/spec-m3.md                → 本规格
+docs/specs/spec-m3.md                → 本规格
 tasks/todo-m3.md               → M3 任务进度
 examples/showcase.rs           → 新增 Scrollable + TextArea 演示区
 src/
@@ -76,7 +76,7 @@ tests/                         → 新增集成测试
 
 - 公开 API 一律经 `src/lib.rs` re-export，不暴露深层模块路径。
 - 所有公共类型/函数写中文文档注释；内部实现用英文命名。
-- 新增 `.rs` 文件头必须包含 `// ! @author 十四叔` 与 `// ! @date yyyy/MM/dd`。
+- 新增 `.rs` 文件头必须包含 `//! @author 十四叔` 与 `//! @date yyyy/MM/dd`。
 - 错误处理：库代码用 `thiserror`，example 用 `anyhow`。
 - 依赖方向只允许向下：`widget/`、`layout.rs`、`event.rs` 不得依赖 `winit`/`wgpu`。
 

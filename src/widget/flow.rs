@@ -188,7 +188,14 @@ impl Flow {
                     // Fit 子项拉伸:交叉轴 tight 为容器交叉尺寸,重新布局。
                     // 主轴保持宽松,绝大多数组件的主轴尺寸与交叉轴无关,
                     // 因此第一遍算出的主轴分配仍然成立。
-                    child.layout(axis.stretch_constraints(main_max, cross_max), texts)
+                    let laid_out =
+                        child.layout(axis.stretch_constraints(main_max, cross_max), texts);
+                    debug_assert!(
+                        axis.main(laid_out) <= main_size + f32::EPSILON,
+                        "cross_stretch 要求 Fit 子项的主轴尺寸不随交叉轴增大而增大,\
+                         否则后续兄弟会与它重叠"
+                    );
+                    laid_out
                 } else {
                     axis.make_size(main_size, fit_cross[i])
                 }

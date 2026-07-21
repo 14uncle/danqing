@@ -12,7 +12,7 @@
 
 ## Phase 2: Drawing
 - [x] **Task 4** SDF 矩形管线(依赖 3)— 多色圆角矩形,边缘 AA,resize 不变形 ✅ 2026-07-16(PrintWindow 截图自检通过,校验零错误)
-- [x] **Task 5** 字体加载+字形图集·纯逻辑(依赖 1,⟂ 可并行)✅ 2026-07-16(OQ1 裁决:build.rs 经 jsdelivr 下载 ZCOOL XiaoWei OFL;12 项测试全绿)
+- [x] **Task 5** 字体加载+字形图集·纯逻辑(依赖 1,⟂ 可并行)✅ 2026-07-16(OQ1 裁决:字体提交到 `assets/fonts/fallback-font.ttf`;12 项测试全绿)
 - [x] **Task 6** 文本渲染管线(依赖 3+5)— 渲染 `Hello, 你好世界` 中英文清晰 ✅ 2026-07-16(截图自检:基线对齐、两字号两色;系统字体走 Microsoft YaHei)
 
 ### ⏸ Checkpoint 2 ✅ 通过(2026-07-16):矩形+中英文文本同屏,resize 稳定,校验零错误,`cargo test` 12/12

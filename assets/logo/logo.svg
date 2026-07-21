@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>丹青 Danqing Logo</title>
+  <desc>Glass canvas mark: a rounded square frame with a pigment dot.</desc>
+
+  <!-- 玻璃画布外框：accent 描边 + 半透明白色填充 -->
+  <rect
+    x="48"
+    y="48"
+    width="160"
+    height="160"
+    rx="40"
+    ry="40"
+    fill="white"
+    fill-opacity="0.85"
+    stroke="#3B82F6"
+    stroke-width="24"
+  />
+
+  <!-- 颜料滴：实心 accent 圆，偏右下 -->
+  <circle
+    cx="152"
+    cy="152"
+    r="32"
+    fill="#3B82F6"
+  />
+</svg>
