@@ -710,10 +710,7 @@ mod tests {
             .collect();
         assert_eq!(matches.len(), 1, "应恰好找到关闭按钮 hover 背景");
         assert_eq!(matches[0].0.size, Size::new(height, height));
-        assert_eq!(
-            matches[0].1,
-            [0.0, LightTheme.radius_window(), 0.0, 0.0]
-        );
+        assert_eq!(matches[0].1, [0.0, LightTheme.radius_window(), 0.0, 0.0]);
     }
 
     #[test]
