@@ -11,33 +11,19 @@
 //! 2. [`Widget::layout`] —— 约束向下传、尺寸向上算;
 //! 3. [`Widget::paint`] —— 按缓存的几何收集绘制命令。
 
-mod box_;
-mod button;
-mod center;
-mod column;
-mod flow;
+mod base;
 mod focus;
-mod padding;
-mod row;
-mod scrollable;
-mod text;
-mod text_area;
-mod text_editor;
-mod text_input;
+mod form;
+mod layout;
 mod title_bar;
+mod view;
 
-pub use box_::Box;
-pub use button::Button;
-pub use center::Center;
-pub use column::Column;
+pub use base::{Button, Text};
 pub use focus::FocusManager;
-pub use padding::Padding;
-pub use row::Row;
-pub use scrollable::{ScrollAxis, Scrollable};
-pub use text::Text;
-pub use text_area::TextArea;
-pub use text_input::TextInput;
+pub use form::{TextArea, TextInput};
+pub use layout::{Box, Center, Column, Padding, Row};
 pub use title_bar::TitleBar;
+pub use view::{ScrollAxis, Scrollable};
 
 use std::any::Any;
 

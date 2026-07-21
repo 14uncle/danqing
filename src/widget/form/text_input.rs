@@ -10,7 +10,7 @@ use std::cell::Cell;
 use crate::app::AnimationCtx;
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 use crate::render::{RectBatch, TextBatch};
-use crate::widget::text_editor::TextEditor;
+use crate::widget::form::text_editor::TextEditor;
 use crate::widget::{EventResult, MsgQueue, Widget};
 use crate::{Color, Constraints, Edges, LightTheme, Rect, Size, Theme};
 
@@ -692,11 +692,11 @@ mod tests {
     #[test]
     fn undo_stack_depth_limit() {
         let mut t = TextInput::new();
-        for i in 0..=crate::widget::text_editor::MAX_UNDO {
+        for i in 0..=crate::widget::form::text_editor::MAX_UNDO {
             t.insert(&i.to_string());
         }
         // 只能撤销最后 MAX_UNDO 次编辑
-        for _ in 0..crate::widget::text_editor::MAX_UNDO {
+        for _ in 0..crate::widget::form::text_editor::MAX_UNDO {
             t.undo();
         }
         // 再撤销一次应无变化(栈已空)

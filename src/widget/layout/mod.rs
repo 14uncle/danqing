@@ -1,0 +1,19 @@
+//! @author 十四叔
+//! @date 2026/07/21
+
+//! 布局组件: 盒模型容器与流式排布。
+//!
+//! `flow` 为内部排布引擎, 经 [`Column`] / [`Row`] 复用, 不进入公开 API。
+
+mod box_;
+mod center;
+mod column;
+mod flow;
+mod padding;
+mod row;
+
+pub use box_::Box;
+pub use center::Center;
+pub use column::Column;
+pub use padding::Padding;
+pub use row::Row;

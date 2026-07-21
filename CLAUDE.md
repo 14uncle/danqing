@@ -17,7 +17,7 @@ cargo test --lib --tests
 
 # 运行单个测试
 # 模块内单元测试
-cargo test widget::flow::tests::column_stacks_fit_children -- --exact
+cargo test widget::layout::flow::tests::column_stacks_fit_children -- --exact
 # 集成测试文件
 cargo test --test event_dispatch press_and_release -- --exact
 
@@ -54,7 +54,7 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 - `src/window.rs`: 唯一允许接触 OS 窗口 API 的适配层;winit 事件循环、焦点路由、IME/剪贴板封装、消息消费、每帧 `request_redraw` 驱动。
 - `src/event.rs`: 平台无关事件类型(鼠标/键盘/IME/剪贴板)与分发语义;`Event::Key` 携带 shift/ctrl 修饰键。
 - `src/layout.rs`: 纯逻辑值类型与布局分配算法。
-- `src/widget/`: 纯逻辑组件。`Widget` trait 含 `sync`/`animate`/`layout`/`paint`/`event` 及焦点相关默认方法(`focusable`/`children`/`ime_area`/`wants_ime`/`selected_text`);容器复用 `src/widget/flow.rs`;`FocusManager` 负责焦点链与 Tab 遍历;`TextInput` 是单行可编辑文本组件,`TextArea` 是多行可编辑文本组件,`Scrollable` 提供滚动视口。
+- `src/widget/`: 纯逻辑组件,按类型分目录: `base/`(Button、Text)、`layout/`(Box、Column、Row、Padding、Center,容器复用内部 `flow.rs`)、`form/`(TextInput、TextArea,共享内部 `text_editor.rs`)、`view/`(Scrollable、Switcher);`focus.rs`(FocusManager 焦点链与 Tab 遍历)与 `title_bar.rs` 作为框架层居根部。`Widget` trait 含 `sync`/`animate`/`layout`/`paint`/`event` 及焦点相关默认方法(`focusable`/`children`/`ime_area`/`wants_ime`/`selected_text`);`TextInput` 是单行可编辑文本组件,`TextArea` 是多行可编辑文本组件,`Scrollable` 提供滚动视口,`Switcher` 提供多面板可见性切换。
 - `src/text/line_layout.rs`: 多行文本排版(显式换行 + 字符级 soft-wrap),纯逻辑。
 - `src/render/`/`src/text/`: 同 M1;`RectBatch`/`TextBatch` 支持 clip stack,用于 `Scrollable` 视口裁剪。
 - `src/theme.rs`(阶段 1 新增): 设计 token(颜色、字体、间距、圆角、阴影、动效曲线)与 `Theme` trait。

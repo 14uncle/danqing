@@ -1,24 +1,24 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! Row 组件:水平流式容器。
+//! Column 组件:垂直流式容器。
 
 use crate::event::Event;
 use crate::render::{RectBatch, TextBatch};
-use crate::widget::flow::{Axis, Flow};
+use crate::widget::layout::flow::{Axis, Flow};
 use crate::widget::{EventResult, MsgQueue, Widget};
 use crate::{Constraints, Rect, Size};
 
-/// 水平排列的容器。
+/// 垂直排列的容器。
 ///
-/// 子组件自左而右排列;[`Row::fill`] 添加的子组件按权重
-/// 瓜分剩余主轴空间,[`Row::child`] 添加的按内容自然尺寸。
-pub struct Row {
+/// 子组件自上而下排列;[`Column::fill`] 添加的子组件按权重
+/// 瓜分剩余主轴空间,[`Column::child`] 添加的按内容自然尺寸。
+pub struct Column {
     flow: Flow,
 }
 
-impl Row {
-    /// 创建无间距行。
+impl Column {
+    /// 创建无间距列。
     pub fn new() -> Self {
         Self {
             flow: Flow::new(0.0),
@@ -31,10 +31,10 @@ impl Row {
         self
     }
 
-    /// 把 Fit 子项拉伸到容器高度(最高子项的自然高)。
+    /// 把 Fit 子项拉伸到容器宽度(最宽子项的自然宽),使卡片等宽。
     ///
     /// 注意:Fit 子项会被布局两遍(先量自然尺寸,再按拉伸约束重排);
-    /// 要求子项的宽度不随高度增大而增大(如保持宽高比的图片组件不适用)。
+    /// 要求子项的高度不随宽度增大而增大(如保持宽高比的图片组件不适用)。
     pub fn cross_stretch(mut self) -> Self {
         self.flow.set_cross_stretch(true);
         self
@@ -53,13 +53,13 @@ impl Row {
     }
 }
 
-impl Default for Row {
+impl Default for Column {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Widget for Row {
+impl Widget for Column {
     fn sync(&mut self, state: &dyn std::any::Any) {
         for child in self.flow.children_mut().iter_mut() {
             child.sync(state);
@@ -73,7 +73,7 @@ impl Widget for Row {
     }
 
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
-        self.flow.layout(Axis::Horizontal, constraints, texts)
+        self.flow.layout(Axis::Vertical, constraints, texts)
     }
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {

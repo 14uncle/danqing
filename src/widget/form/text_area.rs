@@ -12,7 +12,7 @@ use crate::app::AnimationCtx;
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 use crate::render::{RectBatch, TextBatch};
 use crate::text::{Line, break_lines};
-use crate::widget::text_editor::{TextEditor, char_to_byte};
+use crate::widget::form::text_editor::{TextEditor, char_to_byte};
 use crate::widget::{EventResult, MsgQueue, Widget};
 use crate::{Color, Constraints, Edges, LightTheme, Point, Rect, Size, Theme};
 
@@ -911,10 +911,10 @@ mod tests {
     #[test]
     fn undo_stack_depth_limit() {
         let mut t = TextArea::new();
-        for i in 0..=crate::widget::text_editor::MAX_UNDO {
+        for i in 0..=crate::widget::form::text_editor::MAX_UNDO {
             t.insert(&i.to_string());
         }
-        for _ in 0..crate::widget::text_editor::MAX_UNDO {
+        for _ in 0..crate::widget::form::text_editor::MAX_UNDO {
             t.undo();
         }
         let after_undos = t.value().to_string();
