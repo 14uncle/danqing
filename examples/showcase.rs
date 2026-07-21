@@ -333,6 +333,7 @@ fn build_tree() -> Node {
         Column::new()
             .child(
                 TitleBar::themed(&t, "danqing 丹青")
+                    .corner_radius(t.radius_window())
                     .on_close(|| WindowAction::Close)
                     .on_minimize(|| WindowAction::Minimize)
                     .on_maximize(|| WindowAction::MaximizeOrRestore)
@@ -388,8 +389,9 @@ fn main() -> anyhow::Result<()> {
     };
 
     let t = theme();
-    let background =
-        BackgroundConfig::with_image("assets/background/gradient.png").scale(ScaleMode::Cover);
+    let background = BackgroundConfig::with_image("assets/background/gradient.png")
+        .scale(ScaleMode::Cover)
+        .with_noise("assets/background/noise.png", 0.08);
     let config = danqing::WindowConfig {
         clear_color: t.background(),
         background,
