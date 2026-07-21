@@ -17,7 +17,7 @@ struct VsOut {
     @location(0) local: vec2<f32>,     // 相对矩形中心的像素坐标
     @location(1) half_size: vec2<f32>, // 矩形半尺寸
     @location(2) color: vec4<f32>,
-    @location(3) radius: f32,
+    @location(3) radii: vec4<f32>,     // 四角圆角半径: 左上、右上、右下、左下
     @location(4) px: vec2<f32>,        // 片段像素坐标(用于裁剪)
     @location(5) clip_min: vec2<f32>,
     @location(6) clip_max: vec2<f32>,
@@ -29,7 +29,7 @@ fn vs_main(
     @location(0) pos: vec2<f32>,
     @location(1) size: vec2<f32>,
     @location(2) color: vec4<f32>,
-    @location(3) radius: f32,
+    @location(3) radii: vec4<f32>,
     @location(4) rotation: f32,
     @location(5) clip_min: vec2<f32>,
     @location(6) clip_max: vec2<f32>,
@@ -63,17 +63,25 @@ fn vs_main(
     out.local = d * size;
     out.half_size = size * 0.5;
     out.color = color;
-    out.radius = radius;
+    out.radii = radii;
     out.px = px;
     out.clip_min = clip_min;
     out.clip_max = clip_max;
     return out;
 }
 
-// 圆角矩形有向距离(内部为负)
-fn sd_rounded_box(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-    let q = abs(p) - b + r;
-    return length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - r;
+// 逐角圆角矩形有向距离(内部为负)。
+// radii 顺序: 左上、右上、右下、左下。
+fn sd_rounded_box_per_corner(p: vec2<f32>, b: vec2<f32>, r: vec4<f32>) -> f32 {
+    var ix: i32;
+    if (p.x >= 0.0) {
+        if (p.y >= 0.0) { ix = 2; } else { ix = 1; }
+    } else {
+        if (p.y >= 0.0) { ix = 3; } else { ix = 0; }
+    }
+    let rc = r[ix];
+    let q = abs(p) - b + vec2<f32>(rc);
+    return length(max(q, vec2<f32>(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - rc;
 }
 
 @fragment
@@ -83,8 +91,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         || in.px.y < in.clip_min.y || in.px.y >= in.clip_max.y {
         discard;
     }
-    let r = min(in.radius, min(in.half_size.x, in.half_size.y));
-    let d = sd_rounded_box(in.local, in.half_size, r);
+    let max_r = min(in.half_size.x, in.half_size.y);
+    let r = min(in.radii, vec4<f32>(max_r));
+    let d = sd_rounded_box_per_corner(in.local, in.half_size, r);
     // 以距离的变化率为过渡带宽,约 1 物理像素抗锯齿
     let w = max(fwidth(d), 1e-4);
     let alpha = 1.0 - smoothstep(-w, w, d);
