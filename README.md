@@ -36,7 +36,9 @@ src/
   layout.rs           值类型 + 约束传递 + 布局算法
   render/             wgpu 渲染管线(矩形 SDF、文本图集)
   text/               字体加载 + 字形图集(纯 CPU)
-  widget/             保留模式组件:Box/Text/Button/Column/Row/Padding/Center
+  widget/             保留模式组件,按类型分目录:base/(Button/Text)
+                      layout/(Box/Column/Row/Padding/Center) form/(TextInput/TextArea)
+                      view/(Scrollable/Switcher);focus.rs 与 title_bar.rs 居根部
 ```
 
 依赖方向只允许向下:`widget/`、`layout.rs`、`event.rs` 为纯逻辑,不依赖 `winit`/`wgpu`。

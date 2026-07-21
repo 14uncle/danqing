@@ -1,15 +1,16 @@
 //! @author 十四叔
 //! @date 2026/07/19
 
-//! 丹青 showcase —— 阶段 1 毛玻璃演示页。
+//! 丹青 showcase —— 阶段 1 设计系统组件图鉴。
 //!
 //! 本示例是唯一且持续生长的演示程序: 框架每落地一项能力,
-//! 就在这里展示一项 (以用代测)。当前使用 LightTheme 与主题化组件,
-//! 呈现统一的浅色毛玻璃视觉。
+//! 就在这里展示一项 (以用代测)。左侧按 widget/ 目录分类导航
+//! (基础 / 布局 / 表单 / 视图), 右侧经 Switcher 切换分类面板;
+//! 所有面板常驻实例化, 切换不重建组件树。
 
 use danqing::widget::{
     self, Box as UiBox, Button, Column, EventResult, MsgQueue, Node, Padding, Row, Scrollable,
-    Text, TextArea, TextInput, TitleBar, Widget,
+    Switcher, Text, TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
     App, BackgroundConfig, Event, Key, LightTheme, NamedKey, Point, ScaleMode, Size, Theme,
@@ -24,6 +25,9 @@ const SQUARE_SIZE: f32 = 40.0;
 /// 每次按键移动步长 (逻辑像素)。
 const MOVE_STEP: f32 = 20.0;
 
+/// 分类导航: 与 src/widget/ 子目录一一对应。
+const CATEGORIES: [&str; 4] = ["基础 base", "布局 layout", "表单 form", "视图 view"];
+
 /// showcase 应用 (状态容器 + 消息更新 + 视图树)。
 struct Showcase {
     count: u32,
@@ -31,6 +35,8 @@ struct Showcase {
     last_key: String,
     input_value: String,
     textarea_value: String,
+    /// 当前选中的分类索引 (驱动 Switcher)。
+    selected: usize,
 }
 
 /// 应用消息。
@@ -45,6 +51,8 @@ enum Msg {
     InputChanged(String),
     /// 多行文本域内容变化。
     TextareaChanged(String),
+    /// 切换分类面板。
+    Select(usize),
 }
 
 impl App for Showcase {
@@ -62,6 +70,7 @@ impl App for Showcase {
             Msg::KeyChar(c) => self.last_key = c,
             Msg::InputChanged(s) => self.input_value = s,
             Msg::TextareaChanged(s) => self.textarea_value = s,
+            Msg::Select(i) => self.selected = i,
         }
     }
 
@@ -209,14 +218,6 @@ fn input_row(t: &LightTheme) -> impl Widget + 'static {
         )
 }
 
-/// 交互组件卡片。
-fn interaction_card(t: &LightTheme) -> impl Widget + 'static {
-    Column::new()
-        .gap(t.spacing_md())
-        .child(counter_row(t))
-        .child(input_row(t))
-}
-
 /// 多行输入区:Scrollable + TextArea + 实时回显字数 / 行数。
 fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
@@ -337,6 +338,90 @@ impl Widget for Positioned {
     }
 }
 
+/// 页面包装: Scrollable + Padding + 页标题 + 内容。
+fn page(t: &LightTheme, heading: &str, content: impl Widget + 'static) -> impl Widget + 'static {
+    Scrollable::themed(
+        t,
+        Padding::all(
+            t.spacing_lg(),
+            Column::new()
+                .gap(t.spacing_lg())
+                // 卡片统一为内容列宽, 右边缘对齐。
+                .cross_stretch()
+                .child(
+                    Text::new(heading)
+                        .font_size(t.font_size_heading())
+                        .color(t.text_primary()),
+                )
+                .child(content),
+        ),
+    )
+}
+
+/// 基础页: 按钮与文本。
+fn page_base(t: &LightTheme) -> impl Widget + 'static {
+    page(
+        t,
+        "基础 base — 按钮与文本",
+        card(t, "按钮与计数", counter_row(t)),
+    )
+}
+
+/// 布局页: 盒模型与流式排布。
+fn page_layout(t: &LightTheme) -> impl Widget + 'static {
+    page(
+        t,
+        "布局 layout — 盒模型与流式排布",
+        card(t, "品牌色与圆角", palette_and_rounded_card(t)),
+    )
+}
+
+/// 表单页: 单行与多行文本输入。
+fn page_form(t: &LightTheme) -> impl Widget + 'static {
+    page(
+        t,
+        "表单 form — 文本输入",
+        Column::new()
+            .gap(t.spacing_lg())
+            .cross_stretch()
+            .child(card(t, "单行输入", input_row(t)))
+            .child(card(t, "多行输入", textarea_card(t))),
+    )
+}
+
+/// 视图页: 视口与可见性; 自定义组件演示。
+fn page_view(t: &LightTheme) -> impl Widget + 'static {
+    page(
+        t,
+        "视图 view — 每个面板都是 Scrollable, 分类切换由 Switcher 驱动",
+        card(t, "键盘响应 (自定义 Positioned 组件)", keyboard_card(t)),
+    )
+}
+
+/// 侧边栏: 分类导航, 选中项以 ▶ 前缀标示 (showcase 本地方案, 不改框架)。
+fn sidebar(t: &LightTheme) -> impl Widget + 'static {
+    let mut col = Column::new().gap(t.spacing_sm()).cross_stretch();
+    for (i, name) in CATEGORIES.iter().enumerate() {
+        let name = *name;
+        col = col.child(
+            Button::themed(
+                t,
+                Text::bind(move |s: &Showcase| {
+                    let prefix = if s.selected == i { "▶ " } else { "\u{3000}" };
+                    format!("{prefix}{name}")
+                })
+                .font_size(t.font_size_body())
+                .color(t.surface()),
+            )
+            .on_click(move || Msg::Select(i)),
+        );
+    }
+    UiBox::themed(t)
+        .radius(t.radius_lg())
+        .width(160.0)
+        .child(Padding::all(t.spacing_md(), col))
+}
+
 /// 构建组件树 (保留模式: 树只建一次, 数据每帧同步)。
 fn build_tree() -> Node {
     let t = theme();
@@ -349,27 +434,19 @@ fn build_tree() -> Node {
                     .on_maximize(|| WindowAction::MaximizeOrRestore)
                     .on_drag(|| WindowAction::Drag),
             )
-            // 内容区整体可滚动: 卡片总高超过视口时仍可全部到达。
             .fill(
-                Scrollable::themed(
-                    &t,
-                    Padding::all(
-                        t.spacing_lg(),
-                        Column::new()
-                            .gap(t.spacing_lg())
-                            // 所有卡片统一为最宽卡片的宽度, 右边缘对齐。
-                            .cross_stretch()
-                            .child(
-                                Text::new("跨平台自绘 UI 框架 — 阶段 1 设计系统")
-                                    .font_size(t.font_size_heading())
-                                    .color(t.text_primary()),
-                            )
-                            .child(card(&t, "品牌色与圆角", palette_and_rounded_card(&t)))
-                            .child(card(&t, "交互组件", interaction_card(&t)))
-                            .child(card(&t, "多行输入", textarea_card(&t)))
-                            .child(card(&t, "键盘响应", keyboard_card(&t))),
+                Row::new()
+                    .child(Padding::all(t.spacing_lg(), sidebar(&t)))
+                    // 分类面板: 四个页面常驻实例化, Switcher 只切换可见性。
+                    .fill(
+                        Switcher::new()
+                            .child(page_base(&t))
+                            .child(page_layout(&t))
+                            .child(page_form(&t))
+                            .child(page_view(&t))
+                            .bind(|s: &Showcase| s.selected),
+                        1,
                     ),
-                ),
                 1,
             ),
     )
@@ -385,6 +462,7 @@ fn main() -> anyhow::Result<()> {
         last_key: String::from("-"),
         input_value: String::new(),
         textarea_value: String::new(),
+        selected: 0,
     };
 
     let t = theme();
