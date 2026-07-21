@@ -81,6 +81,10 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     fn radius_md(&self) -> f32;
     /// 大圆角 (如卡片)。
     fn radius_lg(&self) -> f32;
+    /// 窗口圆角半径 (标题栏关闭按钮等需要适配)。
+    fn radius_window(&self) -> f32 {
+        self.radius_lg()
+    }
 
     /// 小阴影 (如输入框)。
     fn shadow_sm(&self) -> Shadow;
