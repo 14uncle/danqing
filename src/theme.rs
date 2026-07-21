@@ -81,15 +81,13 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     fn radius_md(&self) -> f32;
     /// 大圆角 (如卡片)。
     fn radius_lg(&self) -> f32;
-    /// 窗口圆角半径 (标题栏关闭按钮等需要适配)。
-    fn radius_window(&self) -> f32 {
-        self.radius_lg()
-    }
 
     /// 小阴影 (如输入框)。
     fn shadow_sm(&self) -> Shadow;
     /// 中阴影 (如卡片、浮层)。
     fn shadow_md(&self) -> Shadow;
+    /// 大阴影 (如模态、悬浮面板)。
+    fn shadow_lg(&self) -> Shadow;
 
     /// 标准动效曲线。
     fn easing_standard(&self) -> Easing;
@@ -105,15 +103,18 @@ pub struct LightTheme;
 
 impl Theme for LightTheme {
     fn background(&self) -> Color {
-        Color::rgba(245.0 / 255.0, 247.0 / 255.0, 250.0 / 255.0, 0.85)
+        // 与背景渐变 top 色一致的 fallback 清屏色。
+        Color::from_srgb8(247, 249, 254)
     }
 
     fn surface(&self) -> Color {
-        Color::rgba(1.0, 1.0, 1.0, 0.85)
+        // 接近纯白但保留极淡透明,让阴影/背景能透出一丝氛围。
+        Color::rgba(1.0, 1.0, 1.0, 0.95)
     }
 
     fn surface_variant(&self) -> Color {
-        Color::rgba(1.0, 1.0, 1.0, 0.40)
+        // 用于悬停、次级卡片等需要与主 surface 区分的场景。
+        Color::from_srgb8(241, 245, 249)
     }
 
     fn accent(&self) -> Color {
@@ -121,23 +122,23 @@ impl Theme for LightTheme {
     }
 
     fn text_primary(&self) -> Color {
-        Color::from_srgb8(30, 41, 59)
+        Color::from_srgb8(15, 23, 42)
     }
 
     fn text_secondary(&self) -> Color {
-        Color::from_srgb8(100, 116, 139)
+        Color::from_srgb8(71, 85, 105)
     }
 
     fn divider(&self) -> Color {
-        Color::rgba(0.0, 0.0, 0.0, 0.08)
+        Color::rgba(0.0, 0.0, 0.0, 0.10)
     }
 
     fn border(&self) -> Color {
-        Color::rgba(0.0, 0.0, 0.0, 0.12)
+        Color::rgba(0.0, 0.0, 0.0, 0.18)
     }
 
     fn selection(&self) -> Color {
-        Color::rgba(59.0 / 255.0, 130.0 / 255.0, 246.0 / 255.0, 0.25)
+        Color::rgba(59.0 / 255.0, 130.0 / 255.0, 246.0 / 255.0, 0.30)
     }
 
     fn caret(&self) -> Color {
@@ -157,7 +158,7 @@ impl Theme for LightTheme {
     }
 
     fn font_size_heading(&self) -> u16 {
-        18
+        20
     }
 
     fn spacing_xs(&self) -> f32 {
@@ -181,30 +182,38 @@ impl Theme for LightTheme {
     }
 
     fn radius_sm(&self) -> f32 {
-        4.0
+        6.0
     }
 
     fn radius_md(&self) -> f32 {
-        8.0
+        10.0
     }
 
     fn radius_lg(&self) -> f32 {
-        12.0
+        16.0
     }
 
     fn shadow_sm(&self) -> Shadow {
         Shadow {
             offset: Point::new(0.0, 1.0),
-            blur_radius: 2.0,
-            color: Color::rgba(0.0, 0.0, 0.0, 0.05),
+            blur_radius: 4.0,
+            color: Color::rgba(0.0, 0.0, 0.0, 0.08),
         }
     }
 
     fn shadow_md(&self) -> Shadow {
         Shadow {
             offset: Point::new(0.0, 4.0),
-            blur_radius: 12.0,
-            color: Color::rgba(0.0, 0.0, 0.0, 0.10),
+            blur_radius: 16.0,
+            color: Color::rgba(0.0, 0.0, 0.0, 0.14),
+        }
+    }
+
+    fn shadow_lg(&self) -> Shadow {
+        Shadow {
+            offset: Point::new(0.0, 8.0),
+            blur_radius: 28.0,
+            color: Color::rgba(0.0, 0.0, 0.0, 0.18),
         }
     }
 
@@ -272,8 +281,10 @@ mod tests {
         let theme = LightTheme;
         assert!(theme.shadow_sm().color.a > 0.0);
         assert!(theme.shadow_md().color.a > 0.0);
+        assert!(theme.shadow_lg().color.a > 0.0);
         assert!(theme.shadow_sm().blur_radius >= 0.0);
         assert!(theme.shadow_md().blur_radius >= 0.0);
+        assert!(theme.shadow_lg().blur_radius >= 0.0);
     }
 
     #[test]

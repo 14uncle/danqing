@@ -54,14 +54,14 @@ pub struct TitleBar {
     close_hover_color: Color,
     /// 按钮背景悬停 / 按下色。
     button_bg_color: Color,
-    /// 窗口右上角圆角半径,关闭按钮 hover 背景右上角使用。
-    window_corner_radius: f32,
     /// LOGO 外框色。
     logo_frame_color: Color,
     /// LOGO 内部填充色。
     logo_fill_color: Color,
     /// LOGO 颜料点色。
     logo_dot_color: Color,
+    /// 标题字号。
+    font_size: u16,
     /// 三个按钮状态 (0= 关闭,1= 最大化,2= 最小化, 从右往左)。
     buttons: [TitleButton; 3],
     /// 关闭按钮回调。
@@ -92,7 +92,7 @@ impl TitleBar {
             button_size: theme.spacing_lg() + theme.spacing_xs(),
             button_gap: 1.0,
             margin: theme.spacing_md(),
-            logo_size: theme.spacing_lg() + theme.spacing_xs(),
+            logo_size: theme.spacing_lg(),
             logo_gap: theme.spacing_sm(),
             bg: theme.surface(),
             text_color: theme.text_primary(),
@@ -100,10 +100,10 @@ impl TitleBar {
             button_hover_color: theme.text_primary(),
             close_hover_color: theme.danger(),
             button_bg_color: theme.border(),
-            window_corner_radius: theme.radius_window(),
             logo_frame_color: theme.accent(),
             logo_fill_color: theme.surface(),
             logo_dot_color: theme.accent(),
+            font_size: theme.font_size_body(),
             buttons: [TitleButton::default(); 3],
             on_close: None,
             on_minimize: None,
@@ -135,12 +135,6 @@ impl TitleBar {
     /// 设置标题栏拖拽时产出的消息。
     pub fn on_drag<M: 'static>(mut self, f: impl Fn() -> M + 'static) -> Self {
         self.on_drag = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
-        self
-    }
-
-    /// 设置窗口右上角圆角半径,关闭按钮 hover 背景右上角会适配此半径。
-    pub fn corner_radius(mut self, radius: f32) -> Self {
-        self.window_corner_radius = radius;
         self
     }
 
@@ -179,16 +173,18 @@ impl TitleBar {
 
     /// 第 i 个按钮的图形符号颜色。
     fn button_symbol_color(&self, index: usize) -> Color {
-        let base = if self.buttons[index].hovered {
-            if index == 0 {
-                self.close_hover_color
-            } else {
-                self.button_hover_color
-            }
+        let is_close = index == 0;
+        let btn = &self.buttons[index];
+        if is_close && btn.hovered {
+            // 关闭按钮 hover 时背景变 danger,符号反白。
+            return Color::WHITE;
+        }
+        let base = if btn.hovered {
+            self.button_hover_color
         } else {
             self.button_color
         };
-        if self.buttons[index].pressed {
+        if btn.pressed {
             Color::rgba(base.r * 0.7, base.g * 0.7, base.b * 0.7, base.a)
         } else {
             base
@@ -196,16 +192,27 @@ impl TitleBar {
     }
 
     /// 第 i 个按钮的背景颜色 (正常状态透明, 悬停 / 按下时显示)。
-    fn button_background_color(&self, _index: usize) -> Option<Color> {
-        if self.buttons[_index].pressed {
+    fn button_background_color(&self, index: usize) -> Option<Color> {
+        let btn = &self.buttons[index];
+        let is_close = index == 0;
+        if btn.pressed {
+            let base = if is_close && btn.hovered {
+                self.close_hover_color
+            } else {
+                self.button_bg_color
+            };
             Some(Color::rgba(
-                self.button_bg_color.r * 0.85,
-                self.button_bg_color.g * 0.85,
-                self.button_bg_color.b * 0.85,
-                self.button_bg_color.a,
+                base.r * 0.85,
+                base.g * 0.85,
+                base.b * 0.85,
+                base.a,
             ))
-        } else if self.buttons[_index].hovered {
-            Some(self.button_bg_color)
+        } else if btn.hovered {
+            if is_close {
+                Some(self.close_hover_color)
+            } else {
+                Some(self.button_bg_color)
+            }
         } else {
             None
         }
@@ -406,7 +413,7 @@ impl Widget for TitleBar {
         rects.push_rect(dot_rect, self.logo_dot_color, dot_size / 2.0);
 
         // 标题文字, 垂直居中。
-        let font_size = LightTheme.font_size_body();
+        let font_size = self.font_size;
         let baseline =
             area.origin.y + area.size.height / 2.0 + texts.ascent(f32::from(font_size)) / 2.0;
         texts.push_text(
@@ -418,16 +425,14 @@ impl Widget for TitleBar {
         );
 
         // 三个按钮: 正常仅显示几何符号, 悬停 / 按下时出现矩形背景。
+        // 背景一律直角: 窗口圆角由 DWM 裁剪 (Windows) 或原生装饰
+        // (其他平台) 处理, 自绘圆角反而无法与真实窗体圆角 / 最大化
+        // 直角状态保持一致。
         for i in 0..self.buttons.len() {
             let bg = self.button_rect(area, i);
             let icon = self.button_icon_rect(bg);
             if let Some(bg_color) = self.button_background_color(i) {
-                let radii = if i == 0 {
-                    [0.0, self.window_corner_radius, 0.0, 0.0]
-                } else {
-                    [0.0; 4]
-                };
-                rects.push_rounded_rect(bg, bg_color, radii);
+                rects.push_rect(bg, bg_color, 0.0);
             }
             self.paint_button_symbol(rects, i, icon, self.button_symbol_color(i));
         }
@@ -545,11 +550,7 @@ mod tests {
         );
         assert!((bar.button_gap - 1.0).abs() < f32::EPSILON);
         assert_eq!(bar.margin, LightTheme.spacing_md());
-        assert_eq!(
-            bar.logo_size,
-            LightTheme.spacing_lg() + LightTheme.spacing_xs()
-        );
-        assert_eq!(bar.window_corner_radius, LightTheme.radius_window());
+        assert_eq!(bar.logo_size, LightTheme.spacing_lg());
         assert_eq!(bar.bg, LightTheme.surface());
         assert_eq!(bar.logo_frame_color, LightTheme.accent());
         assert_eq!(bar.logo_fill_color, LightTheme.surface());
@@ -686,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn close_hover_background_uses_window_corner_radius() {
+    fn close_hover_background_is_rightmost_sharp_rect() {
         let mut bar = TitleBar::themed(&LightTheme, "丹青");
         let area = title_bar_area();
         let mut texts = TextBatch::new();
@@ -700,17 +701,19 @@ mod tests {
         texts.clear();
         bar.paint(area, &mut rects, &mut texts);
 
+        // hover 背景为直角矩形, 右上角由 DWM 窗体圆角裁剪适配。
         let height = bar.height;
         let matches: Vec<_> = rects
             .instance_rects()
             .iter()
             .zip(rects.instance_radii())
-            .filter(|(r, radii)| r.size == Size::new(height, height) && radii[1] > 0.0)
-            .map(|(r, radii)| (*r, radii))
+            .filter(|(r, radii)| r.size == Size::new(height, height) && radii == &[0.0; 4])
+            .map(|(r, _)| *r)
             .collect();
         assert_eq!(matches.len(), 1, "应恰好找到关闭按钮 hover 背景");
-        assert_eq!(matches[0].0.size, Size::new(height, height));
-        assert_eq!(matches[0].1, [0.0, LightTheme.radius_window(), 0.0, 0.0]);
+        let bg = matches[0];
+        assert_eq!(bg.origin.x + bg.size.width, area.origin.x + area.size.width);
+        assert_eq!(bg.origin.y, area.origin.y);
     }
 
     #[test]
@@ -737,11 +740,5 @@ mod tests {
             .map(|(r, radii)| (*r, radii))
             .collect();
         assert!(!matches.is_empty(), "应找到最大化按钮 hover 背景");
-    }
-
-    #[test]
-    fn corner_radius_builder_overrides_theme() {
-        let bar = TitleBar::themed(&LightTheme, "丹青").corner_radius(8.0);
-        assert!((bar.window_corner_radius - 8.0).abs() < f32::EPSILON);
     }
 }
