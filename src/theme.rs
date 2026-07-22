@@ -115,7 +115,7 @@ pub struct LightTheme;
 impl Theme for LightTheme {
     fn background(&self) -> Color {
         // 与背景渐变 top 色一致的 fallback 清屏色。
-        Color::from_srgb8(247, 249, 254)
+        Color::from_srgb8(240, 245, 253)
     }
 
     fn surface(&self) -> Color {

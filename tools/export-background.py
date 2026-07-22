@@ -23,9 +23,11 @@ OUT_DIR = REPO_ROOT / "assets" / "background"
 # Brand accent #3B82F6, same as LightTheme::accent().
 ACCENT = (59, 130, 246)
 
-# Gradient endpoints: very light blue-white to a slightly deeper blue-tinted grey.
-TOP = (247, 249, 254)
-BOTTOM = (228, 236, 251)
+# Gradient endpoints: light blue-white to a clearly blue-tinted base.
+# The bottom needs enough saturation/darkness for translucent glass cards
+# (white at ~0.72 alpha) to read as glass rather than flat white.
+TOP = (240, 245, 253)
+BOTTOM = (186, 208, 244)
 
 # Canvas size for the gradient / glow. 1024 is large enough to look smooth
 # when scaled with Cover on typical window sizes.
@@ -83,7 +85,9 @@ def generate_glow() -> Image.Image:
         t = i / steps
         radius = max_radius * t
         # Ease-out falloff: opacity peaks at center and drops quickly.
-        alpha = int(26 * (1.0 - t**1.5))
+        # Peak alpha 64: strong enough for the brand glow to survive the
+        # 0.25 overlay opacity and remain visible behind glass cards.
+        alpha = int(64 * (1.0 - t**1.5))
         if alpha <= 1:
             continue
         color = (*ACCENT, alpha)

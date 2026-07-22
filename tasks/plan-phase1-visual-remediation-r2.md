@@ -97,6 +97,10 @@
 - [ ] `cargo test --lib --tests` 全绿；`cargo clippy -- -D warnings` 零警告。
 - [ ] 人工确认：卡片透出背景、标题栏融入顶部、多行卡片无接缝。
 
+- [x] **Task 6.5: 重制背景渐变让玻璃可读** ✅ 2026-07-22（视觉终审后补入）
+  - **Description:** T3 完成后 surface 半透明已生效，但 gradient.png 顶部 (247,249,254) → 底部 (228,236,251) 整体过淡，72% 白叠 98% 白肉眼无法分辨玻璃。重制背景资产提高饱和度与起伏。
+  - **完成记录：** `tools/export-background.py` 顶部改 (240,245,253)、底部改 (186,208,244)，光晕峰值 alpha 26→64;showcase glow 叠加 0.15→0.25;`theme.background()` 清屏色同步新顶部色。截屏自验（`tools/capture-screen.ps1`）：层次与品牌蓝氛围可读，深色文字在全幅背景上仍清晰。
+
 ### Phase 3: 收尾
 
 - [x] **Task 6: 排版清理** ✅ 2026-07-22

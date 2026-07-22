@@ -552,7 +552,7 @@ fn main() -> anyhow::Result<()> {
     let t = theme();
     let background = BackgroundConfig::with_image("assets/background/gradient.png")
         .scale(ScaleMode::Cover)
-        .with_glow("assets/background/glow.png", 0.15)
+        .with_glow("assets/background/glow.png", 0.25)
         .with_noise("assets/background/noise.png", 0.06);
     let config = danqing::WindowConfig {
         clear_color: t.background(),
