@@ -274,11 +274,17 @@ impl RectBatch {
         let straight_h = (rect.size.height - 2.0 * r).max(0.0);
         let half = thickness * 0.5;
 
-        // 四条直边
+        // 四条直边: 整体内缩在矩形边界之内 (描边不跨边界),
+        // 否则 Scrollable 等裁剪边界会削掉外凸的半线宽, 边线发虚甚至消失。
+        self.push_rect(
+            Rect::from_xywh(rect.origin.x + r, rect.origin.y, straight_w, thickness),
+            color,
+            0.0,
+        );
         self.push_rect(
             Rect::from_xywh(
                 rect.origin.x + r,
-                rect.origin.y - half,
+                rect.origin.y + rect.size.height - thickness,
                 straight_w,
                 thickness,
             ),
@@ -286,28 +292,13 @@ impl RectBatch {
             0.0,
         );
         self.push_rect(
-            Rect::from_xywh(
-                rect.origin.x + r,
-                rect.origin.y + rect.size.height - half,
-                straight_w,
-                thickness,
-            ),
+            Rect::from_xywh(rect.origin.x, rect.origin.y + r, thickness, straight_h),
             color,
             0.0,
         );
         self.push_rect(
             Rect::from_xywh(
-                rect.origin.x - half,
-                rect.origin.y + r,
-                thickness,
-                straight_h,
-            ),
-            color,
-            0.0,
-        );
-        self.push_rect(
-            Rect::from_xywh(
-                rect.origin.x + rect.size.width - half,
+                rect.origin.x + rect.size.width - thickness,
                 rect.origin.y + r,
                 thickness,
                 straight_h,
@@ -317,9 +308,11 @@ impl RectBatch {
         );
 
         // 四个圆角：沿 90° 圆弧等距放置小矩形，步长为 half 使弧线更平滑。
+        // 弧半径内缩 half (r - half), 使圆点外缘恰好贴合矩形边界。
         // 顺序：左上、右上、右下、左下，每段从一条直边过渡到相邻直边。
-        if r > 0.0 {
-            let corner_len = std::f32::consts::FRAC_PI_2 * r;
+        if r > half {
+            let arc_r = r - half;
+            let corner_len = std::f32::consts::FRAC_PI_2 * arc_r;
             let segments = (corner_len / half).ceil().max(2.0) as usize;
             let angle_step = std::f32::consts::FRAC_PI_2 / segments as f32;
             for corner_idx in 0..4 {
@@ -344,8 +337,8 @@ impl RectBatch {
                 };
                 for i in 0..=segments {
                     let theta = start_theta + i as f32 * angle_step;
-                    let px = cx + r * theta.cos();
-                    let py = cy + r * theta.sin();
+                    let px = cx + arc_r * theta.cos();
+                    let py = cy + arc_r * theta.sin();
                     self.push_rect(
                         Rect::from_xywh(px - half, py - half, thickness, thickness),
                         color,
@@ -959,5 +952,39 @@ mod tests {
         let mut zero = RectBatch::new();
         zero.push_rounded_border(rect, Color::WHITE, 0.0, 1.0);
         assert_eq!(neg.instance_rects(), zero.instance_rects());
+    }
+
+    #[test]
+    fn rounded_border_stays_inside_rect() {
+        // 描边内缩: 所有实例 (直边 + 圆角点) 必须完全落在矩形内部,
+        // 否则在 Scrollable 裁剪边界处外凸的半线宽会被裁掉, 导致边线发虚或消失。
+        let rect = Rect::from_xywh(10.0, 20.0, 100.0, 50.0);
+        let mut batch = RectBatch::new();
+        batch.push_rounded_border(rect, Color::WHITE, 6.0, 1.0);
+        assert!(!batch.instance_rects().is_empty());
+        for inst in batch.instance_rects() {
+            let eps = 1e-4;
+            assert!(
+                inst.origin.x >= rect.origin.x - eps
+                    && inst.origin.y >= rect.origin.y - eps
+                    && inst.origin.x + inst.size.width <= rect.origin.x + rect.size.width + eps
+                    && inst.origin.y + inst.size.height <= rect.origin.y + rect.size.height + eps,
+                "描边实例应完全落在矩形内部: {inst:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rounded_border_keeps_full_thickness_under_clip() {
+        // 描边与裁剪边界重合时仍保持完整线宽 (内缩前会被裁掉一半)。
+        let rect = Rect::from_xywh(0.0, 0.0, 100.0, 50.0);
+        let mut batch = RectBatch::new();
+        batch.push_clip(rect);
+        batch.push_rounded_border(rect, Color::WHITE, 6.0, 2.0);
+        batch.pop_clip();
+        let top_edge = batch.instance_rects().iter().any(|r| {
+            (r.origin.y - rect.origin.y).abs() < 1e-4 && (r.size.height - 2.0).abs() < 1e-4
+        });
+        assert!(top_edge, "顶边应保持完整 2px 线宽且与矩形顶对齐");
     }
 }
