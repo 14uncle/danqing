@@ -81,8 +81,9 @@
   - **Files:** `src/widget/title_bar.rs`
   - **Scope:** S
 
-- [ ] **Task 5: 修 TextArea 卡片接缝**
+- [x] **Task 5: 修 TextArea 卡片接缝** ✅ 2026-07-22
   - **Description:** 框架层：TextArea 在 Scrollable 视口内高度应填满可用空间（视口高于内容时背景铺满视口，内容超高时随内容增长），而非只画内容高度；showcase 层：简化 `textarea_card` 包装，去掉外层 `UiBox` 与 TextArea 重复绘制的 surface（二选一保留背景职责）。注意不要破坏 M3 的滚动与撤销/重做行为。
+  - **完成记录：** TextArea 新增 `height()` 最小高度 builder（空内容铺满视口、内容超高仍增长，两条回归测试）;showcase 外层 UiBox 改透明尺寸壳，背景职责归 TextArea。滚动/编辑行为人工复核留给 T7。
   - **Acceptance:**
     - 表单页多行卡片为一个完整圆角白框，顶部无接缝、无双层框。
     - `cargo test --lib` 中 TextArea/Scrollable 测试全绿；滚动行为人工确认不变。

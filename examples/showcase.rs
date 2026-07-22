@@ -228,12 +228,15 @@ fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
                 .color(t.text_primary()),
         )
         .child(
-            UiBox::themed(t)
+            // 透明尺寸壳: 只为 Scrollable 提供 400×160 视口, 背景职责归 TextArea,
+            // 避免外层 UiBox 与 TextArea 双层 surface 叠出接缝。
+            UiBox::new(Color::TRANSPARENT)
                 .size(400.0, 160.0)
                 .child(Scrollable::themed(
                     t,
                     TextArea::themed(t)
                         .width(400.0)
+                        .height(160.0)
                         .on_change(|s: &str| Msg::TextareaChanged(s.to_string())),
                 )),
         )

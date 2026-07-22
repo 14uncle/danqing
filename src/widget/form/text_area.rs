@@ -47,6 +47,8 @@ pub struct TextArea {
     border_width: f32,
     /// 显式宽度(未指定则按约束上限)。
     width: Option<f32>,
+    /// 最小高度(未指定则只随内容增长;内容超高时仍随内容,供 Scrollable 滚动)。
+    height: Option<f32>,
     /// layout/paint 缓存:自身绝对矩形。
     area: Cell<Rect>,
     /// 每行文本的字符区间与宽度。
@@ -85,6 +87,7 @@ impl TextArea {
             focus_border_color: theme.accent(),
             border_width: 1.0,
             width: None,
+            height: None,
             area: Cell::new(Rect::default()),
             lines: vec![Line::empty()],
             char_offsets: vec![Vec::new()],
@@ -128,6 +131,15 @@ impl TextArea {
     /// 设置显式宽度。
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
+        self
+    }
+
+    /// 设置最小高度。
+    ///
+    /// 内容不足时保持该高度 (如填满 Scrollable 视口,避免背景接缝);
+    /// 内容超高时仍随内容增长, 由外层 Scrollable 滚动。
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = Some(height);
         self
     }
 
@@ -332,7 +344,8 @@ impl Widget for TextArea {
             .width
             .unwrap_or(constraints.max_width)
             .max(max_line_width + self.padding.horizontal());
-        let height = self.lines.len() as f32 * self.line_height + self.padding.vertical();
+        let content_height = self.lines.len() as f32 * self.line_height + self.padding.vertical();
+        let height = content_height.max(self.height.unwrap_or(0.0));
         let size = constraints.constrain(Size::new(width, height));
         self.area.set(Rect::new(Point::ZERO, size));
         size
@@ -643,6 +656,31 @@ mod tests {
 
     fn area() -> Rect {
         Rect::from_xywh(0.0, 0.0, 500.0, 500.0)
+    }
+
+    #[test]
+    fn height_builder_sets_min_height() {
+        let mut texts = TextBatch::new();
+        let mut t = TextArea::new().width(400.0).height(160.0);
+        let size = t.layout(Constraints::loose(Size::new(800.0, 800.0)), &mut texts);
+        assert!(
+            (size.height - 160.0).abs() < 0.01,
+            "空内容时应保持显式高度 160, 实际 {}",
+            size.height
+        );
+    }
+
+    #[test]
+    fn height_builder_does_not_cap_content_growth() {
+        let mut texts = TextBatch::new();
+        let long = "行\n".repeat(30);
+        let mut t = TextArea::new().width(400.0).height(160.0).text(long);
+        let size = t.layout(Constraints::loose(Size::new(800.0, 800.0)), &mut texts);
+        assert!(
+            size.height > 160.0,
+            "内容超高时应随内容增长以支持滚动, 实际 {}",
+            size.height
+        );
     }
 
     #[test]
