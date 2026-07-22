@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-丹青 (danqing) 是一个 Rust 跨平台自绘 UI 框架,处于 **阶段 1 —— 设计系统 + 品牌视觉**(M1/M2/M3 已关闭)。它使用 `winit` 0.30 处理窗口与事件,`wgpu` 30 自绘,保留模式组件树;M1 完成基础渲染与组件树,M2 加入焦点系统、单行 `TextInput`、剪贴板与 IME 支持,M3 完成 `Scrollable` 滚动容器、`TextArea` 多行文本域、撤销/重做。当前阶段 1 目标是为效率工具场景建立毛玻璃(Glassmorphism)浅色设计系统与品牌视觉。阶段 2 将落地首个 POC——剪贴板历史管理器(计划示例 `examples/clipboard.rs`,当前尚未创建)。
+丹青 (danqing) 是一个 Rust 跨平台自绘 UI 框架,使用 `winit` 0.30 处理窗口与事件,`wgpu` 30 自绘,保留模式组件树。基础里程碑 M1~M3(渲染与组件树、焦点与输入、滚动与多行文本)已关闭,文档归档在 `tasks/archive/`;当前处于 **阶段 1 —— 设计系统 + 品牌视觉**,为效率工具场景建立毛玻璃(Glassmorphism)浅色设计系统。阶段 2 将落地首个 POC——剪贴板历史管理器(计划示例 `examples/clipboard.rs`,当前尚未创建)。
 
 ## Common commands
 
@@ -86,7 +86,7 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 ## Documentation layout
 
 - 规格(spec)文档统一放在 `docs/specs/`
-- 实现计划(plan)与进度(todo)统一放在 `tasks/`
+- 实现计划(plan)与进度(todo)统一放在 `tasks/`;已关闭的里程碑 plan/todo 归档到 `tasks/archive/`
 - 灵感/one-pager 等背景材料放在 `docs/ideas/`
 
 例如 `docs/specs/spec.md`、`docs/specs/phase1-design-system.md`、`tasks/plan-phase1.md`、`tasks/todo-phase1.md`、`docs/ideas/danqing-efficiency-tool-glassmorphism.md`。

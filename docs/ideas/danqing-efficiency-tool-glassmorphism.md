@@ -91,7 +91,7 @@
 
 ## Related Documents
 
-- `tasks/plan.md` — M1 实现计划
-- `tasks/plan-m2.md` — M2 焦点与输入计划
-- `tasks/plan-m3.md` — M3 滚动与多行文本计划
+- `tasks/archive/plan.md` — M1 实现计划
+- `tasks/archive/plan-m2.md` — M2 焦点与输入计划
+- `tasks/archive/plan-m3.md` — M3 滚动与多行文本计划
 - `CLAUDE.md` — 项目约定与命令

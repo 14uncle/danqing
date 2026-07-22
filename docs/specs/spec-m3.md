@@ -52,7 +52,7 @@ M3 新增/修改：
 
 ```
 docs/specs/spec-m3.md                → 本规格
-tasks/todo-m3.md               → M3 任务进度
+tasks/archive/todo-m3.md         → M3 任务进度
 examples/showcase.rs           → 新增 Scrollable + TextArea 演示区
 src/
   layout.rs                    → 新增 Rect::intersect / is_empty
