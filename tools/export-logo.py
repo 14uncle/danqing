@@ -30,19 +30,21 @@ OUT_DIR = REPO_ROOT / "assets" / "logo"
 PNG_SIZES = [16, 24, 32, 48, 256]
 ICO_SIZES = [16, 24, 32, 48, 256]
 
-# Same colors as assets/logo/logo.svg and LightTheme::accent().
-ACCENT = (59, 130, 246, 255)
+# Same colors as assets/logo/logo.svg: jade-teal frame + brand cinnabar drop.
+# Cinnabar is a brand-only color; it is not part of the LightTheme token set.
+ACCENT = (15, 118, 110, 255)
+CINNABAR = (227, 66, 52, 255)
 FILL = (255, 255, 255, int(255 * 0.85))
 
 # Geometry expressed in the 256x256 design coordinate space.
-FRAME_X = 48
-FRAME_Y = 48
-FRAME_SIZE = 160
-FRAME_RADIUS = 40
-STROKE_WIDTH = 24
-DOT_CX = 152
-DOT_CY = 152
-DOT_R = 32
+FRAME_X = 42
+FRAME_Y = 42
+FRAME_SIZE = 172
+FRAME_RADIUS = 46
+STROKE_WIDTH = 26
+DOT_CX = 200
+DOT_CY = 200
+DOT_R = 33
 
 
 def rounded_rectangle(
@@ -112,7 +114,7 @@ def render_logo(size: int) -> Image.Image:
         fill=FILL,
     )
 
-    # Pigment dot.
+    # Cinnabar pigment drop straddling the lower-right frame edge.
     draw.ellipse(
         [
             dot_cx - dot_r,
@@ -120,7 +122,7 @@ def render_logo(size: int) -> Image.Image:
             dot_cx + dot_r,
             dot_cy + dot_r,
         ],
-        fill=ACCENT,
+        fill=CINNABAR,
     )
 
     # Downsample with high-quality antialiasing.

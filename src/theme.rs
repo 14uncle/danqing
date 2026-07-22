@@ -108,14 +108,16 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
 
 /// 浅色主题。
 ///
-/// 采用毛玻璃风格: 低饱和度背景 + 半透明白色表面 + 蓝色强调。
+/// 采用毛玻璃风格: 低饱和度背景 + 半透明白色表面 + 青绿(玉色)强调。
+///
+/// accent 取丹青矿物色中的深青绿/玉色 (#0F766E), 朱砂仅作品牌点睛 (logo), 不进 token。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LightTheme;
 
 impl Theme for LightTheme {
     fn background(&self) -> Color {
-        // 与背景渐变 top 色一致的 fallback 清屏色。
-        Color::from_srgb8(240, 245, 253)
+        // 与背景渐变 top 色一致的 fallback 清屏色 (微带青头, 与玉色 accent 同温)。
+        Color::from_srgb8(240, 248, 246)
     }
 
     fn surface(&self) -> Color {
@@ -129,12 +131,13 @@ impl Theme for LightTheme {
     }
 
     fn surface_variant(&self) -> Color {
-        // 用于悬停、次级卡片等需要与主 surface 区分的场景。
-        Color::from_srgb8(241, 245, 249)
+        // 用于悬停、次级卡片等需要与主 surface 区分的场景 (冷调微青)。
+        Color::from_srgb8(238, 246, 242)
     }
 
     fn accent(&self) -> Color {
-        Color::from_srgb8(59, 130, 246)
+        // 深青绿/玉色 #0F766E: 丹青矿物色, 白底对比度 ~5:1。
+        Color::from_srgb8(15, 118, 110)
     }
 
     fn text_primary(&self) -> Color {
@@ -154,11 +157,13 @@ impl Theme for LightTheme {
     }
 
     fn selection(&self) -> Color {
-        Color::rgba(59.0 / 255.0, 130.0 / 255.0, 246.0 / 255.0, 0.30)
+        // 跟随 accent 的 30% 透明选区。
+        Color::rgba(15.0 / 255.0, 118.0 / 255.0, 110.0 / 255.0, 0.30)
     }
 
     fn caret(&self) -> Color {
-        Color::from_srgb8(59, 130, 246)
+        // 跟随 accent。
+        Color::from_srgb8(15, 118, 110)
     }
 
     fn danger(&self) -> Color {

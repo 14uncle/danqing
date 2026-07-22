@@ -1,26 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <title>丹青 Danqing Logo</title>
-  <desc>Glass canvas mark: a rounded square frame with a pigment dot.</desc>
+  <desc>破框朱砂: a glass canvas frame in jade teal, with a cinnabar pigment drop breaking out at the lower-right corner.</desc>
 
-  <!-- 玻璃画布外框：accent 描边 + 半透明白色填充 -->
+  <!-- 玻璃画布外框:玉色(深青绿) #0F766E 描边 + 半透明白色填充 -->
   <rect
-    x="48"
-    y="48"
-    width="160"
-    height="160"
-    rx="40"
-    ry="40"
+    x="42"
+    y="42"
+    width="172"
+    height="172"
+    rx="46"
+    ry="46"
     fill="white"
     fill-opacity="0.85"
-    stroke="#3B82F6"
-    stroke-width="24"
+    stroke="#0F766E"
+    stroke-width="26"
   />
 
-  <!-- 颜料滴：实心 accent 圆，偏右下 -->
+  <!-- 朱砂滴:实心 #E34234 圆,骑跨右下角框线,一半在画布内、一半破框而出 -->
   <circle
-    cx="152"
-    cy="152"
-    r="32"
-    fill="#3B82F6"
+    cx="200"
+    cy="200"
+    r="33"
+    fill="#E34234"
   />
 </svg>

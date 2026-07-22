@@ -106,7 +106,7 @@ pub struct LightTheme;
 impl Theme for LightTheme {
     fn background(&self) -> Color { Color::rgba(245, 247, 250, 0.85) }
     fn surface(&self) -> Color { Color::rgba(255, 255, 255, 0.60) }
-    fn accent(&self) -> Color { Color::rgb(59, 130, 246) }
+    fn accent(&self) -> Color { Color::rgb(15, 118, 110) }
     fn text_primary(&self) -> Color { Color::rgb(30, 41, 59) }
     fn text_secondary(&self) -> Color { Color::rgb(100, 116, 139) }
     fn divider(&self) -> Color { Color::rgba(0, 0, 0, 0.08) }

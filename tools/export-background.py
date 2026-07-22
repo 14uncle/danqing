@@ -20,14 +20,14 @@ from PIL import Image, ImageDraw, ImageFilter
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = REPO_ROOT / "assets" / "background"
 
-# Brand accent #3B82F6, same as LightTheme::accent().
-ACCENT = (59, 130, 246)
+# Brand accent #0F766E (deep teal / jade), same as LightTheme::accent().
+ACCENT = (15, 118, 110)
 
-# Gradient endpoints: light blue-white to a clearly blue-tinted base.
+# Gradient endpoints: light jade-white to a clearly teal-tinted base.
 # The bottom needs enough saturation/darkness for translucent glass cards
 # (white at ~0.72 alpha) to read as glass rather than flat white.
-TOP = (240, 245, 253)
-BOTTOM = (186, 208, 244)
+TOP = (240, 248, 246)
+BOTTOM = (184, 214, 208)
 
 # Canvas size for the gradient / glow. 1024 is large enough to look smooth
 # when scaled with Cover on typical window sizes.
