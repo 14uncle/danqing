@@ -40,7 +40,7 @@ struct RectInstance {
 pub struct RectBatch {
     instances: Vec<RectInstance>,
     /// 裁剪矩形栈;`None` 表示当前裁剪区为空 (完全裁剪)。
-    clip_stack: Vec<Option<crate::Rect>>,
+    clip_stack: Vec<Option<Rect>>,
 }
 
 impl RectBatch {
@@ -52,8 +52,8 @@ impl RectBatch {
     /// 压入一个裁剪矩形。
     ///
     /// 后续 push 的矩形会被裁剪到该矩形与所有祖先裁剪矩形的交集。
-    /// 必须在子组件 paint 前调用, 并在 paint 后调用 [`Self::pop_clip`]。
-    pub fn push_clip(&mut self, rect: crate::Rect) {
+    /// 必须在子组件 paint 前调用，并在 paint 后调用 [`Self::pop_clip`]。
+    pub fn push_clip(&mut self, rect: Rect) {
         let next = match self.current_clip() {
             Some(parent) => parent.intersect(&rect),
             None => Some(rect),
@@ -66,7 +66,7 @@ impl RectBatch {
         self.clip_stack.pop();
     }
 
-    fn current_clip(&self) -> Option<crate::Rect> {
+    fn current_clip(&self) -> Option<Rect> {
         self.clip_stack.iter().rev().find_map(|r| *r)
     }
 
@@ -105,9 +105,12 @@ impl RectBatch {
 
     /// 添加一条沿圆角矩形边框的虚线 (划线 - 空隙式)。
     ///
-    /// 四条直边为长条形 dash, 四个圆角用等距小圆点衔接,
-    /// 从而跟随组件圆角。`dash` 为每段划线长度,`gap` 为空隙长度,
-    /// `thickness` 为线宽。
+    /// 从顶边左端出发顺时针走一整圈，四条直边与四个圆角共享同一
+    /// 划线 - 空隙相位 (按周长弧长推进),虚线节奏绕角连续、首尾相接。
+    /// 直边为长条形 dash，圆角处用半步重叠的小圆点融成平滑弧段。
+    /// 描边路径内缩半线宽，划线整体落在 `rect` 内侧,外缘与 `rect`
+    /// 边缘对齐，四边留白严格一致。
+    /// `dash` 为每段划线长度，`gap` 为空隙长度，`thickness` 为线宽。
     pub fn push_dashed_border(
         &mut self,
         rect: Rect,
@@ -117,96 +120,141 @@ impl RectBatch {
         gap: f32,
         thickness: f32,
     ) {
+        let step = dash + gap;
+        if step <= 0.0 || dash <= 0.0 || thickness <= 0.0 {
+            return;
+        }
         let r = radius
+            .max(0.0)
             .min(rect.size.width * 0.5)
             .min(rect.size.height * 0.5);
         let straight_w = (rect.size.width - 2.0 * r).max(0.0);
         let straight_h = (rect.size.height - 2.0 * r).max(0.0);
 
-        // 四条直边
+        // 路径内缩半线宽:直边内移、弧半径收缩 (圆心不变),
+        // 使划线外缘与 rect 边缘对齐而非骑跨边缘。
+        let half = thickness * 0.5;
+        let ir = (r - half).max(0.0);
+        let arc_len = std::f32::consts::FRAC_PI_2 * ir;
+
+        let x0 = rect.origin.x;
+        let y0 = rect.origin.y;
+        let x1 = x0 + rect.size.width;
+        let y1 = y0 + rect.size.height;
+        let ix0 = x0 + half;
+        let iy0 = y0 + half;
+        let ix1 = x1 - half;
+        let iy1 = y1 - half;
+
+        // 已走过的周长弧长，作为各段虚线的相位逐段传递。
+        let mut phase = 0.0f32;
+
+        // 顶边 (左→右) 与右上弧 (θ: -π/2 → 0)。
         push_dashed_hline(
             self,
-            rect.origin.x + r,
-            rect.origin.y,
+            x0 + r,
+            iy0,
             straight_w,
             color,
             dash,
             gap,
             thickness,
+            phase,
         );
-        push_dashed_hline(
+        phase += straight_w;
+        push_dashed_arc(
             self,
-            rect.origin.x + rect.size.width - r,
-            rect.origin.y + rect.size.height,
-            -straight_w,
+            x1 - r,
+            y0 + r,
+            ir,
+            -std::f32::consts::FRAC_PI_2,
             color,
             dash,
             gap,
             thickness,
+            phase,
         );
+        phase += arc_len;
+
+        // 右边 (上→下) 与右下弧 (θ: 0 → π/2)。
         push_dashed_vline(
             self,
-            rect.origin.x + rect.size.width,
-            rect.origin.y + r,
+            ix1,
+            y0 + r,
             straight_h,
             color,
             dash,
             gap,
             thickness,
+            phase,
         );
+        phase += straight_h;
+        push_dashed_arc(
+            self,
+            x1 - r,
+            y1 - r,
+            ir,
+            0.0,
+            color,
+            dash,
+            gap,
+            thickness,
+            phase,
+        );
+        phase += arc_len;
+
+        // 底边 (右→左) 与左下弧 (θ: π/2 → π)。
+        push_dashed_hline(
+            self,
+            x1 - r,
+            iy1,
+            -straight_w,
+            color,
+            dash,
+            gap,
+            thickness,
+            phase,
+        );
+        phase += straight_w;
+        push_dashed_arc(
+            self,
+            x0 + r,
+            y1 - r,
+            ir,
+            std::f32::consts::FRAC_PI_2,
+            color,
+            dash,
+            gap,
+            thickness,
+            phase,
+        );
+        phase += arc_len;
+
+        // 左边 (下→上) 与左上弧 (θ: π → 3π/2)。
         push_dashed_vline(
             self,
-            rect.origin.x,
-            rect.origin.y + rect.size.height - r,
+            ix0,
+            y1 - r,
             -straight_h,
             color,
             dash,
             gap,
             thickness,
+            phase,
         );
-
-        // 四个圆角: 用与线宽等大的小圆点近似, 顺序左上、右上、右下、左下。
-        if r > 0.0 && thickness > 0.0 {
-            let half = thickness * 0.5;
-            let corner_step = thickness + gap;
-            let corner_len = std::f32::consts::FRAC_PI_2 * r;
-            if corner_step > 0.0 {
-                for corner_idx in 0..4 {
-                    let (cx, cy, start_theta) = match corner_idx {
-                        0 => (rect.origin.x + r, rect.origin.y + r, std::f32::consts::PI),
-                        1 => (
-                            rect.origin.x + rect.size.width - r,
-                            rect.origin.y + r,
-                            std::f32::consts::PI + std::f32::consts::FRAC_PI_2,
-                        ),
-                        2 => (
-                            rect.origin.x + rect.size.width - r,
-                            rect.origin.y + rect.size.height - r,
-                            0.0,
-                        ),
-                        3 => (
-                            rect.origin.x + r,
-                            rect.origin.y + rect.size.height - r,
-                            std::f32::consts::FRAC_PI_2,
-                        ),
-                        _ => unreachable!(),
-                    };
-                    let mut d = 0.0f32;
-                    while d < corner_len {
-                        let t = d / corner_len;
-                        let theta = start_theta + t * std::f32::consts::FRAC_PI_2;
-                        let px = cx + r * theta.cos();
-                        let py = cy + r * theta.sin();
-                        self.push_rect(
-                            Rect::from_xywh(px - half, py - half, thickness, thickness),
-                            color,
-                            half,
-                        );
-                        d += corner_step;
-                    }
-                }
-            }
-        }
+        phase += straight_h;
+        push_dashed_arc(
+            self,
+            x0 + r,
+            y0 + r,
+            ir,
+            std::f32::consts::PI,
+            color,
+            dash,
+            gap,
+            thickness,
+            phase,
+        );
     }
 
     /// 添加一条沿圆角矩形边框的实线描边。
@@ -219,6 +267,7 @@ impl RectBatch {
             return;
         }
         let r = radius
+            .max(0.0)
             .min(rect.size.width * 0.5)
             .min(rect.size.height * 0.5);
         let straight_w = (rect.size.width - 2.0 * r).max(0.0);
@@ -396,7 +445,9 @@ impl RectBatch {
     }
 }
 
-/// 沿水平方向绘制一段划线 - 空隙虚线 (长度可为负, 表示从右向左)。
+/// 沿水平方向绘制一段划线 - 空隙虚线 (长度可为负，表示从右向左)。
+///
+/// `phase` 为本段起点之前已走过的弧长，虚线节奏据此延续而非重新开始。
 #[allow(clippy::too_many_arguments)]
 fn push_dashed_hline(
     rects: &mut RectBatch,
@@ -407,27 +458,28 @@ fn push_dashed_hline(
     dash: f32,
     gap: f32,
     thickness: f32,
+    phase: f32,
 ) {
     let step = dash + gap;
-    if step <= 0.0 || thickness <= 0.0 {
+    if step <= 0.0 || dash <= 0.0 || thickness <= 0.0 {
         return;
     }
     let abs_len = len.abs();
     let dir = len.signum();
-    let mut dist = 0.0f32;
-    while dist < abs_len {
-        let seg = dash.min(abs_len - dist);
-        let start_x = x0 + dir * dist;
+    for (a, b) in dash_on_intervals(phase, abs_len, dash, step) {
+        let lo = x0 + dir * a;
+        let hi = x0 + dir * b;
         rects.push_rect(
-            Rect::from_xywh(start_x, y - thickness * 0.5, seg, thickness),
+            Rect::from_xywh(lo.min(hi), y - thickness * 0.5, (hi - lo).abs(), thickness),
             color,
             0.0,
         );
-        dist += step;
     }
 }
 
-/// 沿垂直方向绘制一段划线 - 空隙虚线 (长度可为负, 表示从下向上)。
+/// 沿垂直方向绘制一段划线 - 空隙虚线 (长度可为负，表示从下向上)。
+///
+/// `phase` 含义同 [`push_dashed_hline`]。
 #[allow(clippy::too_many_arguments)]
 fn push_dashed_vline(
     rects: &mut RectBatch,
@@ -438,24 +490,84 @@ fn push_dashed_vline(
     dash: f32,
     gap: f32,
     thickness: f32,
+    phase: f32,
 ) {
     let step = dash + gap;
-    if step <= 0.0 || thickness <= 0.0 {
+    if step <= 0.0 || dash <= 0.0 || thickness <= 0.0 {
         return;
     }
     let abs_len = len.abs();
     let dir = len.signum();
-    let mut dist = 0.0f32;
-    while dist < abs_len {
-        let seg = dash.min(abs_len - dist);
-        let start_y = y0 + dir * dist;
+    for (a, b) in dash_on_intervals(phase, abs_len, dash, step) {
+        let lo = y0 + dir * a;
+        let hi = y0 + dir * b;
         rects.push_rect(
-            Rect::from_xywh(x - thickness * 0.5, start_y, thickness, seg),
+            Rect::from_xywh(x - thickness * 0.5, lo.min(hi), thickness, (hi - lo).abs()),
             color,
             0.0,
         );
-        dist += step;
     }
+}
+
+/// 沿 90° 圆弧绘制一段划线 - 空隙虚线 (θ 随弧长递增，屏幕坐标下即顺时针)。
+///
+/// 以小圆点沿弧半步重叠排列，仅在划线相位内落点，融成平滑弧段。
+/// 与直边按区间精确填充不同，弧上按固定步长采样,dash 端点精度为
+/// ±`thickness/2`，极端参数 (`dash` 小于步长) 下节奏可能与直边错位。
+/// `phase` 含义同 [`push_dashed_hline`]。
+#[allow(clippy::too_many_arguments)]
+fn push_dashed_arc(
+    rects: &mut RectBatch,
+    cx: f32,
+    cy: f32,
+    r: f32,
+    start_theta: f32,
+    color: Color,
+    dash: f32,
+    gap: f32,
+    thickness: f32,
+    phase: f32,
+) {
+    let step = dash + gap;
+    let arc_len = std::f32::consts::FRAC_PI_2 * r;
+    if step <= 0.0 || dash <= 0.0 || thickness <= 0.0 || r <= 0.0 {
+        return;
+    }
+    let half = thickness * 0.5;
+    let march = half.max(0.25);
+    let mut d = 0.0f32;
+    while d < arc_len {
+        if (phase + d).rem_euclid(step) < dash {
+            let theta = start_theta + d / r;
+            let px = cx + r * theta.cos();
+            let py = cy + r * theta.sin();
+            rects.push_rect(
+                Rect::from_xywh(px - half, py - half, thickness, thickness),
+                color,
+                half,
+            );
+        }
+        d += march;
+    }
+}
+
+/// 列出 `[0, len]` 内处于划线段 (on) 的局部距离区间，已按 `phase` 相位偏移。
+fn dash_on_intervals(phase: f32, len: f32, dash: f32, step: f32) -> Vec<(f32, f32)> {
+    let mut intervals = Vec::new();
+    // 当前相位所处划线段的局部起点 (可能为负，表示 phase 落在划线中段)。
+    let mut seg_start = -phase.rem_euclid(step);
+    if seg_start + dash <= 0.0 {
+        seg_start += step;
+    }
+    while seg_start < len {
+        let a = seg_start.max(0.0);
+        let b = (seg_start + dash).min(len);
+        if b > a {
+            intervals.push((a, b));
+        }
+        seg_start += step;
+    }
+    intervals
 }
 
 /// 一帧的绘制目标与参数。
@@ -722,5 +834,130 @@ mod tests {
         batch.pop_clip();
         batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 0.0);
         assert_eq!(batch.len(), 1);
+    }
+
+    #[test]
+    fn dash_on_intervals_offsets_by_phase() {
+        // 无相位：从 0 开始的常规节奏。
+        assert_eq!(
+            dash_on_intervals(0.0, 10.0, 4.0, 6.0),
+            vec![(0.0, 4.0), (6.0, 10.0)]
+        );
+        // 相位落在空隙：整段无划线。
+        assert!(dash_on_intervals(4.0, 2.0, 4.0, 6.0).is_empty());
+        // 相位落在空隙尾部：空隙结束后开始划线并截断到段尾。
+        assert_eq!(dash_on_intervals(5.0, 4.0, 4.0, 6.0), vec![(1.0, 4.0)]);
+        // 相位落在划线中段：段首直接续画。
+        assert_eq!(dash_on_intervals(2.0, 2.0, 4.0, 6.0), vec![(0.0, 2.0)]);
+    }
+
+    #[test]
+    fn dashed_border_carries_phase_across_edges() {
+        // 直角 10x10, 周长 40, 节奏 4+2: 顶边画完相位 10,
+        // 右边须空 2px 后续画, 底边从划线中段开始, 左边恰好重新对齐。
+        let mut batch = RectBatch::new();
+        batch.push_dashed_border(
+            Rect::from_xywh(0.0, 0.0, 10.0, 10.0),
+            Color::WHITE,
+            0.0,
+            4.0,
+            2.0,
+            1.0,
+        );
+        let rects = batch.instance_rects();
+        let expected = [
+            (0.0, 0.0, 4.0, 1.0),
+            (6.0, 0.0, 4.0, 1.0),
+            (9.0, 2.0, 1.0, 4.0),
+            (9.0, 8.0, 1.0, 2.0),
+            (8.0, 9.0, 2.0, 1.0),
+            (2.0, 9.0, 4.0, 1.0),
+            (0.0, 6.0, 1.0, 4.0),
+            (0.0, 0.0, 1.0, 4.0),
+        ];
+        assert_eq!(rects.len(), expected.len());
+        for e in expected {
+            assert!(
+                rects.iter().any(|r| {
+                    (r.origin.x - e.0).abs() < 1e-4
+                        && (r.origin.y - e.1).abs() < 1e-4
+                        && (r.size.width - e.2).abs() < 1e-4
+                        && (r.size.height - e.3).abs() < 1e-4
+                }),
+                "缺少划线 {e:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dashed_border_arc_dots_follow_shared_phase() {
+        // 顶边恰好一段划线 (4px), 随后右上弧整段落在空隙内, 不应有圆点。
+        let mut batch = RectBatch::new();
+        batch.push_dashed_border(
+            Rect::from_xywh(0.0, 0.0, 6.0, 4.0),
+            Color::WHITE,
+            1.0,
+            4.0,
+            2.0,
+            1.0,
+        );
+        let dots: Vec<Rect> = batch
+            .instance_rects()
+            .into_iter()
+            .zip(batch.instance_radii())
+            .filter(|(_, radii)| radii[0] > 0.0)
+            .map(|(r, _)| r)
+            .collect();
+        assert_eq!(dots.len(), 5);
+        // 右上弧区域 (圆心 (5,1) 附近) 不应有圆点。
+        assert!(dots.iter().all(|r| {
+            let cx = r.origin.x + 0.5;
+            let cy = r.origin.y + 0.5;
+            !(cx > 4.0 && cy < 1.5)
+        }));
+    }
+
+    #[test]
+    fn dashed_border_degenerate_inputs_are_safe() {
+        let rect = Rect::from_xywh(0.0, 0.0, 10.0, 10.0);
+
+        // dash / thickness 为 0 以及零尺寸 rect: 整体跳过, 无实例。
+        let mut batch = RectBatch::new();
+        batch.push_dashed_border(rect, Color::WHITE, 4.0, 0.0, 2.0, 1.0);
+        batch.push_dashed_border(rect, Color::WHITE, 4.0, 4.0, 2.0, 0.0);
+        batch.push_dashed_border(
+            Rect::from_xywh(0.0, 0.0, 0.0, 0.0),
+            Color::WHITE,
+            4.0,
+            4.0,
+            2.0,
+            1.0,
+        );
+        assert!(batch.is_empty());
+
+        // 负半径按 0 钳制, 行为与 radius=0 一致。
+        let mut neg = RectBatch::new();
+        neg.push_dashed_border(rect, Color::WHITE, -5.0, 4.0, 2.0, 1.0);
+        let mut zero = RectBatch::new();
+        zero.push_dashed_border(rect, Color::WHITE, 0.0, 4.0, 2.0, 1.0);
+        assert_eq!(neg.len(), zero.len());
+
+        // 超大半径 (钳到 min(w,h)/2)、半径小于半线宽 (弧被跳过)、gap 为 0:
+        // 均不 panic 且实例数有界。
+        let mut batch = RectBatch::new();
+        batch.push_dashed_border(rect, Color::WHITE, 99.0, 4.0, 2.0, 1.0);
+        batch.push_dashed_border(rect, Color::WHITE, 1.0, 4.0, 2.0, 4.0);
+        batch.push_dashed_border(rect, Color::WHITE, 4.0, 4.0, 0.0, 1.0);
+        assert!(batch.len() < 256);
+    }
+
+    #[test]
+    fn rounded_border_negative_radius_behaves_like_zero() {
+        let rect = Rect::from_xywh(0.0, 0.0, 10.0, 10.0);
+        let mut neg = RectBatch::new();
+        neg.push_rounded_border(rect, Color::WHITE, -5.0, 1.0);
+        let mut zero = RectBatch::new();
+        zero.push_rounded_border(rect, Color::WHITE, 0.0, 1.0);
+        assert_eq!(neg.instance_rects(), zero.instance_rects());
     }
 }
