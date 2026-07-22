@@ -1,9 +1,9 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! 矩形族渲染管线 (SDF 圆角, 实例化 quad)。
+//! 矩形族渲染管线 (SDF 圆角，实例化 quad)。
 //!
-//! 每帧用法: 先经 [`RectBatch`] 收集矩形, 再由管线一次绘制。
+//! 每帧用法：先经 [`RectBatch`] 收集矩形，再由管线一次绘制。
 //! 绘制同时负责以清屏色开始 render pass(每帧第一个 pass)。
 
 use crate::{Color, Rect};
@@ -22,7 +22,7 @@ struct RectInstance {
     size: [f32; 2],
     /// RGBA 颜色。
     color: [f32; 4],
-    /// 四角圆角半径 (像素),顺序: 左上、右上、右下、左下。
+    /// 四角圆角半径 (像素),顺序：左上、右上、右下、左下。
     radii: [f32; 4],
     /// 旋转角度 (弧度), 绕矩形中心顺时针。
     rotation: f32,
@@ -32,9 +32,9 @@ struct RectInstance {
     clip_max: [f32; 2],
 }
 
-/// 矩形收集器: 一帧内待绘制的矩形列表。
+/// 矩形收集器：一帧内待绘制的矩形列表。
 ///
-/// 组件树 paint 阶段向其中 push 矩形; 目前由应用层直接使用,
+/// 组件树 paint 阶段向其中 push 矩形; 目前由应用层直接使用，
 /// Task 8 起由组件树驱动。
 #[derive(Debug, Default)]
 pub struct RectBatch {
@@ -61,7 +61,7 @@ impl RectBatch {
         self.clip_stack.push(next);
     }
 
-    /// 弹出当前裁剪矩形, 恢复上一层裁剪状态。
+    /// 弹出当前裁剪矩形，恢复上一层裁剪状态。
     pub fn pop_clip(&mut self) {
         self.clip_stack.pop();
     }
@@ -70,14 +70,14 @@ impl RectBatch {
         self.clip_stack.iter().rev().find_map(|r| *r)
     }
 
-    /// 添加一个矩形 (颜色与统一圆角半径, 半径 0 为直角)。
+    /// 添加一个矩形 (颜色与统一圆角半径，半径 0 为直角)。
     pub fn push_rect(&mut self, rect: Rect, color: Color, radius: f32) {
         self.push_rounded_rect(rect, color, [radius; 4]);
     }
 
     /// 添加一个矩形 (颜色与逐角圆角半径)。
     ///
-    /// `radii` 顺序: 左上、右上、右下、左下。
+    /// `radii` 顺序：左上、右上、右下、左下。
     pub fn push_rounded_rect(&mut self, rect: Rect, color: Color, radii: [f32; 4]) {
         let (clip_min, clip_max) = match self.current_clip() {
             Some(clip) => match clip.intersect(&rect) {
@@ -211,8 +211,8 @@ impl RectBatch {
 
     /// 添加一条沿圆角矩形边框的实线描边。
     ///
-    /// 四条直边为矩形长条, 四个圆角用沿圆弧排列的小矩形衔接,
-    /// 半径取 `thickness/2` 以自然融合成平滑弧线, 从而跟随组件圆角。
+    /// 四条直边为矩形长条，四个圆角用沿圆弧排列的小矩形衔接，
+    /// 半径取 `thickness/2` 以自然融合成平滑弧线，从而跟随组件圆角。
     /// `thickness` 为线宽。
     pub fn push_rounded_border(&mut self, rect: Rect, color: Color, radius: f32, thickness: f32) {
         if thickness <= 0.0 {
@@ -267,8 +267,8 @@ impl RectBatch {
             0.0,
         );
 
-        // 四个圆角: 沿 90° 圆弧等距放置小矩形, 步长为 half 使弧线更平滑。
-        // 顺序: 左上、右上、右下、左下, 每段从一条直边过渡到相邻直边。
+        // 四个圆角：沿 90° 圆弧等距放置小矩形，步长为 half 使弧线更平滑。
+        // 顺序：左上、右上、右下、左下，每段从一条直边过渡到相邻直边。
         if r > 0.0 {
             let corner_len = std::f32::consts::FRAC_PI_2 * r;
             let segments = (corner_len / half).ceil().max(2.0) as usize;
@@ -309,9 +309,9 @@ impl RectBatch {
 
     /// 添加一条线段 (以旋转的细圆角矩形表示)。
     ///
-    /// 从 `p1` 绘制到 `p2`, 线宽为 `thickness`; 端点带圆角, 过渡自然。
-    /// 利用实例的 `rotation` 字段让细矩形沿线段方向摆放, 因此可绘制
-    /// 任意角度的直线, 用于标题栏按钮符号等几何图形。
+    /// 从 `p1` 绘制到 `p2`, 线宽为 `thickness`; 端点带圆角，过渡自然。
+    /// 利用实例的 `rotation` 字段让细矩形沿线段方向摆放，因此可绘制
+    /// 任意角度的直线，用于标题栏按钮符号等几何图形。
     pub fn push_line(&mut self, p1: crate::Point, p2: crate::Point, thickness: f32, color: Color) {
         if thickness <= 0.0 {
             return;
@@ -347,7 +347,7 @@ impl RectBatch {
             None => (NO_CLIP_MIN, NO_CLIP_MAX),
         };
 
-        // 细矩形中心与线段中心重合, 尺寸为 (length + thickness) × thickness,
+        // 细矩形中心与线段中心重合，尺寸为 (length + thickness) × thickness,
         // 旋转后两端自然形成半圆端点。
         let size = crate::Size::new(length + thickness, thickness);
         let center = crate::Point::new((p1.x + p2.x) * 0.5, (p1.y + p2.y) * 0.5);
@@ -374,19 +374,19 @@ impl RectBatch {
         self.instances.is_empty()
     }
 
-    /// 测试用: 读取所有实例的颜色 (不参与公开 API 契约)。
+    /// 测试用：读取所有实例的颜色 (不参与公开 API 契约)。
     #[doc(hidden)]
     pub fn instance_colors(&self) -> Vec<[f32; 4]> {
         self.instances.iter().map(|i| i.color).collect()
     }
 
-    /// 测试用: 读取所有实例的逐角圆角半径 (不参与公开 API 契约)。
+    /// 测试用：读取所有实例的逐角圆角半径 (不参与公开 API 契约)。
     #[doc(hidden)]
     pub fn instance_radii(&self) -> Vec<[f32; 4]> {
         self.instances.iter().map(|i| i.radii).collect()
     }
 
-    /// 测试用: 读取所有实例的矩形 (不参与公开 API 契约)。
+    /// 测试用：读取所有实例的矩形 (不参与公开 API 契约)。
     #[doc(hidden)]
     pub fn instance_rects(&self) -> Vec<Rect> {
         self.instances
@@ -483,7 +483,7 @@ pub struct RectPipeline {
 impl RectPipeline {
     const INITIAL_CAPACITY: usize = 256;
 
-    /// 创建管线,target 为 surface 颜色格式。
+    /// 创建管线，target 为 surface 颜色格式。
     pub fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("rect shader"),
@@ -531,7 +531,7 @@ impl RectPipeline {
                 1 => Float32x2, // size
                 2 => Float32x4, // color
                 3 => Float32x4, // radii
-                4 => Float32,   // rotation (弧度, 绕矩形中心)
+                4 => Float32,   // rotation (弧度，绕矩形中心)
                 5 => Float32x2, // clip_min
                 6 => Float32x2, // clip_max
             ],
@@ -604,7 +604,7 @@ impl RectPipeline {
 
     /// 开始 render pass 并绘制收集到的全部矩形。
     ///
-    /// `clear` 为 true 时以 `target.clear_color` 清屏; 为 false 时保留已有内容,
+    /// `clear` 为 true 时以 `target.clear_color` 清屏; 为 false 时保留已有内容，
     /// 用于背景图已绘制的情况。
     pub fn draw(
         &mut self,

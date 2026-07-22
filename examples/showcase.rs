@@ -3,10 +3,10 @@
 
 //! 丹青 showcase —— 阶段 1 设计系统组件图鉴。
 //!
-//! 本示例是唯一且持续生长的演示程序: 框架每落地一项能力,
+//! 本示例是唯一且持续生长的演示程序：框架每落地一项能力，
 //! 就在这里展示一项 (以用代测)。左侧按 widget/ 目录分类导航
 //! (基础 / 布局 / 表单 / 视图), 右侧经 Switcher 切换分类面板;
-//! 所有面板常驻实例化, 切换不重建组件树。
+//! 所有面板常驻实例化，切换不重建组件树。
 
 use danqing::widget::{
     self, Box as UiBox, Button, Column, EventResult, MsgQueue, Node, Padding, Row, Scrollable,
@@ -25,7 +25,7 @@ const SQUARE_SIZE: f32 = 40.0;
 /// 每次按键移动步长 (逻辑像素)。
 const MOVE_STEP: f32 = 20.0;
 
-/// 分类导航: 与 src/widget/ 子目录一一对应。
+/// 分类导航：与 src/widget/ 子目录一一对应。
 const CATEGORIES: [&str; 4] = ["基础 base", "布局 layout", "表单 form", "视图 view"];
 
 /// showcase 应用 (状态容器 + 消息更新 + 视图树)。
@@ -114,11 +114,11 @@ fn theme() -> LightTheme {
     LightTheme
 }
 
-/// 卡片容器: 带标题标签与主题化边框 / 圆角。
+/// 卡片容器：带标题标签与主题化边框 / 圆角。
 fn card(t: &LightTheme, title: &str, content: impl Widget + 'static) -> impl Widget + 'static {
     Column::new()
         .gap(t.spacing_sm())
-        // 拉伸交叉轴: 白底卡片与标题标签同宽, 由外层内容列统一卡片宽度。
+        // 拉伸交叉轴：白底卡片与标题标签同宽，由外层内容列统一卡片宽度。
         .cross_stretch()
         .child(
             Text::new(title)
@@ -153,7 +153,7 @@ fn palette_grid(t: &LightTheme) -> impl Widget + 'static {
     col
 }
 
-/// 圆角区: 同一颜色、递增圆角半径。
+/// 圆角区：同一颜色、递增圆角半径。
 fn rounded_row(t: &LightTheme) -> impl Widget + 'static {
     let mut row = Row::new().gap(t.spacing_sm());
     for radius in [
@@ -177,7 +177,7 @@ fn palette_and_rounded_card(t: &LightTheme) -> impl Widget + 'static {
         .child(rounded_row(t))
 }
 
-/// 交互区: 按钮 + 计数文本。
+/// 交互区：按钮 + 计数文本。
 fn counter_row(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
         .gap(t.spacing_lg())
@@ -202,7 +202,7 @@ fn input_row(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
         .gap(t.spacing_lg())
         .child(
-            Text::new("输入:")
+            Text::new("输入：")
                 .font_size(t.font_size_body())
                 .color(t.text_primary()),
         )
@@ -212,7 +212,7 @@ fn input_row(t: &LightTheme) -> impl Widget + 'static {
                 .on_change(|s: &str| Msg::InputChanged(s.to_string())),
         )
         .child(
-            Text::bind(|s: &Showcase| format!("已输入: {}", s.input_value))
+            Text::bind(|s: &Showcase| format!("已输入：{}", s.input_value))
                 .font_size(t.font_size_body())
                 .color(t.text_primary()),
         )
@@ -223,7 +223,7 @@ fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
         .gap(t.spacing_lg())
         .child(
-            Text::new("多行:")
+            Text::new("多行：")
                 .font_size(t.font_size_body())
                 .color(t.text_primary()),
         )
@@ -248,7 +248,7 @@ fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
         )
 }
 
-/// 键盘区: 方向键 /WASD 移动方块, 并回显最后按下的字符键。
+/// 键盘区：方向键 /WASD 移动方块，并回显最后按下的字符键。
 fn keyboard_card(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
         .gap(t.spacing_lg())
@@ -263,22 +263,22 @@ fn keyboard_card(t: &LightTheme) -> impl Widget + 'static {
                 )),
         )
         .child(
-            Text::bind(|s: &Showcase| format!("最后按键: {}", s.last_key))
+            Text::bind(|s: &Showcase| format!("最后按键：{}", s.last_key))
                 .font_size(t.font_size_body())
                 .color(t.text_primary()),
         )
 }
 
-/// 绝对 / 相对定位容器: 把子组件按状态绑定的偏移量平移。
+/// 绝对 / 相对定位容器：把子组件按状态绑定的偏移量平移。
 ///
-/// 本组件为 showcase 键盘演示专用, 放在示例文件中以保持框架核心精简。
+/// 本组件为 showcase 键盘演示专用，放在示例文件中以保持框架核心精简。
 ///
-/// 注意: 本组件的绘制与事件区域随偏移量平移, 可能超出自身布局矩形;
+/// 注意：本组件的绘制与事件区域随偏移量平移，可能超出自身布局矩形;
 /// 父容器不得按布局矩形对其裁剪。
 struct Positioned {
     child: Node,
     offset: Point,
-    binding: std::boxed::Box<dyn Fn(&Showcase) -> Point>,
+    binding: Box<dyn Fn(&Showcase) -> Point>,
     child_size: Size,
 }
 
@@ -338,7 +338,7 @@ impl Widget for Positioned {
     }
 }
 
-/// 页面包装: Scrollable + Padding + 页标题 + 内容。
+/// 页面包装：Scrollable + Padding + 页标题 + 内容。
 fn page(t: &LightTheme, heading: &str, content: impl Widget + 'static) -> impl Widget + 'static {
     Scrollable::themed(
         t,
@@ -346,7 +346,7 @@ fn page(t: &LightTheme, heading: &str, content: impl Widget + 'static) -> impl W
             t.spacing_lg(),
             Column::new()
                 .gap(t.spacing_lg())
-                // 卡片统一为内容列宽, 右边缘对齐。
+                // 卡片统一为内容列宽，右边缘对齐。
                 .cross_stretch()
                 .child(
                     Text::new(heading)
@@ -358,7 +358,7 @@ fn page(t: &LightTheme, heading: &str, content: impl Widget + 'static) -> impl W
     )
 }
 
-/// 基础页: 按钮与文本。
+/// 基础页：按钮与文本。
 fn page_base(t: &LightTheme) -> impl Widget + 'static {
     page(
         t,
@@ -367,7 +367,7 @@ fn page_base(t: &LightTheme) -> impl Widget + 'static {
     )
 }
 
-/// 布局页: 盒模型与流式排布。
+/// 布局页：盒模型与流式排布。
 fn page_layout(t: &LightTheme) -> impl Widget + 'static {
     page(
         t,
@@ -376,7 +376,7 @@ fn page_layout(t: &LightTheme) -> impl Widget + 'static {
     )
 }
 
-/// 表单页: 单行与多行文本输入。
+/// 表单页：单行与多行文本输入。
 fn page_form(t: &LightTheme) -> impl Widget + 'static {
     page(
         t,
@@ -389,7 +389,7 @@ fn page_form(t: &LightTheme) -> impl Widget + 'static {
     )
 }
 
-/// 视图页: 视口与可见性; 自定义组件演示。
+/// 视图页：视口与可见性; 自定义组件演示。
 fn page_view(t: &LightTheme) -> impl Widget + 'static {
     page(
         t,
@@ -398,7 +398,7 @@ fn page_view(t: &LightTheme) -> impl Widget + 'static {
     )
 }
 
-/// 侧边栏: 分类导航, 选中项以 ▶ 前缀标示 (showcase 本地方案, 不改框架)。
+/// 侧边栏：分类导航，选中项以 ▶ 前缀标示 (showcase 本地方案，不改框架)。
 fn sidebar(t: &LightTheme) -> impl Widget + 'static {
     let mut col = Column::new().gap(t.spacing_sm()).cross_stretch();
     for (i, name) in CATEGORIES.iter().enumerate() {
@@ -422,7 +422,7 @@ fn sidebar(t: &LightTheme) -> impl Widget + 'static {
         .child(Padding::all(t.spacing_md(), col))
 }
 
-/// 构建组件树 (保留模式: 树只建一次, 数据每帧同步)。
+/// 构建组件树 (保留模式：树只建一次，数据每帧同步)。
 fn build_tree() -> Node {
     let t = theme();
     widget::node(
@@ -437,7 +437,7 @@ fn build_tree() -> Node {
             .fill(
                 Row::new()
                     .child(Padding::all(t.spacing_lg(), sidebar(&t)))
-                    // 分类面板: 四个页面常驻实例化, Switcher 只切换可见性。
+                    // 分类面板：四个页面常驻实例化，Switcher 只切换可见性。
                     .fill(
                         Switcher::new()
                             .child(page_base(&t))

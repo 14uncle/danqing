@@ -1,15 +1,15 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! 事件: 平台无关的内部事件类型与分发语义。
+//! 事件：平台无关的内部事件类型与分发语义。
 //!
-//! 本模块为纯逻辑, 不依赖 winit;winit 事件到内部事件的
+//! 本模块为纯逻辑，不依赖 winit;winit 事件到内部事件的
 //! 转换发生在平台适配层 (window.rs)。
 //!
 //! 分发语义 (M1):
-//! - `CursorMoved`: 广播全树, 各组件自行判定 hover;
+//! - `CursorMoved`: 广播全树，各组件自行判定 hover;
 //! - `MouseInput`/`MouseWheel`: 沿命中路径分发 (后绘制者优先);
-//! - 键盘: 不送组件树, 直送应用层 (M1 无焦点系统)。
+//! - 键盘：不送组件树，直送应用层 (M1 无焦点系统)。
 
 use crate::Point;
 
@@ -85,7 +85,7 @@ pub enum ImeEvent {
     Preedit {
         /// 合成字符串。
         value: String,
-        /// 光标在合成字符串中的位置 (起始, 结束),None 表示无特定位置。
+        /// 光标在合成字符串中的位置 (起始，结束),None 表示无特定位置。
         cursor: Option<(usize, usize)>,
     },
     /// 合成提交 (最终文本)。
@@ -106,14 +106,14 @@ pub enum Event {
     MouseInput {
         /// 按键。
         button: MouseButton,
-        /// true = 按下,false = 抬起。
+        /// true = 按下，false = 抬起。
         pressed: bool,
         /// 事件发生时光标位置。
         position: Point,
     },
     /// 滚轮滚动。
     MouseWheel {
-        /// 滚动量 (行或像素, 平台归一后)。
+        /// 滚动量 (行或像素，平台归一后)。
         delta: (f32, f32),
         /// 事件发生时光标位置。
         position: Point,
@@ -122,7 +122,7 @@ pub enum Event {
     Key {
         /// 逻辑键。
         key: Key,
-        /// true = 按下,false = 抬起。
+        /// true = 按下，false = 抬起。
         pressed: bool,
         /// Shift 是否按下。
         shift: bool,
@@ -133,7 +133,7 @@ pub enum Event {
     Ime(ImeEvent),
     /// 复制请求 (焦点组件应通过 `Widget::selected_text` 提供文本)。
     Copy,
-    /// 剪切请求 (焦点组件应通过 `Widget::selected_text` 提供文本, 然后删除选区)。
+    /// 剪切请求 (焦点组件应通过 `Widget::selected_text` 提供文本，然后删除选区)。
     Cut,
     /// 粘贴请求 (系统剪贴板文本将通过 `Event::Ime(Commit)` 送达 )。
     Paste,
@@ -157,8 +157,8 @@ impl Event {
 
 /// 窗口控制动作。
 ///
-/// 由自绘标题栏等组件产出, 经 `window.rs` 的 `Handler` 识别后调用 OS 窗口 API。
-/// 保持纯逻辑, 不依赖 `winit`。
+/// 由自绘标题栏等组件产出，经 `window.rs` 的 `Handler` 识别后调用 OS 窗口 API。
+/// 保持纯逻辑，不依赖 `winit`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowAction {
     /// 关闭窗口。

@@ -1,7 +1,7 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! 单轴流式容器(Column/Row)的共享布局实现。
+//! 单轴流式容器 (Column/Row) 的共享布局实现。
 
 use crate::render::TextBatch;
 use crate::widget::Node;
@@ -10,9 +10,9 @@ use crate::{Constraints, FlowChild, Rect, Size, distribute};
 /// 主轴方向。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Axis {
-    /// 水平(Row)。
+    /// 水平 (Row)。
     Horizontal,
-    /// 垂直(Column)。
+    /// 垂直 (Column)。
     Vertical,
 }
 
@@ -52,7 +52,7 @@ impl Axis {
         }
     }
 
-    /// Fill 子项的约束:主轴固定(分得的尺寸),交叉轴宽松。
+    /// Fill 子项的约束：主轴固定 (分得的尺寸),交叉轴宽松。
     ///
     /// 交叉轴不用 tight —— 让显式尺寸的子项保留自己的交叉尺寸
     /// (如定高色块),未指定尺寸的子项自然占满交叉轴。
@@ -73,8 +73,8 @@ impl Axis {
         }
     }
 
-    /// 交叉轴拉伸约束(开启 cross_stretch 的 Fit 子项):
-    /// 交叉轴固定为容器交叉尺寸,主轴保持宽松以保留自然主轴尺寸。
+    /// 交叉轴拉伸约束 (开启 cross_stretch 的 Fit 子项):
+    /// 交叉轴固定为容器交叉尺寸，主轴保持宽松以保留自然主轴尺寸。
     fn stretch_constraints(self, main_max: f32, cross: f32) -> Constraints {
         match self {
             Axis::Horizontal => Constraints {
@@ -93,17 +93,17 @@ impl Axis {
     }
 }
 
-/// 单轴流式容器的状态(Column/Row 共用)。
+/// 单轴流式容器的状态 (Column/Row 共用)。
 pub struct Flow {
     /// 子组件。
     children: Vec<Node>,
-    /// 每个子组件的填充权重(与 `children` 一一对应)。
+    /// 每个子组件的填充权重 (与 `children` 一一对应)。
     weights: Vec<u32>,
     /// 子项间距。
     gap: f32,
-    /// 是否把 Fit 子项拉伸到容器交叉尺寸(默认 false,保持自然尺寸)。
+    /// 是否把 Fit 子项拉伸到容器交叉尺寸 (默认 false，保持自然尺寸)。
     cross_stretch: bool,
-    /// layout 阶段缓存:各子组件相对容器原点的摆放矩形。
+    /// layout 阶段缓存：各子组件相对容器原点的摆放矩形。
     areas: Vec<Rect>,
 }
 
@@ -141,9 +141,9 @@ impl Flow {
         &mut self.children
     }
 
-    /// 流式布局:Fit 子项先量,Fill 子项按权重分剩余空间。
+    /// 流式布局:Fit 子项先量，Fill 子项按权重分剩余空间。
     pub fn layout(&mut self, axis: Axis, constraints: Constraints, texts: &mut TextBatch) -> Size {
-        // 第一遍:仅量 Fit 子项,得到其自然主轴/交叉轴尺寸。
+        // 第一遍：仅量 Fit 子项，得到其自然主轴/交叉轴尺寸。
         let mut flows: Vec<FlowChild> = Vec::with_capacity(self.children.len());
         let mut fit_cross: Vec<f32> = Vec::with_capacity(self.children.len());
         for (child, weight) in self.children.iter_mut().zip(self.weights.iter()) {
@@ -166,7 +166,7 @@ impl Flow {
         let main_max = axis.main(constraints.max());
         let dist = distribute(main_max, self.gap, &flows);
 
-        // 容器实际交叉高度:Fit 子项自然交叉高的最大值,同时不低于父约束的交叉下限
+        // 容器实际交叉高度:Fit 子项自然交叉高的最大值，同时不低于父约束的交叉下限
         // (保证 tight 约束下 Fill 子项能撑满容器)。
         let cross_max = fit_cross
             .iter()
@@ -185,14 +185,14 @@ impl Flow {
             let (offset, main_size) = dist[i];
             let child_size = if *weight == 0 {
                 if self.cross_stretch {
-                    // Fit 子项拉伸:交叉轴 tight 为容器交叉尺寸,重新布局。
-                    // 主轴保持宽松,绝大多数组件的主轴尺寸与交叉轴无关,
+                    // Fit 子项拉伸：交叉轴 tight 为容器交叉尺寸，重新布局。
+                    // 主轴保持宽松，绝大多数组件的主轴尺寸与交叉轴无关，
                     // 因此第一遍算出的主轴分配仍然成立。
                     let laid_out =
                         child.layout(axis.stretch_constraints(main_max, cross_max), texts);
                     debug_assert!(
                         axis.main(laid_out) <= main_size + f32::EPSILON,
-                        "cross_stretch 要求 Fit 子项的主轴尺寸不随交叉轴增大而增大,\
+                        "cross_stretch 要求 Fit 子项的主轴尺寸不随交叉轴增大而增大，\
                          否则后续兄弟会与它重叠"
                     );
                     laid_out
@@ -212,14 +212,14 @@ impl Flow {
         constraints.constrain(axis.make_size(main, cross_max))
     }
 
-    /// 按缓存的摆放矩形绘制(相对原点平移)。
+    /// 按缓存的摆放矩形绘制 (相对原点平移)。
     pub fn paint(&self, origin: crate::Point, rects: &mut crate::RectBatch, texts: &mut TextBatch) {
         for (child, area) in self.children.iter().zip(self.areas.iter()) {
             child.paint(area.translate(origin.x, origin.y), rects, texts);
         }
     }
 
-    /// 事件分发:移动类广播全树;其他事件沿命中路径(后绘制者优先)。
+    /// 事件分发：移动类广播全树;其他事件沿命中路径 (后绘制者优先)。
     pub fn event(
         &mut self,
         origin: crate::Point,
@@ -247,7 +247,7 @@ impl Flow {
                 EventResult::Ignored
             };
         }
-        // 后绘制者(z 序靠上)优先命中
+        // 后绘制者 (z 序靠上) 优先命中
         for (child, area) in self.children.iter_mut().zip(self.areas.iter()).rev() {
             let child_area = area.translate(origin.x, origin.y);
             let hit = event.position().is_none_or(|p| child_area.contains(p));
@@ -272,7 +272,7 @@ mod tests {
         Constraints::tight(Size::new(w, h))
     }
 
-    /// 测试用记录组件: 记录是否收到事件, 并按配置返回消费结果。
+    /// 测试用记录组件：记录是否收到事件，并按配置返回消费结果。
     struct Recorder {
         received: Rc<RefCell<bool>>,
         consume: bool,
@@ -301,7 +301,7 @@ mod tests {
         let mut flow = Flow::new(0.0);
         let first_seen = Rc::new(RefCell::new(false));
         let second_seen = Rc::new(RefCell::new(false));
-        // 先压入的先绘制; 广播按 rev 顺序, 后压入者先收到事件并消费。
+        // 先压入的先绘制; 广播按 rev 顺序，后压入者先收到事件并消费。
         flow.push(
             node(Recorder {
                 received: Rc::clone(&first_seen),
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn column_cross_stretch_expands_fit_children() {
-        // 开启交叉轴拉伸后,Fit 子项的交叉尺寸扩到容器交叉尺寸(最宽子项)。
+        // 开启交叉轴拉伸后，Fit 子项的交叉尺寸扩到容器交叉尺寸 (最宽子项)。
         let mut texts = TextBatch::new();
         let mut flow = Flow::new(10.0);
         flow.set_cross_stretch(true);
@@ -396,13 +396,13 @@ mod tests {
         let mut flow = Flow::new(10.0);
         flow.push(node(UiBox::new(Color::BLACK).size(50.0, 30.0)), 0);
         flow.push(node(UiBox::new(Color::BLACK).size(80.0, 20.0)), 0);
-        // 宽松约束:容器按内容取自然尺寸
+        // 宽松约束：容器按内容取自然尺寸
         let size = flow.layout(
             Axis::Vertical,
             Constraints::loose(Size::new(200.0, 400.0)),
             &mut texts,
         );
-        // 主(column 高)= 30+20+10 = 60;交叉取最大宽 80
+        // 主 (column 高)= 30+20+10 = 60;交叉取最大宽 80
         assert_eq!(size, Size::new(80.0, 60.0));
         assert_eq!(flow.areas[0], Rect::from_xywh(0.0, 0.0, 50.0, 30.0));
         assert_eq!(flow.areas[1], Rect::from_xywh(0.0, 40.0, 80.0, 20.0));
@@ -436,7 +436,7 @@ mod tests {
         );
         assert!(
             size.height <= 30.0,
-            "Row 高度应接近 Fit 子项,而非父约束的 800;实际 {size:?}"
+            "Row 高度应接近 Fit 子项，而非父约束的 800;实际 {size:?}"
         );
     }
 }

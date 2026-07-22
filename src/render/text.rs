@@ -1,16 +1,16 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! 文本渲染管线: 图集纹理 + 实例化字形 quad。
+//! 文本渲染管线：图集纹理 + 实例化字形 quad。
 //!
-//! [`TextBatch`] 是 CPU 侧: 持有字体与图集, 负责按字排版并收集实例;
-//! [`TextPipeline`] 是 GPU 侧: 负责把图集脏区域上传纹理并绘制实例。
+//! [`TextBatch`] 是 CPU 侧：持有字体与图集，负责按字排版并收集实例;
+//! [`TextPipeline`] 是 GPU 侧：负责把图集脏区域上传纹理并绘制实例。
 
 use crate::Color;
 use crate::render::DrawTarget;
 use crate::text::{Font, GlyphAtlas};
 
-/// 无裁剪时使用的极大安全矩形(像素坐标)。
+/// 无裁剪时使用的极大安全矩形 (像素坐标)。
 const NO_CLIP_MIN: [f32; 2] = [-1_000_000.0; 2];
 const NO_CLIP_MAX: [f32; 2] = [1_000_000.0; 2];
 
@@ -30,23 +30,23 @@ struct GlyphInstance {
     color: [f32; 4],
     /// 裁剪矩形左上角。
     clip_min: [f32; 2],
-    /// 裁剪矩形右下角(不含)。
+    /// 裁剪矩形右下角 (不含)。
     clip_max: [f32; 2],
 }
 
-/// 文本收集器: 字体 + 图集 + 一帧内的字形实例。
+/// 文本收集器：字体 + 图集 + 一帧内的字形实例。
 ///
 /// 持久存在 (字体与图集跨帧复用); 每帧 [`Self::clear`] 清空实例列表。
 pub struct TextBatch {
     font: Font,
     atlas: GlyphAtlas,
     instances: Vec<GlyphInstance>,
-    /// 裁剪矩形栈;`None` 表示当前裁剪区为空(完全裁剪)。
+    /// 裁剪矩形栈;`None` 表示当前裁剪区为空 (完全裁剪)。
     clip_stack: Vec<Option<crate::Rect>>,
 }
 
 impl TextBatch {
-    /// 新建: 按策略加载字体 (系统优先, 内嵌兜底), 建默认图集。
+    /// 新建：按策略加载字体 (系统优先，内嵌兜底), 建默认图集。
     pub fn new() -> Self {
         Self {
             font: Font::load(),
@@ -59,7 +59,7 @@ impl TextBatch {
     /// 压入一个裁剪矩形。
     ///
     /// 后续 push 的字形会被裁剪到该矩形与所有祖先裁剪矩形的交集。
-    /// 必须在子组件 paint 前调用,并在 paint 后调用 [`Self::pop_clip`]。
+    /// 必须在子组件 paint 前调用，并在 paint 后调用 [`Self::pop_clip`]。
     pub fn push_clip(&mut self, rect: crate::Rect) {
         let next = match self.current_clip() {
             Some(parent) => parent.intersect(&rect),
@@ -68,7 +68,7 @@ impl TextBatch {
         self.clip_stack.push(next);
     }
 
-    /// 弹出当前裁剪矩形,恢复上一层裁剪状态。
+    /// 弹出当前裁剪矩形，恢复上一层裁剪状态。
     pub fn pop_clip(&mut self) {
         self.clip_stack.pop();
     }
@@ -102,21 +102,21 @@ impl TextBatch {
         for ch in text.chars() {
             match self.atlas.get_or_rasterize(self.font.inner(), ch, px) {
                 Ok(info) => width += info.advance,
-                Err(err) => log::warn!("测量时栅格化失败,按 0 宽计: {err}"),
+                Err(err) => log::warn!("测量时栅格化失败，按 0 宽计：{err}"),
             }
         }
         width
     }
 
-    /// 按字排版一段单行文本: 从 (x, baseline) 起逐字放置。
+    /// 按字排版一段单行文本：从 (x, baseline) 起逐字放置。
     ///
-    /// 排版失败的字形 (如图集满) 记录日志并跳过, 不中断整行。
+    /// 排版失败的字形 (如图集满) 记录日志并跳过，不中断整行。
     pub fn push_text(&mut self, text: &str, x: f32, baseline: f32, px: u16, color: Color) {
         let mut pen_x = x;
         let atlas_size = self.atlas.size() as f32;
         for ch in text.chars() {
             let Ok(info) = self.atlas.get_or_rasterize(self.font.inner(), ch, px) else {
-                log::warn!("字形栅格化失败,跳过: {ch:?} ({px}px)");
+                log::warn!("字形栅格化失败，跳过：{ch:?} ({px}px)");
                 continue;
             };
             if info.width > 0 {
@@ -182,7 +182,7 @@ impl Default for TextBatch {
     }
 }
 
-/// 文本渲染管线: 图集纹理 + 实例缓冲 + 采样渲染。
+/// 文本渲染管线：图集纹理 + 实例缓冲 + 采样渲染。
 pub struct TextPipeline {
     pipeline: wgpu::RenderPipeline,
     uniform_buf: wgpu::Buffer,
@@ -196,7 +196,7 @@ pub struct TextPipeline {
 impl TextPipeline {
     const INITIAL_CAPACITY: usize = 512;
 
-    /// 创建管线, 图集纹理按 atlas_size 建 (u8 alpha → R8Unorm)。
+    /// 创建管线，图集纹理按 atlas_size 建 (u8 alpha → R8Unorm)。
     pub fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat, atlas_size: u32) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("text shader"),
@@ -462,7 +462,7 @@ mod tests {
     fn clip_stack_skips_fully_clipped_glyphs() {
         let mut batch = TextBatch::new();
         batch.push_clip(Rect::from_xywh(0.0, 0.0, 10.0, 10.0));
-        // 文本在 (20,0) 开始,完全在裁剪区外
+        // 文本在 (20,0) 开始，完全在裁剪区外
         batch.push_text("A", 20.0, 20.0, 16, Color::BLACK);
         assert_eq!(batch.len(), 0);
     }

@@ -1,7 +1,7 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! Row 组件:水平流式容器。
+//! Row 组件：水平流式容器。
 
 use crate::event::Event;
 use crate::render::{RectBatch, TextBatch};
@@ -11,8 +11,10 @@ use crate::{Constraints, Rect, Size};
 
 /// 水平排列的容器。
 ///
-/// 子组件自左而右排列;[`Row::fill`] 添加的子组件按权重
-/// 瓜分剩余主轴空间,[`Row::child`] 添加的按内容自然尺寸。
+/// 子组件自左而右排列;
+/// [`Row::child`] 添加的按内容自然尺寸，
+/// [`Row::fill`] 添加的子组件按权重瓜分剩余主轴空间。
+///
 pub struct Row {
     flow: Flow,
 }
@@ -31,10 +33,10 @@ impl Row {
         self
     }
 
-    /// 把 Fit 子项拉伸到容器高度(最高子项的自然高)。
+    /// 把 Fit 子项拉伸到容器高度 (最高子项的自然高)。
     ///
-    /// 注意:Fit 子项会被布局两遍(先量自然尺寸,再按拉伸约束重排);
-    /// 要求子项的宽度不随高度增大而增大(如保持宽高比的图片组件不适用)。
+    /// 注意:Fit 子项会被布局两遍 (先量自然尺寸，再按拉伸约束重排);
+    /// 要求子项的宽度不随高度增大而增大 (如保持宽高比的图片组件不适用)。
     pub fn cross_stretch(mut self) -> Self {
         self.flow.set_cross_stretch(true);
         self
@@ -42,13 +44,13 @@ impl Row {
 
     /// 添加按内容自然尺寸的子组件。
     pub fn child(mut self, child: impl Widget + 'static) -> Self {
-        self.flow.push(std::boxed::Box::new(child), 0);
+        self.flow.push(Box::new(child), 0);
         self
     }
 
     /// 添加按权重瓜分剩余主轴空间的子组件。
     pub fn fill(mut self, child: impl Widget + 'static, weight: u32) -> Self {
-        self.flow.push(std::boxed::Box::new(child), weight);
+        self.flow.push(Box::new(child), weight);
         self
     }
 }

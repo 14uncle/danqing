@@ -1,18 +1,18 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! Padding 组件:为子组件添加四边间距。
+//! Padding 组件：为子组件添加四边间距。
 
 use crate::event::Event;
 use crate::render::{RectBatch, TextBatch};
 use crate::widget::{EventResult, MsgQueue, Node, Widget};
 use crate::{Constraints, Edges, Point, Rect, Size};
 
-/// 间距容器:在子组件四周留白。
+/// 间距容器：在子组件四周留白。
 pub struct Padding {
     edges: Edges,
     child: Node,
-    /// layout 缓存:子组件尺寸。
+    /// layout 缓存：子组件尺寸。
     child_size: Size,
 }
 
@@ -26,7 +26,7 @@ impl Padding {
         }
     }
 
-    /// 便捷构造:四边相同间距。
+    /// 便捷构造：四边相同间距。
     pub fn all(value: f32, child: impl Widget + 'static) -> Self {
         Self::new(Edges::all(value), child)
     }

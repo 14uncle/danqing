@@ -1,7 +1,7 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! Text 组件:单行文本,内容可静态或绑定到应用状态。
+//! Text 组件：单行文本，内容可静态或绑定到应用状态。
 
 use std::any::Any;
 
@@ -9,13 +9,13 @@ use crate::render::{RectBatch, TextBatch};
 use crate::widget::Widget;
 use crate::{Color, Constraints, LightTheme, Rect, Size, Theme};
 
-/// 文本绑定闭包:从类型擦除的应用状态产出显示内容。
+/// 文本绑定闭包：从类型擦除的应用状态产出显示内容。
 type TextBinding = Box<dyn Fn(&dyn Any) -> String>;
 
 /// 文本组件。
 ///
-/// 显示一段单行文本,字号与颜色可在构建时指定;
-/// 内容可静态([`Text::new`])或绑定到状态读取闭包([`Text::bind`])。
+/// 显示一段单行文本，字号与颜色可在构建时指定;
+/// 内容可静态 ([`Text::new`]) 或绑定到状态读取闭包 ([`Text::bind`])。
 pub struct Text {
     content: String,
     binding: Option<TextBinding>,
@@ -24,7 +24,7 @@ pub struct Text {
 }
 
 impl Text {
-    /// 创建静态文本组件,默认字号为浅色主题正文字号、颜色为不透明黑色。
+    /// 创建静态文本组件，默认字号为浅色主题正文字号、颜色为不透明黑色。
     pub fn new(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
@@ -34,7 +34,7 @@ impl Text {
         }
     }
 
-    /// 创建绑定文本组件:每帧从应用状态读取内容。
+    /// 创建绑定文本组件：每帧从应用状态读取内容。
     pub fn bind<S: 'static>(f: impl Fn(&S) -> String + 'static) -> Self {
         let mut text = Self::new("");
         text.binding = Some(Box::new(move |state: &dyn Any| {
@@ -46,7 +46,7 @@ impl Text {
         text
     }
 
-    /// 设置字号(逻辑像素)。
+    /// 设置字号 (逻辑像素)。
     pub fn font_size(mut self, size: u16) -> Self {
         self.font_size = size;
         self

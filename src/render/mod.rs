@@ -3,7 +3,7 @@
 
 //! 渲染层:wgpu 上下文 (实例 / 适配器 / 设备 / 队列 /surface)。
 //!
-//! 本模块是允许接触图形 API 的适配层之一, 对上层暴露
+//! 本模块是允许接触图形 API 的适配层之一，对上层暴露
 //! "清屏 + 绘制一帧矩形"的能力; 文本管线在后续模块中加入。
 
 mod background;
@@ -21,7 +21,7 @@ use winit::window::Window as WinitWindow;
 
 use crate::Color;
 
-/// 根据平台选择单一主 backend,避免实例创建时扫描多个后端。
+/// 根据平台选择单一主 backend，避免实例创建时扫描多个后端。
 #[cfg(target_os = "windows")]
 const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::PRIMARY;
 #[cfg(target_os = "macos")]
@@ -37,8 +37,8 @@ const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::PRIMARY;
 
 /// wgpu 实例标志。
 ///
-/// 默认在 debug/release 均关闭校验层,避免 1~2 秒的启动/关闭延迟。
-/// 需要校验层时,设置环境变量 `DANQING_WGPU_VALIDATION=1` 或 `WGPU_VALIDATION=1`。
+/// 默认在 debug/release 均关闭校验层，避免 1~2 秒的启动/关闭延迟。
+/// 需要校验层时，设置环境变量 `DANQING_WGPU_VALIDATION=1` 或 `WGPU_VALIDATION=1`。
 fn instance_flags() -> wgpu::InstanceFlags {
     let enabled = env::var("DANQING_WGPU_VALIDATION")
         .or_else(|_| env::var("WGPU_VALIDATION"))
@@ -54,13 +54,13 @@ fn instance_flags() -> wgpu::InstanceFlags {
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
     /// 创建 surface 失败。
-    #[error("创建 surface 失败: {0}")]
+    #[error("创建 surface 失败：{0}")]
     CreateSurface(#[from] wgpu::CreateSurfaceError),
     /// 请求适配器失败。
-    #[error("请求 GPU 适配器失败: {0}")]
+    #[error("请求 GPU 适配器失败：{0}")]
     RequestAdapter(#[from] wgpu::RequestAdapterError),
     /// 请求设备失败。
-    #[error("请求 GPU 设备失败: {0}")]
+    #[error("请求 GPU 设备失败：{0}")]
     RequestDevice(#[from] wgpu::RequestDeviceError),
 }
 
@@ -76,7 +76,7 @@ pub struct Context {
     config: wgpu::SurfaceConfiguration,
     /// 清屏颜色。
     clear_color: Color,
-    /// 背景图管线(可选)。
+    /// 背景图管线 (可选)。
     background_pipeline: Option<BackgroundPipeline>,
     /// 矩形渲染管线。
     rect_pipeline: RectPipeline,
@@ -112,7 +112,7 @@ impl Context {
                 ..Default::default()
             })
             .await?;
-        log::info!("GPU 适配器: {}", adapter.get_info().name);
+        log::info!("GPU 适配器：{}", adapter.get_info().name);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("danqing device"),
@@ -140,7 +140,7 @@ impl Context {
         };
         surface.configure(&device, &config);
         log::info!(
-            "surface 已配置: {}x{}, 格式 {format:?}",
+            "surface 已配置：{}x{}, 格式 {format:?}",
             config.width,
             config.height
         );
@@ -169,30 +169,30 @@ impl Context {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
-        log::debug!("surface 重建: {width}x{height}");
+        log::debug!("surface 重建：{width}x{height}");
     }
 
-    /// 渲染一帧: 背景图(如有) → 矩形 pass → 文本 pass。
-    /// 返回 false 表示出现致命错误, 应退出。
+    /// 渲染一帧：背景图 (如有) → 矩形 pass → 文本 pass。
+    /// 返回 false 表示出现致命错误，应退出。
     pub fn render(&mut self, rects: &RectBatch, texts: &mut TextBatch) -> bool {
         use wgpu::CurrentSurfaceTexture as CST;
         let frame = match self.surface.get_current_texture() {
             CST::Success(frame) | CST::Suboptimal(frame) => frame,
             CST::Timeout => {
-                log::warn!("获取帧超时,跳过本帧");
+                log::warn!("获取帧超时，跳过本帧");
                 return true;
             }
             CST::Occluded => {
-                // 窗口被遮挡 / 最小化: 跳过本帧
+                // 窗口被遮挡 / 最小化：跳过本帧
                 return true;
             }
             CST::Outdated | CST::Lost => {
-                // surface 丢失 / 过期: 重建后继续
+                // surface 丢失 / 过期：重建后继续
                 self.surface.configure(&self.device, &self.config);
                 return true;
             }
             CST::Validation => {
-                log::error!("获取帧时出现校验错误,跳过本帧");
+                log::error!("获取帧时出现校验错误，跳过本帧");
                 return true;
             }
         };

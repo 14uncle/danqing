@@ -3,10 +3,10 @@
 
 //! 自绘标题栏组件。
 //!
-//! 左侧显示窗口 LOGO 与标题, 按钮布局由 `TitleBarStyle` 决定:
+//! 左侧显示窗口 LOGO 与标题，按钮布局由 `TitleBarStyle` 决定：
 //! `Standard` 右侧提供最小化 / 最大化 / 关闭三个按钮 (Windows / Linux),
 //! `TrafficLights` 左侧提供红绿灯按钮 (macOS)。
-//! 阶段 1 按钮产出 `WindowAction` 消息, 由 `window.rs` 的 `Handler` 调用 OS 窗口 API。
+//! 阶段 1 按钮产出 `WindowAction` 消息，由 `window.rs` 的 `Handler` 调用 OS 窗口 API。
 
 use std::any::Any;
 use std::time::{Duration, Instant};
@@ -18,18 +18,18 @@ use crate::{Color, Constraints, LightTheme, Point, Rect, Size, Theme};
 
 /// 标题栏按钮布局样式。
 ///
-/// 默认值由 [`TitleBarStyle::platform_default`] 按平台解析,
+/// 默认值由 [`TitleBarStyle::platform_default`] 按平台解析，
 /// 也可通过 [`TitleBar::style`] 显式指定 (如跨平台测试红绿灯布局)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitleBarStyle {
     /// 右侧最小化 / 最大化 / 关闭三键 (Windows / Linux 风格)。
     Standard,
-    /// 左侧红绿灯按钮 (macOS 风格): 红 = 关闭, 黄 = 最小化, 绿 = 最大化。
+    /// 左侧红绿灯按钮 (macOS 风格): 红 = 关闭，黄 = 最小化，绿 = 最大化。
     TrafficLights,
 }
 
 impl TitleBarStyle {
-    /// 当前平台的默认样式: macOS 为红绿灯, 其余平台为标准右侧三键。
+    /// 当前平台的默认样式：macOS 为红绿灯，其余平台为标准右侧三键。
     pub fn platform_default() -> Self {
         if cfg!(target_os = "macos") {
             Self::TrafficLights
@@ -55,7 +55,7 @@ impl TitleBarStyle {
     }
 }
 
-/// 标题栏按钮角色; 数组下标即角色序 (0= 关闭, 1= 最大化, 2= 最小化)。
+/// 标题栏按钮角色; 数组下标即角色序 (0= 关闭，1= 最大化，2= 最小化)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ButtonRole {
     Close,
@@ -64,7 +64,7 @@ enum ButtonRole {
 }
 
 impl ButtonRole {
-    /// 全部角色, 下标与角色序一致。
+    /// 全部角色，下标与角色序一致。
     const ALL: [Self; 3] = [Self::Close, Self::Maximize, Self::Minimize];
 
     /// 角色对应的按钮数组下标。
@@ -73,7 +73,7 @@ impl ButtonRole {
     }
 }
 
-/// 红绿灯 hover 符号颜色 (macOS 惯例: 半透明深灰, 不随主题变化)。
+/// 红绿灯 hover 符号颜色 (macOS 惯例：半透明深灰，不随主题变化)。
 const TRAFFIC_GLYPH_COLOR: Color = Color::rgba(0.0, 0.0, 0.0, 0.55);
 
 /// 标题栏按钮。
@@ -138,7 +138,7 @@ pub struct TitleBar {
     traffic_leading: f32,
     /// 标题字号。
     font_size: u16,
-    /// 三个按钮状态, 按角色序索引 (0= 关闭,1= 最大化,2= 最小化)。
+    /// 三个按钮状态，按角色序索引 (0= 关闭，1= 最大化，2= 最小化)。
     buttons: [TitleButton; 3],
     /// 关闭按钮回调。
     on_close: Option<ActionFactory>,
@@ -150,12 +150,12 @@ pub struct TitleBar {
     on_drag: Option<ActionFactory>,
     /// 自身绝对矩形缓存。
     area: Rect,
-    /// 上次在非按钮区按下左键的时间与位置, 用于识别双击最大化。
+    /// 上次在非按钮区按下左键的时间与位置，用于识别双击最大化。
     last_left_press: Option<(Instant, Point)>,
 }
 
 impl TitleBar {
-    /// 创建标题栏, 使用默认浅色主题。
+    /// 创建标题栏，使用默认浅色主题。
     pub fn new(title: impl Into<String>) -> Self {
         Self::themed(&LightTheme, title)
     }
@@ -183,7 +183,7 @@ impl TitleBar {
             traffic_close_color: theme.traffic_close(),
             traffic_minimize_color: theme.traffic_minimize(),
             traffic_maximize_color: theme.traffic_maximize(),
-            // macOS 红绿灯规格: 直径 12、间隙 8、前导边距 12, 取间距 token 近似值。
+            // macOS 红绿灯规格：直径 12、间隙 8、前导边距 12, 取间距 token 近似值。
             traffic_diameter: theme.spacing_md(),
             traffic_gap: theme.spacing_sm(),
             traffic_leading: theme.spacing_md(),
@@ -198,7 +198,7 @@ impl TitleBar {
         }
     }
 
-    /// 设置按钮布局样式, 覆盖平台默认值。
+    /// 设置按钮布局样式，覆盖平台默认值。
     pub fn style(mut self, style: TitleBarStyle) -> Self {
         self.style = style;
         self
@@ -228,7 +228,7 @@ impl TitleBar {
         self
     }
 
-    /// 计算指定角色按钮的矩形 (Standard 为整高方形, 红绿灯为圆形外接正方形)。
+    /// 计算指定角色按钮的矩形 (Standard 为整高方形，红绿灯为圆形外接正方形)。
     fn button_rect(&self, area: Rect, role: ButtonRole) -> Rect {
         let placed = self.style.placed_roles();
         let pos = placed
@@ -251,7 +251,7 @@ impl TitleBar {
         }
     }
 
-    /// 计算第 i 个按钮图标矩形,在 hover 背景内居中。
+    /// 计算第 i 个按钮图标矩形，在 hover 背景内居中。
     fn button_icon_rect(&self, bg: Rect) -> Rect {
         let size = self.button_size;
         let x = bg.origin.x + (bg.size.width - size) / 2.0;
@@ -276,7 +276,7 @@ impl TitleBar {
         Rect::from_xywh(x, y, self.logo_size, self.logo_size)
     }
 
-    /// 返回鼠标位置命中的按钮角色, 无命中返回 `None`。
+    /// 返回鼠标位置命中的按钮角色，无命中返回 `None`。
     fn hit_button(&self, area: Rect, position: Point) -> Option<ButtonRole> {
         ButtonRole::ALL
             .into_iter()
@@ -288,7 +288,7 @@ impl TitleBar {
         let is_close = role == ButtonRole::Close;
         let btn = &self.buttons[role.index()];
         if is_close && btn.hovered {
-            // 关闭按钮 hover 时背景变 danger,符号反白。
+            // 关闭按钮 hover 时背景变 danger，符号反白。
             return Color::WHITE;
         }
         let base = if btn.hovered {
@@ -303,7 +303,7 @@ impl TitleBar {
         }
     }
 
-    /// 指定角色按钮的背景颜色 (正常状态透明, 悬停 / 按下时显示)。
+    /// 指定角色按钮的背景颜色 (正常状态透明，悬停 / 按下时显示)。
     fn button_background_color(&self, role: ButtonRole) -> Option<Color> {
         let btn = &self.buttons[role.index()];
         let is_close = role == ButtonRole::Close;
@@ -363,7 +363,7 @@ impl TitleBar {
                 && dist.x.abs() < DOUBLE_CLICK_DISTANCE
                 && dist.y.abs() < DOUBLE_CLICK_DISTANCE
             {
-                // 双击: 最大化 / 还原
+                // 双击：最大化 / 还原
                 if let Some(factory) = &self.on_maximize {
                     msgs.push(factory());
                 }
@@ -381,8 +381,8 @@ impl TitleBar {
 
     /// 用纯轴对齐几何图形绘制指定角色按钮的符号。
     ///
-    /// 为避开旋转实例在部分 GPU 驱动下的表现不一致, 所有符号均用
-    /// `push_rect` 实现: 水平 / 垂直线段用细长矩形, 对角线用小圆点队列近似。
+    /// 为避开旋转实例在部分 GPU 驱动下的表现不一致，所有符号均用
+    /// `push_rect` 实现：水平 / 垂直线段用细长矩形，对角线用小圆点队列近似。
     fn paint_button_symbol(
         &self,
         rects: &mut RectBatch,
@@ -398,7 +398,7 @@ impl TitleBar {
         let half_thick = thickness * 0.5;
 
         match role {
-            // 关闭:× 形两条对角线, 用小圆点队列近似。
+            // 关闭:× 形两条对角线，用小圆点队列近似。
             ButtonRole::Close => {
                 self.push_axis_aligned_diagonal(
                     rects,
@@ -415,7 +415,7 @@ impl TitleBar {
                     color,
                 );
             }
-            // 最大化: Standard 为 □ 形方框, 红绿灯为 + 形 (水平 + 垂直线段)。
+            // 最大化：Standard 为 □ 形方框，红绿灯为 + 形 (水平 + 垂直线段)。
             ButtonRole::Maximize => {
                 if self.style == TitleBarStyle::TrafficLights {
                     rects.push_rect(
@@ -463,7 +463,7 @@ impl TitleBar {
                     half_thick,
                 );
             }
-            // 最小化: 水平线段。
+            // 最小化：水平线段。
             ButtonRole::Minimize => {
                 rects.push_rect(
                     Rect::from_xywh(cx - extent, cy - half_thick, extent * 2.0, thickness),
@@ -476,8 +476,8 @@ impl TitleBar {
 
     /// 用轴对齐小圆点队列近似一条对角线。
     ///
-    /// 每个步进放置一个 `thickness × thickness` 的圆角矩形,
-    /// 圆角半径为 `thickness/2` 使其呈圆形, 彼此重叠形成平滑线段。
+    /// 每个步进放置一个 `thickness × thickness` 的圆角矩形，
+    /// 圆角半径为 `thickness/2` 使其呈圆形，彼此重叠形成平滑线段。
     fn push_axis_aligned_diagonal(
         &self,
         rects: &mut RectBatch,
@@ -496,7 +496,7 @@ impl TitleBar {
             return;
         }
         let half = thickness * 0.5;
-        // 步长取 thickness 的一半, 让小圆点高度重叠, 对角线看起来更实心。
+        // 步长取 thickness 的一半，让小圆点高度重叠，对角线看起来更实心。
         let step = thickness * 0.5;
         let count = (length / step).ceil().max(1.0) as usize;
         for i in 0..=count {
@@ -515,7 +515,7 @@ impl TitleBar {
 impl Widget for TitleBar {
     fn layout(&mut self, constraints: Constraints, _texts: &mut TextBatch) -> Size {
         let size = constraints.constrain(Size::new(constraints.max_width, self.height));
-        self.area = Rect::new(crate::Point::ZERO, size);
+        self.area = Rect::new(Point::ZERO, size);
         size
     }
 
@@ -551,7 +551,7 @@ impl Widget for TitleBar {
         );
         rects.push_rect(dot_rect, self.logo_dot_color, dot_size / 2.0);
 
-        // 标题文字, 垂直居中。
+        // 标题文字，垂直居中。
         let font_size = self.font_size;
         let baseline =
             area.origin.y + area.size.height / 2.0 + texts.ascent(f32::from(font_size)) / 2.0;
@@ -566,9 +566,9 @@ impl Widget for TitleBar {
         // 按钮绘制按样式分支。
         match self.style {
             TitleBarStyle::Standard => {
-                // 正常仅显示几何符号, 悬停 / 按下时出现矩形背景。
-                // 背景一律直角: 窗口圆角由 DWM 裁剪 (Windows) 或原生装饰
-                // (其他平台) 处理, 自绘圆角反而无法与真实窗体圆角 / 最大化
+                // 正常仅显示几何符号，悬停 / 按下时出现矩形背景。
+                // 背景一律直角：窗口圆角由 DWM 裁剪 (Windows) 或原生装饰
+                // (其他平台) 处理，自绘圆角反而无法与真实窗体圆角 / 最大化
                 // 直角状态保持一致。
                 for role in self.style.placed_roles() {
                     let bg = self.button_rect(area, role);
@@ -580,7 +580,7 @@ impl Widget for TitleBar {
                 }
             }
             TitleBarStyle::TrafficLights => {
-                // 红绿灯: 始终绘制主题色实心圆, 仅 hover 时叠加深色符号。
+                // 红绿灯：始终绘制主题色实心圆，仅 hover 时叠加深色符号。
                 for role in self.style.placed_roles() {
                     let circle = self.button_rect(area, role);
                     rects.push_rect(circle, self.traffic_color(role), circle.size.width / 2.0);
@@ -626,7 +626,7 @@ impl Widget for TitleBar {
                     }
                     EventResult::Consumed
                 } else {
-                    // 非按钮区: 拖拽或双击最大化
+                    // 非按钮区：拖拽或双击最大化
                     self.handle_drag_or_double_click(*position, msgs);
                     EventResult::Consumed
                 }
@@ -663,7 +663,7 @@ impl Widget for TitleBar {
 
 #[cfg(test)]
 impl TitleBar {
-    /// 指定按钮是否悬停 (测试用,0= 关闭,1= 最大化,2= 最小化)。
+    /// 指定按钮是否悬停 (测试用，0= 关闭，1= 最大化，2= 最小化)。
     pub(crate) fn button_hovered(&self, index: usize) -> bool {
         self.buttons[index].hovered
     }
@@ -673,7 +673,7 @@ impl TitleBar {
         self.buttons[index].pressed
     }
 
-    /// 指定按钮中心 (测试用, 角色序: 0= 关闭,1= 最大化,2= 最小化)。
+    /// 指定按钮中心 (测试用，角色序：0= 关闭，1= 最大化，2= 最小化)。
     pub(crate) fn button_center(&self, area: Rect, index: usize) -> Point {
         let r = self.button_rect(area, ButtonRole::ALL[index]);
         Point::new(
@@ -725,7 +725,7 @@ mod tests {
         let minimize = bar.button_rect(area, ButtonRole::Minimize);
         let maximize = bar.button_rect(area, ButtonRole::Maximize);
 
-        // 左置: 整组位于左半区, 顺序 关闭 → 最小化 → 最大化。
+        // 左置：整组位于左半区，顺序 关闭 → 最小化 → 最大化。
         assert!(close.origin.x >= area.origin.x);
         assert!(close.origin.x < minimize.origin.x);
         assert!(minimize.origin.x < maximize.origin.x);
@@ -750,12 +750,12 @@ mod tests {
             )
         };
 
-        // 红绿灯关闭按钮中心, 在 Standard 布局下不命中任何按钮。
+        // 红绿灯关闭按钮中心，在 Standard 布局下不命中任何按钮。
         let p = center_of(traffic.button_rect(area, ButtonRole::Close));
         assert_eq!(standard.hit_button(area, p), None);
         assert_eq!(traffic.hit_button(area, p), Some(ButtonRole::Close));
 
-        // Standard 关闭按钮中心, 在红绿灯布局下不命中任何按钮。
+        // Standard 关闭按钮中心，在红绿灯布局下不命中任何按钮。
         let p = center_of(standard.button_rect(area, ButtonRole::Close));
         assert_eq!(traffic.hit_button(area, p), None);
         assert_eq!(standard.hit_button(area, p), Some(ButtonRole::Close));
@@ -790,7 +790,7 @@ mod tests {
             let expected = [color.r, color.g, color.b, color.a];
             assert!(
                 circles.contains(&expected),
-                "缺少主题色圆形按钮: {expected:?}"
+                "缺少主题色圆形按钮：{expected:?}"
             );
         }
         // 非 hover: 不绘制任何符号。
@@ -956,11 +956,7 @@ mod tests {
         let area = title_bar_area();
         let mut msgs = MsgQueue::new();
 
-        let result = bar.event(
-            &Event::CursorMoved(crate::Point::new(10.0, 10.0)),
-            area,
-            &mut msgs,
-        );
+        let result = bar.event(&Event::CursorMoved(Point::new(10.0, 10.0)), area, &mut msgs);
 
         assert_eq!(result, EventResult::Ignored);
         assert!(!bar.button_hovered(0));
@@ -1008,7 +1004,7 @@ mod tests {
             &Event::MouseInput {
                 button: MouseButton::Left,
                 pressed: true,
-                position: crate::Point::new(50.0, 20.0),
+                position: Point::new(50.0, 20.0),
             },
             area,
             &mut msgs,
@@ -1034,7 +1030,7 @@ mod tests {
         texts.clear();
         bar.paint(area, &mut rects, &mut texts);
 
-        // hover 背景为直角矩形, 右上角由 DWM 窗体圆角裁剪适配。
+        // hover 背景为直角矩形，右上角由 DWM 窗体圆角裁剪适配。
         let height = bar.height;
         let matches: Vec<_> = rects
             .instance_rects()

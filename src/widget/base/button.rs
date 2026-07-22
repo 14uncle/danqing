@@ -1,7 +1,7 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! Button 组件:可点击按钮,点击产出应用消息。
+//! Button 组件：可点击按钮，点击产出应用消息。
 
 use std::any::Any;
 
@@ -15,8 +15,8 @@ type MsgFactory = std::boxed::Box<dyn Fn() -> std::boxed::Box<dyn Any>>;
 
 /// 按钮组件。
 ///
-/// 内含一个子组件(通常是文本标签),自带内边距与背景;
-/// hover 变亮、pressed 变暗;点击(按下并原地抬起)或聚焦时按空格/回车产出消息。
+/// 内含一个子组件 (通常是文本标签),自带内边距与背景;
+/// hover 变亮、pressed 变暗;点击 (按下并原地抬起) 或聚焦时按空格/回车产出消息。
 pub struct Button {
     child: Node,
     on_click: Option<MsgFactory>,
@@ -28,14 +28,14 @@ pub struct Button {
     hovered: bool,
     pressed: bool,
     focused: bool,
-    /// layout 缓存:内容区矩形(相对自身原点)。
+    /// layout 缓存：内容区矩形 (相对自身原点)。
     child_size: Size,
-    /// layout 缓存:自身绝对矩形(用于焦点命中与 IME 区域)。
+    /// layout 缓存：自身绝对矩形 (用于焦点命中与 IME 区域)。
     area: Rect,
 }
 
 impl Button {
-    /// 创建按钮,使用默认浅色主题 token。
+    /// 创建按钮，使用默认浅色主题 token。
     pub fn new(child: impl Widget + 'static) -> Self {
         Self::themed(&LightTheme, child)
     }
@@ -249,22 +249,22 @@ impl Widget for Button {
 
 #[cfg(test)]
 impl Button {
-    /// 当前背景色(测试用)。
+    /// 当前背景色 (测试用)。
     pub(crate) fn color_value(&self) -> Color {
         self.color
     }
 
-    /// 当前焦点环颜色(测试用)。
+    /// 当前焦点环颜色 (测试用)。
     pub(crate) fn focus_color_value(&self) -> Color {
         self.focus_color
     }
 
-    /// 当前圆角半径(测试用)。
+    /// 当前圆角半径 (测试用)。
     pub(crate) fn radius_value(&self) -> f32 {
         self.radius
     }
 
-    /// 当前内边距(测试用)。
+    /// 当前内边距 (测试用)。
     pub(crate) fn padding_value(&self) -> Edges {
         self.padding
     }

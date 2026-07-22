@@ -487,7 +487,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 f64::from(self.config.size.width),
                 f64::from(self.config.size.height),
             ));
-        // 全平台使用自绘标题栏 (按钮布局样式由 TitleBar 按平台适配,
+        // 全平台使用自绘标题栏 (按钮布局样式由 TitleBar 按平台适配，
         // 参见 docs/specs/title-bar-cross-platform.md)。
         let attrs = attrs.with_decorations(false);
         let window = match event_loop.create_window(attrs) {
@@ -546,6 +546,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 | WindowEvent::MouseInput { .. }
                 | WindowEvent::MouseWheel { .. }
         ) {
+            // 鼠标事件
             if let Some(internal) = convert_event(&event, self.cursor, self.modifiers) {
                 let result = self.tree.event(&internal, self.root_area, &mut self.msgs);
                 if let Event::MouseInput {

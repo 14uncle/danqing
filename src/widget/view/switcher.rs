@@ -1,7 +1,7 @@
 //! @author 十四叔
 //! @date 2026/07/21
 
-//! Switcher 组件: 多面板切换容器。
+//! Switcher 组件：多面板切换容器。
 
 use std::any::Any;
 
@@ -11,28 +11,28 @@ use crate::render::{RectBatch, TextBatch};
 use crate::widget::{EventResult, MsgQueue, Node, Widget};
 use crate::{Constraints, Rect, Size};
 
-/// active 索引绑定闭包: 每帧从应用状态读取。
+/// active 索引绑定闭包：每帧从应用状态读取。
 type ActiveBinding = Box<dyn Fn(&dyn Any) -> usize>;
 
-/// 切换容器: 保留全部子组件实例, 只让 active 子组件参与布局 / 绘制 / 事件。
+/// 切换容器：保留全部子组件实例，只让 active 子组件参与布局 / 绘制 / 事件。
 ///
-/// 与"销毁-重建"的切换不同, Switcher 始终持有所有子组件:
+/// 与"销毁 - 重建"的切换不同，Switcher 始终持有所有子组件：
 /// `sync` / `animate` 传播给全部子组件 (状态保鲜、动画存活),
-/// `layout` / `paint` / `event` 只作用于 active 子组件,
+/// `layout` / `paint` / `event` 只作用于 active 子组件，
 /// [`Switcher::children`] 只暴露 active 子组件。
 ///
-/// 焦点语义: 隐藏面板内的组件不进焦点链; 若焦点恰在隐藏面板内,
-/// 下一帧焦点重建会将其清除, 切回后不自动恢复 (组件内残留的
-/// focused 标志不可见, 无副作用)。注意焦点路径按索引解析: 若切换后
-/// 新面板在相同路径上恰好也是可聚焦组件, 焦点会静默落在该组件上
+/// 焦点语义：隐藏面板内的组件不进焦点链; 若焦点恰在隐藏面板内，
+/// 下一帧焦点重建会将其清除，切回后不自动恢复 (组件内残留的
+/// focused 标志不可见，无副作用)。注意焦点路径按索引解析：若切换后
+/// 新面板在相同路径上恰好也是可聚焦组件，焦点会静默落在该组件上
 /// (不派发 FocusIn), 应用若介意可在切换消息里一并处理。
 ///
-/// `active` 越界时钳制到末尾索引, 不 panic。
+/// `active` 越界时钳制到末尾索引，不 panic。
 pub struct Switcher {
     children: Vec<Node>,
     active: usize,
     binding: Option<ActiveBinding>,
-    /// layout 缓存: active 子组件尺寸。
+    /// layout 缓存：active 子组件尺寸。
     active_size: Size,
 }
 
@@ -49,7 +49,7 @@ impl Switcher {
 
     /// 追加一个面板 (子组件), 返回自身以链式调用。
     pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.children.push(std::boxed::Box::new(widget));
+        self.children.push(Box::new(widget));
         self
     }
 
@@ -59,11 +59,11 @@ impl Switcher {
         self
     }
 
-    /// 绑定应用状态: 每帧 `sync` 时经闭包读取 active 索引。
+    /// 绑定应用状态：每帧 `sync` 时经闭包读取 active 索引。
     ///
     /// 状态类型 `S` 须与 [`App`](crate::App) 实现者一致。
     pub fn bind<S: 'static>(mut self, f: impl Fn(&S) -> usize + 'static) -> Self {
-        self.binding = Some(std::boxed::Box::new(move |state: &dyn Any| {
+        self.binding = Some(Box::new(move |state: &dyn Any| {
             let state = state
                 .downcast_ref::<S>()
                 .expect("Switcher 绑定的状态类型不匹配");
@@ -157,7 +157,7 @@ mod tests {
     use super::*;
     use crate::Point;
 
-    /// 测试桩: 固定尺寸, 记录 sync / paint / event 调用。
+    /// 测试桩：固定尺寸，记录 sync / paint / event 调用。
     struct Stub {
         id: &'static str,
         size: Size,
@@ -193,7 +193,7 @@ mod tests {
         }
 
         fn event(&mut self, _event: &Event, _area: Rect, msgs: &mut MsgQueue) -> EventResult {
-            msgs.push(std::boxed::Box::new(self.id));
+            msgs.push(Box::new(self.id));
             EventResult::Consumed
         }
     }
@@ -288,7 +288,7 @@ mod tests {
         // sync 传播给全部子组件。
         assert_eq!(log.take(), vec!["a", "b"]);
 
-        // binding 驱动 active 切换, children() 只暴露 active。
+        // binding 驱动 active 切换，children() 只暴露 active。
         let mut texts = TextBatch::default();
         switcher.layout(loose(), &mut texts);
         assert_eq!(switcher.children().len(), 1);

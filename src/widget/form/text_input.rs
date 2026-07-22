@@ -806,7 +806,7 @@ mod tests {
     #[test]
     fn mouse_click_positions_cursor() {
         let mut t = input();
-        let mut texts = crate::TextBatch::new();
+        let mut texts = TextBatch::new();
         // 触发 layout 以计算 char_offsets
         t.layout(Constraints::loose(Size::new(500.0, 100.0)), &mut texts);
 
@@ -839,7 +839,7 @@ mod tests {
     #[test]
     fn mouse_drag_selects_text() {
         let mut t = input();
-        let mut texts = crate::TextBatch::new();
+        let mut texts = TextBatch::new();
         t.layout(Constraints::loose(Size::new(500.0, 100.0)), &mut texts);
 
         let area = Rect::from_xywh(0.0, 0.0, 500.0, 100.0);
@@ -879,7 +879,7 @@ mod tests {
         t.set_cursor(0);
         t.set_anchor(0);
 
-        let mut texts = crate::TextBatch::new();
+        let mut texts = TextBatch::new();
         t.layout(Constraints::loose(Size::new(500.0, 100.0)), &mut texts);
 
         // paint 前 area 为本地原点,IME 区域应位于 (padding.left, padding.top)。
@@ -889,7 +889,7 @@ mod tests {
 
         // paint 后缓存绝对矩形,IME 区域应跟随光标平移。
         let abs = Rect::from_xywh(20.0, 30.0, 500.0, 100.0);
-        let mut rects = crate::RectBatch::new();
+        let mut rects = RectBatch::new();
         t.paint(abs, &mut rects, &mut texts);
 
         let area = t.ime_area().unwrap();
