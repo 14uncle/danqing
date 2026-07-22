@@ -94,8 +94,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let max_r = min(in.half_size.x, in.half_size.y);
     let r = min(in.radii, vec4<f32>(max_r));
     let d = sd_rounded_box_per_corner(in.local, in.half_size, r);
-    // 以距离的变化率为过渡带宽,约 1 物理像素抗锯齿
-    let w = max(fwidth(d), 1e-4);
+    // 过渡带取距离变化率, 但不超过矩形半尺寸:
+    // 1px 细线的片元最多只深入边缘 0.5px, 过渡带收窄到半尺寸后
+    // 中心行才能拿到满覆盖, 细线不再随亚像素相位发虚。
+    let w = max(min(fwidth(d), max_r), 1e-4);
     let alpha = 1.0 - smoothstep(-w, w, d);
     return vec4<f32>(in.color.rgb, in.color.a * alpha);
 }

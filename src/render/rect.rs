@@ -262,10 +262,24 @@ impl RectBatch {
     /// 四条直边为矩形长条，四个圆角用沿圆弧排列的小矩形衔接，
     /// 半径取 `thickness/2` 以自然融合成平滑弧线，从而跟随组件圆角。
     /// `thickness` 为线宽。
+    ///
+    /// 描边矩形先向内对齐到整数像素边界 (顶/左取 ceil，底/右取 floor):
+    /// 1px 细线落在分数坐标时只覆盖一行像素且覆盖率随亚像素相位折半,
+    /// 对齐后才能满强度渲染;向内对齐也保证描边不越出原矩形被裁剪。
     pub fn push_rounded_border(&mut self, rect: Rect, color: Color, radius: f32, thickness: f32) {
         if thickness <= 0.0 {
             return;
         }
+        let x0 = rect.origin.x.ceil();
+        let y0 = rect.origin.y.ceil();
+        let x1 = (rect.origin.x + rect.size.width).floor();
+        let y1 = (rect.origin.y + rect.size.height).floor();
+        // 极端小矩形对齐后可能退化, 此时保留原矩形。
+        let rect = if x1 > x0 && y1 > y0 {
+            Rect::from_xywh(x0, y0, x1 - x0, y1 - y0)
+        } else {
+            rect
+        };
         let r = radius
             .max(0.0)
             .min(rect.size.width * 0.5)
@@ -986,5 +1000,42 @@ mod tests {
             (r.origin.y - rect.origin.y).abs() < 1e-4 && (r.size.height - 2.0).abs() < 1e-4
         });
         assert!(top_edge, "顶边应保持完整 2px 线宽且与矩形顶对齐");
+    }
+
+    #[test]
+    fn rounded_border_snaps_edges_to_pixel_grid() {
+        // 1px 细线落在分数坐标时只会覆盖一行像素且 SDF 覆盖率随亚像素相位
+        // 折半 (输入框底边发虚/消失的根因);直边应向内对齐到整数像素,
+        // 保证任何布局下都能满强度渲染。
+        let rect = Rect::from_xywh(285.0, 142.553, 240.0, 35.951);
+        let mut batch = RectBatch::new();
+        batch.push_rounded_border(rect, Color::WHITE, 6.0, 1.0);
+        let rects = batch.instance_rects();
+        // 四条直边: 一条边等于线宽、另一条边是长条。
+        let straights: Vec<_> = rects
+            .iter()
+            .filter(|r| {
+                ((r.size.width - 1.0).abs() < 1e-4 && r.size.height > 2.0)
+                    || ((r.size.height - 1.0).abs() < 1e-4 && r.size.width > 2.0)
+            })
+            .collect();
+        assert_eq!(straights.len(), 4, "应有四条直边: {rects:?}");
+        for edge in &straights {
+            assert!(
+                edge.origin.x.fract().abs() < 1e-4 && edge.origin.y.fract().abs() < 1e-4,
+                "直边原点应对齐整数像素: {edge:?}"
+            );
+        }
+        // 向内对齐: 顶边取 ceil(142.553) = 143, 底边取 floor(178.504) - 1 = 177。
+        let top = straights
+            .iter()
+            .any(|r| (r.origin.y - 143.0).abs() < 1e-4 && r.size.width > 2.0);
+        let bottom = straights
+            .iter()
+            .any(|r| (r.origin.y - 177.0).abs() < 1e-4 && r.size.width > 2.0);
+        assert!(
+            top && bottom,
+            "顶/底边应向内对齐到 143.0 / 177.0: {straights:?}"
+        );
     }
 }
