@@ -22,7 +22,7 @@ pub use base::{Button, Text};
 pub use focus::FocusManager;
 pub use form::{TextArea, TextInput};
 pub use layout::{Box, Center, Column, Padding, Row};
-pub use title_bar::TitleBar;
+pub use title_bar::{TitleBar, TitleBarStyle};
 pub use view::{ScrollAxis, Scrollable, Switcher};
 
 use std::any::Any;

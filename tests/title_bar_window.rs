@@ -7,7 +7,7 @@
 //! 验证产出的 `WindowAction` 消息类型正确。
 
 use danqing::event::{Event, MouseButton, WindowAction};
-use danqing::widget::{EventResult, MsgQueue, TitleBar, Widget};
+use danqing::widget::{EventResult, MsgQueue, TitleBar, TitleBarStyle, Widget};
 use danqing::{Constraints, LightTheme, Point, Rect, Theme};
 
 /// 400px 宽标题栏区域。
@@ -38,6 +38,12 @@ fn layout(bar: &mut TitleBar) {
     let area = title_area();
     let mut texts = danqing::TextBatch::new();
     bar.layout(Constraints::tight(area.size), &mut texts);
+}
+
+#[test]
+fn title_bar_style_exported_at_widget_root() {
+    // 构造成功即证明 TitleBarStyle 平铺导出与 .style() builder 可用。
+    let _bar = TitleBar::themed(&LightTheme, "丹青").style(TitleBarStyle::Standard);
 }
 
 #[test]
