@@ -15,7 +15,7 @@
 
 ## Phase 2: 平台层
 
-- [ ] **Task 4**: window.rs 移除 `with_decorations(false)` 的 Windows cfg 门控
+- [x] **Task 4**: window.rs 移除 `with_decorations(false)` 的 Windows cfg 门控
   - 验收： Windows 冒烟零回归；「其他平台降级」注释清除
 - [ ] **Task 5**: 跨平台编译检查（`cargo check --target x86_64-unknown-linux-gnu` / `x86_64-apple-darwin`)
   - 验收： Linux 通过；macOS 通过（或记录降级理由：________)

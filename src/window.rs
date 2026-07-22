@@ -487,8 +487,8 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 f64::from(self.config.size.width),
                 f64::from(self.config.size.height),
             ));
-        // Windows 使用自绘标题栏，其他平台保留原生标题栏作为降级。
-        #[cfg(target_os = "windows")]
+        // 全平台使用自绘标题栏 (按钮布局样式由 TitleBar 按平台适配,
+        // 参见 docs/specs/title-bar-cross-platform.md)。
         let attrs = attrs.with_decorations(false);
         let window = match event_loop.create_window(attrs) {
             Ok(window) => Arc::new(window),
