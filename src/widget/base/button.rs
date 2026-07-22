@@ -10,8 +10,8 @@ use crate::render::{RectBatch, TextBatch};
 use crate::widget::{EventResult, Node, Widget};
 use crate::{Color, Constraints, Edges, LightTheme, Point, Rect, Size, Theme};
 
-/// 消息工厂:点击时产出一条应用消息。
-type MsgFactory = std::boxed::Box<dyn Fn() -> std::boxed::Box<dyn Any>>;
+/// 消息工厂：点击时产出一条应用消息。
+type MsgFactory = Box<dyn Fn() -> Box<dyn Any>>;
 
 /// 按钮组件。
 ///
@@ -43,11 +43,11 @@ impl Button {
     /// 使用指定主题创建按钮。
     pub fn themed(theme: &impl Theme, child: impl Widget + 'static) -> Self {
         Self {
-            child: std::boxed::Box::new(child),
+            child: Box::new(child),
             on_click: None,
             color: theme.accent(),
             hover_color: None,
-            focus_color: theme.text_primary(),
+            focus_color: Color::WHITE,
             radius: theme.radius_md(),
             padding: Edges::symmetric(theme.spacing_lg(), theme.spacing_md()),
             hovered: false,
@@ -60,9 +60,7 @@ impl Button {
 
     /// 设置点击时产出的消息。
     pub fn on_click<M: 'static>(mut self, f: impl Fn() -> M + 'static) -> Self {
-        self.on_click = Some(std::boxed::Box::new(move || {
-            std::boxed::Box::new(f()) as std::boxed::Box<dyn Any>
-        }));
+        self.on_click = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
         self
     }
 
@@ -130,23 +128,24 @@ impl Widget for Button {
             self.child_size.width + self.padding.horizontal(),
             self.child_size.height + self.padding.vertical(),
         ));
-        self.area = Rect::new(crate::Point::ZERO, size);
+        self.area = Rect::new(Point::ZERO, size);
         size
     }
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
         rects.push_rect(area, self.effective_color(), self.radius);
         if self.focused {
-            // 焦点环:内缩 2px 的圆角虚线边框,跟随按钮圆角。
-            let inset = 2.0;
+            // 焦点环：内缩 3px 的白色圆角虚线边框 (线宽 1px),跟随按钮圆角。
+            let inset = 3.0;
             let focus_rect = Rect::new(
-                crate::Point::new(area.origin.x + inset, area.origin.y + inset),
-                crate::Size::new(
+                Point::new(area.origin.x + inset, area.origin.y + inset),
+                Size::new(
                     area.size.width - inset * 2.0,
                     area.size.height - inset * 2.0,
                 ),
             );
-            rects.push_rounded_border(focus_rect, self.focus_color, self.radius, 1.0);
+            // 虚线参数：划线 4px、空隙 2px。
+            rects.push_dashed_border(focus_rect, self.focus_color, self.radius, 4.0, 2.0, 1.0);
         }
         let inner = Rect::new(
             Point::new(
@@ -158,12 +157,7 @@ impl Widget for Button {
         self.child.paint(inner, rects, texts);
     }
 
-    fn event(
-        &mut self,
-        event: &Event,
-        area: Rect,
-        msgs: &mut Vec<std::boxed::Box<dyn Any>>,
-    ) -> EventResult {
+    fn event(&mut self, event: &Event, area: Rect, msgs: &mut Vec<Box<dyn Any>>) -> EventResult {
         self.area = area;
         match event {
             Event::FocusIn => {
@@ -234,16 +228,16 @@ impl Widget for Button {
         std::slice::from_ref(&self.child)
     }
 
-    fn children_mut(&mut self) -> &mut [Node] {
-        std::slice::from_mut(&mut self.child)
-    }
-
     fn ime_area(&self) -> Option<Rect> {
         Some(self.area)
     }
 
     fn hit_area(&self) -> Option<Rect> {
         Some(self.area)
+    }
+
+    fn children_mut(&mut self) -> &mut [Node] {
+        std::slice::from_mut(&mut self.child)
     }
 }
 
@@ -279,7 +273,7 @@ mod tests {
     fn button_new_uses_light_theme_defaults() {
         let button = Button::new(Text::new("OK"));
         assert_eq!(button.color_value(), LightTheme.accent());
-        assert_eq!(button.focus_color_value(), LightTheme.text_primary());
+        assert_eq!(button.focus_color_value(), Color::WHITE);
         assert_eq!(button.radius_value(), LightTheme.radius_md());
         assert_eq!(
             button.padding_value(),
