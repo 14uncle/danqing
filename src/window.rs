@@ -3,8 +3,8 @@
 
 //! 窗口与事件循环封装 (winit 平台适配层)。
 //!
-//! 本模块是唯一允许接触 OS 窗口 API 的地方: 负责窗口创建、
-//! 事件循环驱动, 并把 winit 事件转换为平台无关的内部事件。
+//! 本模块是唯一允许接触 OS 窗口 API 的地方：负责窗口创建、
+//! 事件循环驱动，并把 winit 事件转换为平台无关的内部事件。
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -31,10 +31,10 @@ use crate::{Color, Point, Rect, Size};
 #[derive(Debug, thiserror::Error)]
 pub enum WindowError {
     /// 事件循环创建或运行失败。
-    #[error("事件循环错误: {0}")]
+    #[error("事件循环错误：{0}")]
     EventLoop(#[from] winit::error::EventLoopError),
     /// 窗口创建失败。
-    #[error("创建窗口失败: {0}")]
+    #[error("创建窗口失败：{0}")]
     Os(#[from] winit::error::OsError),
 }
 
@@ -62,10 +62,10 @@ impl Default for WindowConfig {
         Self {
             title: "danqing showcase".into(),
             size: Size::new(1280.0, 800.0),
-            // 深蓝灰: 非常量黑 / 白, 用于验证颜色参数通路
+            // 深蓝灰：非常量黑 / 白，用于验证颜色参数通路
             clear_color: Color::rgb(0.10, 0.16, 0.24),
             background: BackgroundConfig::default(),
-            // 浅灰边框, 与浅色毛玻璃主题协调
+            // 浅灰边框，与浅色毛玻璃主题协调
             border_color: Color::rgba(0.0, 0.0, 0.0, 0.12),
             border_radius: 12.0,
             border_thickness: 1.0,
@@ -156,7 +156,7 @@ fn convert_event(event: &WindowEvent, cursor: Point, modifiers: ModifiersState) 
 
 /// 从 PNG 文件加载 winit 图标。
 ///
-/// 将 PNG 解码为 RGBA 后, 通过 [`Icon::from_rgba`] 创建图标。
+/// 将 PNG 解码为 RGBA 后，通过 [`Icon::from_rgba`] 创建图标。
 /// 返回 `Err` 时调用方可选择回退到默认图标。
 fn load_icon_from_png(path: &std::path::Path) -> Result<Icon, Box<dyn std::error::Error>> {
     let img = image::open(path)?.into_rgba8();
@@ -167,7 +167,7 @@ fn load_icon_from_png(path: &std::path::Path) -> Result<Icon, Box<dyn std::error
 /// Windows 下为无边框窗口恢复圆角与阴影。
 ///
 /// 使用 winit 公开的平台扩展 API, 避免手写 unsafe DWM 调用。
-/// 若设置失败仅记录警告, 不影响窗口功能。
+/// 若设置失败仅记录警告，不影响窗口功能。
 #[cfg(target_os = "windows")]
 fn apply_windows_undecorated_style(window: &WinitWindow) {
     use winit::platform::windows::{CornerPreference, WindowExtWindows};
@@ -176,7 +176,7 @@ fn apply_windows_undecorated_style(window: &WinitWindow) {
         window.set_undecorated_shadow(true);
         window.set_corner_preference(CornerPreference::Round);
     }) {
-        log::warn!("设置 Windows 无边框窗口样式失败: {err:?}");
+        log::warn!("设置 Windows 无边框窗口样式失败：{err:?}");
     }
 }
 
@@ -191,13 +191,13 @@ fn load_window_icon() -> Option<Icon> {
     match load_icon_from_png(&path) {
         Ok(icon) => Some(icon),
         Err(err) => {
-            log::warn!("加载窗口图标失败: {err}");
+            log::warn!("加载窗口图标失败：{err}");
             None
         }
     }
 }
 
-/// winit 应用处理器, 驱动窗口生命周期与事件分发。
+/// winit 应用处理器，驱动窗口生命周期与事件分发。
 struct Handler<'a, A: App> {
     config: WindowConfig,
     window: Option<Arc<WinitWindow>>,
@@ -214,7 +214,7 @@ struct Handler<'a, A: App> {
     tree: Node,
     /// 组件产出的消息队列。
     msgs: MsgQueue,
-    /// 根矩形 (事件命中用, 每帧布局后更新)。
+    /// 根矩形 (事件命中用，每帧布局后更新)。
     root_area: Rect,
     /// 焦点管理器。
     focus: FocusManager,
@@ -231,22 +231,22 @@ impl<A: App> Handler<'_, A> {
     fn log_event(event: &WindowEvent) {
         match event {
             WindowEvent::CursorMoved { position, .. } => {
-                log::debug!("鼠标移动: ({:.0}, {:.0})", position.x, position.y);
+                log::debug!("鼠标移动：({:.0}, {:.0})", position.x, position.y);
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                log::info!("鼠标按键: {button:?} {state:?}");
+                log::info!("鼠标按键：{button:?} {state:?}");
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                log::info!("滚轮: {delta:?}");
+                log::info!("滚轮：{delta:?}");
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                log::info!("键盘: {:?} {:?}", event.logical_key, event.state);
+                log::info!("键盘：{:?} {:?}", event.logical_key, event.state);
             }
             WindowEvent::Ime(ime) => {
                 log::info!("IME: {ime:?}");
             }
             WindowEvent::ModifiersChanged(mods) => {
-                log::debug!("修饰键: {mods:?}");
+                log::debug!("修饰键：{mods:?}");
             }
             _ => {}
         }
@@ -280,8 +280,8 @@ impl<A: App> Handler<'_, A> {
 
     /// 将键盘 /IME/ 剪贴板事件路由到当前焦点组件。
     fn dispatch_focused_event(&mut self, event: &Event) {
-        // Tab 遍历与当前焦点状态无关,必须最先处理:
-        // 清焦(点击空白/Escape)后键盘仍能借此重回焦点链。
+        // Tab 遍历与当前焦点状态无关，必须最先处理：
+        // 清焦 (点击空白/Escape) 后键盘仍能借此重回焦点链。
         if let Event::Key {
             key: Key::Named(NamedKey::Tab),
             pressed: true,
@@ -306,7 +306,7 @@ impl<A: App> Handler<'_, A> {
             Event::Key { key, pressed, .. } if *pressed => {
                 match key {
                     Key::Named(NamedKey::Escape) => {
-                        // 焦点组件未消费 Escape 时清除焦点,
+                        // 焦点组件未消费 Escape 时清除焦点，
                         // 键盘事件随后回退到应用层。
                         let consumed = event_at_path(
                             &mut self.tree,
@@ -403,7 +403,7 @@ impl<A: App> Handler<'_, A> {
         if self.clipboard.is_none() {
             match arboard::Clipboard::new() {
                 Ok(cb) => self.clipboard = Some(cb),
-                Err(err) => log::warn!("初始化剪贴板失败: {err}"),
+                Err(err) => log::warn!("初始化剪贴板失败：{err}"),
             }
         }
         self.clipboard.as_mut()
@@ -412,7 +412,7 @@ impl<A: App> Handler<'_, A> {
     fn set_clipboard(&mut self, text: String) {
         if let Some(cb) = self.clipboard() {
             if let Err(err) = cb.set_text(text) {
-                log::warn!("写入剪贴板失败: {err}");
+                log::warn!("写入剪贴板失败：{err}");
             }
         }
     }
@@ -438,12 +438,12 @@ impl<A: App> Handler<'_, A> {
             }
             WindowAction::MaximizeOrRestore => {
                 let maximized = window.is_maximized();
-                log::info!("标题栏最大化/还原窗口: {}", !maximized);
+                log::info!("标题栏最大化/还原窗口：{}", !maximized);
                 window.set_maximized(!maximized);
             }
             WindowAction::Drag => {
                 if let Err(err) = window.drag_window() {
-                    log::warn!("拖拽窗口失败: {err}");
+                    log::warn!("拖拽窗口失败：{err}");
                 }
             }
         }
@@ -487,18 +487,18 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 f64::from(self.config.size.width),
                 f64::from(self.config.size.height),
             ));
-        // Windows 使用自绘标题栏, 其他平台保留原生标题栏作为降级。
+        // Windows 使用自绘标题栏，其他平台保留原生标题栏作为降级。
         #[cfg(target_os = "windows")]
         let attrs = attrs.with_decorations(false);
         let window = match event_loop.create_window(attrs) {
             Ok(window) => Arc::new(window),
             Err(err) => {
-                log::error!("创建窗口失败: {err}");
+                log::error!("创建窗口失败：{err}");
                 event_loop.exit();
                 return;
             }
         };
-        log::info!("窗口已创建: {}", self.config.title);
+        log::info!("窗口已创建：{}", self.config.title);
 
         #[cfg(target_os = "windows")]
         apply_windows_undecorated_style(&window);
@@ -511,10 +511,10 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         ) {
             Ok(context) => {
                 self.context = Some(context);
-                log::info!("渲染上下文初始化耗时: {:?}", ctx_start.elapsed());
+                log::info!("渲染上下文初始化耗时：{:?}", ctx_start.elapsed());
             }
             Err(err) => {
-                log::error!("初始化渲染上下文失败: {err}");
+                log::error!("初始化渲染上下文失败：{err}");
                 event_loop.exit();
                 return;
             }
@@ -522,7 +522,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         window.set_visible(true);
         log::info!("窗口已显示");
         self.window = Some(window);
-        // 持续渲染模式: 请求首帧, 之后每帧结束再请求下一帧
+        // 持续渲染模式：请求首帧，之后每帧结束再请求下一帧
         if let Some(window) = &self.window {
             window.request_redraw();
         }
@@ -538,7 +538,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             return;
         }
 
-        // 鼠标事件经组件树命中分发, 分发后可能更新焦点
+        // 鼠标事件经组件树命中分发，分发后可能更新焦点
         if matches!(
             event,
             WindowEvent::CursorMoved { .. }
@@ -588,15 +588,15 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
 
         match event {
             WindowEvent::CloseRequested => {
-                log::info!("收到关闭请求,退出事件循环");
-                // 立即隐藏窗口, 让关闭感觉更快 (资源释放仍在后台完成)。
+                log::info!("收到关闭请求，退出事件循环");
+                // 立即隐藏窗口，让关闭感觉更快 (资源释放仍在后台完成)。
                 if let Some(window) = &self.window {
                     window.set_visible(false);
                 }
                 event_loop.exit();
             }
             WindowEvent::Resized(size) => {
-                log::info!("窗口尺寸变化: {}x{}", size.width, size.height);
+                log::info!("窗口尺寸变化：{}x{}", size.width, size.height);
                 if let Some(context) = &mut self.context {
                     context.resize(size.width, size.height);
                 }
@@ -642,7 +642,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 }
                 if !self.first_frame_done {
                     self.first_frame_done = true;
-                    log::info!("首帧渲染耗时: {:?}", frame_start.elapsed());
+                    log::info!("首帧渲染耗时：{:?}", frame_start.elapsed());
                 }
                 if let Some(window) = &self.window {
                     window.request_redraw();
@@ -653,13 +653,13 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
     }
 }
 
-/// 打开窗口并运行应用: 事件分发、消息驱动、每帧重绘, 直到窗口关闭。
+/// 打开窗口并运行应用：事件分发、消息驱动、每帧重绘，直到窗口关闭。
 pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowError> {
     let event_loop = EventLoop::new()?;
     let texts_start = Instant::now();
     let texts = TextBatch::new();
     log::info!(
-        "文本批次初始化(含字体加载)耗时: {:?}",
+        "文本批次初始化 (含字体加载) 耗时：{:?}",
         texts_start.elapsed()
     );
     let mut handler = Handler {
@@ -680,7 +680,7 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
     };
     let run_start = Instant::now();
     event_loop.run_app(&mut handler)?;
-    log::info!("事件循环运行耗时: {:?}", run_start.elapsed());
+    log::info!("事件循环运行耗时：{:?}", run_start.elapsed());
     log::info!("事件循环已退出");
     Ok(())
 }
@@ -704,8 +704,8 @@ mod tests {
 
     use super::*;
 
-    /// 冒烟测试: 仅创建事件循环 (链接触发 shim 生成的导入库)。
-    /// 若导入库损坏, 本测试会以访问违规崩溃。
+    /// 冒烟测试：仅创建事件循环 (链接触发 shim 生成的导入库)。
+    /// 若导入库损坏，本测试会以访问违规崩溃。
     #[test]
     fn event_loop_creation_smoke() {
         use winit::platform::windows::EventLoopBuilderExtWindows;
@@ -717,7 +717,7 @@ mod tests {
     fn load_icon_from_valid_png_succeeds() {
         let path = PathBuf::from("assets").join("logo").join("logo_256.png");
         let icon = load_icon_from_png(&path);
-        assert!(icon.is_ok(), "应能加载有效 PNG 图标: {icon:?}");
+        assert!(icon.is_ok(), "应能加载有效 PNG 图标：{icon:?}");
     }
 
     #[test]
