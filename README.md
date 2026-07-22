@@ -22,8 +22,6 @@ cargo fmt                      # 格式化
 cargo build --release          # 发布构建
 ```
 
-> 首次构建会从 jsdelivr 下载 OFL 回退字体(ZCOOL XiaoWei),仓库内不提交字体二进制。
-
 ## 架构
 
 ```
@@ -65,6 +63,10 @@ src/
 - `TextArea` 多行文本域:显式换行、按字符 soft-wrap、光标/选区、键盘编辑、IME、剪贴板
 - 鼠标拖拽选区(`TextInput` + `TextArea`)
 - 渲染裁剪基础(Batch clip stack + shader discard)
+
+## 开发说明
+
+丹青由十四叔主导设计与实现，代码经 LLM 辅助生成，所有代码均经人工评审、测试后入库。
 
 ## 许可证
 
