@@ -77,7 +77,7 @@ fn input_row_renders_text_input_background() {
     let mut rects = danqing::RectBatch::new();
     tree.paint(Rect::new(Point::ZERO, size), &mut rects, &mut texts);
 
-    let bg = LightTheme.surface();
+    let bg = LightTheme.surface_input();
     let has_background = rects.instance_colors().iter().any(|c| {
         (c[0] - bg.r).abs() < 0.001
             && (c[1] - bg.g).abs() < 0.001
@@ -134,7 +134,7 @@ fn showcase_like_column_keeps_text_input_on_screen() {
     let mut rects = danqing::RectBatch::new();
     tree.paint(Rect::new(Point::ZERO, size), &mut rects, &mut texts);
 
-    let bg = LightTheme.surface();
+    let bg = LightTheme.surface_input();
     let input_rects: Vec<Rect> = rects
         .instance_rects()
         .into_iter()

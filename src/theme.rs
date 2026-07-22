@@ -38,6 +38,11 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     fn background(&self) -> Color;
     /// 表面浮层色 (卡片、输入框背景)。
     fn surface(&self) -> Color;
+    /// 输入区表面色 (TextInput/TextArea 背景)。
+    ///
+    /// 比 `surface` 更实: 输入区以可读性优先,
+    /// 卡片可以透出背景营造玻璃感, 文字输入处不行。
+    fn surface_input(&self) -> Color;
     /// 次级表面色 (悬停、禁用背景)。
     fn surface_variant(&self) -> Color;
     /// 主强调色 (按钮、光标、选区)。
@@ -114,7 +119,12 @@ impl Theme for LightTheme {
     }
 
     fn surface(&self) -> Color {
-        // 接近纯白但保留极淡透明,让阴影/背景能透出一丝氛围。
+        // 半透明白: 卡片浮在渐变背景上透出玻璃感。
+        Color::rgba(1.0, 1.0, 1.0, 0.72)
+    }
+
+    fn surface_input(&self) -> Color {
+        // 接近纯白: 输入区文字可读性优先, 只允许一丝氛围透出。
         Color::rgba(1.0, 1.0, 1.0, 0.95)
     }
 
@@ -278,6 +288,24 @@ mod tests {
         assert!(theme.selection().a > 0.0);
         assert!(theme.caret().a > 0.0);
         assert!(theme.danger().a > 0.0);
+    }
+
+    #[test]
+    fn light_theme_surface_is_translucent_glass() {
+        // 玻璃感护栏: surface 必须半透明, 让背景渐变透出; 又不能透明到丢失层次。
+        let a = LightTheme.surface().a;
+        assert!(
+            (0.6..=0.8).contains(&a),
+            "surface alpha 应在 0.6~0.8 玻璃区间, 实际 {a}"
+        );
+    }
+
+    #[test]
+    fn light_theme_surface_input_is_more_solid_than_surface() {
+        // 输入区可读性优先: 输入框背景要比卡片更实。
+        let theme = LightTheme;
+        assert!(theme.surface_input().a >= 0.9);
+        assert!(theme.surface_input().a > theme.surface().a);
     }
 
     #[test]

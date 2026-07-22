@@ -76,7 +76,7 @@ impl TextArea {
             focused: false,
             font_size: theme.font_size_body(),
             color: theme.text_primary(),
-            background: theme.surface(),
+            background: theme.surface_input(),
             selection_color: theme.selection(),
             caret_color: theme.caret(),
             padding: Edges::symmetric(theme.spacing_md(), theme.spacing_sm()),
@@ -622,7 +622,7 @@ mod tests {
     fn text_area_uses_theme_defaults() {
         let area = TextArea::new();
         assert_eq!(area.text_color_value(), LightTheme.text_primary());
-        assert_eq!(area.background_color(), LightTheme.surface());
+        assert_eq!(area.background_color(), LightTheme.surface_input());
         assert_eq!(area.radius_value(), LightTheme.radius_sm());
     }
 
@@ -630,7 +630,7 @@ mod tests {
     fn text_area_themed_uses_provided_theme() {
         let area = TextArea::themed(&LightTheme);
         assert_eq!(area.text_color_value(), LightTheme.text_primary());
-        assert_eq!(area.background_color(), LightTheme.surface());
+        assert_eq!(area.background_color(), LightTheme.surface_input());
     }
 
     #[test]

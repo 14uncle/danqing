@@ -186,7 +186,7 @@ fn counter_row(t: &LightTheme) -> impl Widget + 'static {
                 t,
                 Text::new("点击 +1")
                     .font_size(t.font_size_body())
-                    .color(t.surface()),
+                    .color(Color::WHITE),
             )
             .on_click(|| Msg::Increment),
         )
@@ -487,7 +487,7 @@ fn sidebar(t: &LightTheme) -> impl Widget + 'static {
                 t,
                 Text::new(name)
                     .font_size(t.font_size_body())
-                    .color(t.surface()),
+                    .color(Color::WHITE),
             )
             .bind_color(
                 move |s: &Showcase| {

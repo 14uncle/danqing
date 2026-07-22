@@ -58,8 +58,9 @@
 
 ### Phase 2: 玻璃感
 
-- [ ] **Task 3: surface 降 alpha，让背景透上来**
+- [x] **Task 3: surface 降 alpha，让背景透上来** ✅ 2026-07-22
   - **Description:** `LightTheme::surface()` 从 0.95 降到 0.70 一档（0.70–0.75 区间目视迭代取最优）;`surface_variant`、`divider`、`border` 在半透明表面上的可见性同步校准；评估输入框是否需要比卡片更实的背景（效率工具输入区可读性优先，允许 `TextInput`/`TextArea` 背景保持更高 alpha，通过各自 token 而非全局 surface)。同步更新 `theme.rs`、`tests/design_system.rs` 及受影响组件测试中的颜色断言。
+  - **完成记录：** surface 取 0.72;Theme 新增 `surface_input()` token(0.95),TextInput/TextArea 改用；showcase 按钮白字从 `t.surface()` 改 `Color::WHITE` 防洗白；新增玻璃区间（0.6~0.8）与输入区更实两条护栏测试。**alpha 档位待 T7 人工目视复核。**
   - **Acceptance:**
     - 卡片下能透出渐变背景的蓝色倾向与光晕，层次不靠纯阴影。
     - 输入框文字可读性不劣于现状。

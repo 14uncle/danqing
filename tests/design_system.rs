@@ -111,7 +111,7 @@ fn button_paints_with_theme_accent() {
 }
 
 #[test]
-fn text_input_paints_with_theme_surface() {
+fn text_input_paints_with_theme_surface_input() {
     let t = LightTheme;
     let mut widget = TextInput::themed(&t).width(200.0);
     let mut texts = danqing::TextBatch::new();
@@ -127,12 +127,12 @@ fn text_input_paints_with_theme_surface() {
     assert!(!rects.is_empty());
     assert!(color_eq(
         color_from_array(rects.instance_colors()[0]),
-        t.surface()
+        t.surface_input()
     ));
 }
 
 #[test]
-fn text_area_paints_with_theme_surface() {
+fn text_area_paints_with_theme_surface_input() {
     let t = LightTheme;
     let mut widget = TextArea::themed(&t).width(200.0);
     let mut texts = danqing::TextBatch::new();
@@ -148,7 +148,7 @@ fn text_area_paints_with_theme_surface() {
     assert!(!rects.is_empty());
     assert!(color_eq(
         color_from_array(rects.instance_colors()[0]),
-        t.surface()
+        t.surface_input()
     ));
 }
 
