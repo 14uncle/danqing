@@ -1,5 +1,9 @@
 # Spec: 自绘标题栏接管原生窗口控制
 
+> **后续更新 (2026-07-22)**：本文 Success Criteria 第 6 条与 Open Questions 第 3 条
+> （其他平台保留原生标题栏降级）已被 `docs/specs/title-bar-cross-platform.md` 取代 ——
+> 自绘标题栏已推广到全平台，macOS 适配红绿灯样式。其余内容仍有效。
+
 ## Objective
 
 让 `examples/showcase.rs` 使用自绘 `TitleBar` 完全替代操作系统原生标题栏。
