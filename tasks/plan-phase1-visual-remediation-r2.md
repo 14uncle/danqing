@@ -2,7 +2,7 @@
 
 > 依据：2026-07-22 阶段 1 视觉复盘（showcase 截图对照 `docs/specs/phase1-design-system.md` 十条验收）。
 > 前一轮：`tasks/plan-phase1-visual-remediation.md`（✅ 已完成）解决了"苍白/无层次"，但 surface 提到 0.95 后玻璃感丢失，且遗留字体、选中态、TextArea 接缝问题。
-> **状态：🔲 待实施**
+> **状态：✅ 已完成（2026-07-23 阶段 1 正式关闭）**
 
 ## Overview
 
@@ -53,8 +53,8 @@
 
 ### Checkpoint 1: 文字与导航可用
 
-- [ ] `cargo test --lib --tests` 全绿；`cargo fmt --check` / `cargo clippy -- -D warnings` 通过。
-- [ ] 人工确认：正文不发灰、无豆腐块、当前页导航可辨。
+- [x] `cargo test --lib --tests` 全绿；`cargo fmt --check` / `cargo clippy -- -D warnings` 通过。
+- [x] 人工确认：正文不发灰、无豆腐块、当前页导航可辨。
 
 ### Phase 2: 玻璃感
 
@@ -94,8 +94,8 @@
 
 ### Checkpoint 2: 玻璃成立
 
-- [ ] `cargo test --lib --tests` 全绿；`cargo clippy -- -D warnings` 零警告。
-- [ ] 人工确认：卡片透出背景、标题栏融入顶部、多行卡片无接缝。
+- [x] `cargo test --lib --tests` 全绿；`cargo clippy -- -D warnings` 零警告。
+- [x] 人工确认：卡片透出背景、标题栏融入顶部、多行卡片无接缝。
 
 - [x] **Task 6.5: 重制背景渐变让玻璃可读** ✅ 2026-07-22（视觉终审后补入）
   - **Description:** T3 完成后 surface 半透明已生效，但 gradient.png 顶部 (247,249,254) → 底部 (228,236,251) 整体过淡，72% 白叠 98% 白肉眼无法分辨玻璃。重制背景资产提高饱和度与起伏。
@@ -120,8 +120,9 @@
   - **Files:** `examples/showcase.rs`
   - **Scope:** S
 
-- [ ] **Task 7: 回归验证与阶段 1 终审**
+- [x] **Task 7: 回归验证与阶段 1 终审** ✅ 2026-07-23
   - **Description:** 全量验证 + 人工终审，对照 `docs/specs/phase1-design-system.md` 十条验收逐条过；通过后回补 `tasks/todo-phase1.md` 的 Checkpoint Complete 三项勾选，阶段 1 正式关闭。
+  - **完成记录：** 十条验收逐条核实（含 `window.rs` 窗口图标已用 `logo_256.png`)；程序化 LOGO 与新 logo.svg 比例一致（16.4%/18%/10.2%/78.1% 破框朱砂滴）;`cargo fmt` / `clippy -D warnings` / 230 测试 / `cargo build --release` 全绿；作者人工终审通过（边框四边满强度确认为最后放行项）,Checkpoint Complete 三项已勾。
   - **Acceptance:**
     - `cargo fmt` / `cargo clippy -- -D warnings` / `cargo test --lib --tests` / `cargo build --release` 全绿。
     - spec 验收 4（毛玻璃整体效果）与 10（人工视觉验证）通过。
@@ -132,8 +133,8 @@
 
 ### Checkpoint 3: 阶段 1 关闭
 
-- [ ] spec Success Criteria 10/10 通过。
-- [ ] `tasks/todo-phase1.md` 全部勾选。
+- [x] spec Success Criteria 10/10 通过。
+- [x] `tasks/todo-phase1.md` 全部勾选。
 - [ ] 准备进入阶段 2 POC（剪贴板历史管理器）。
 
 ## Risks and Mitigations

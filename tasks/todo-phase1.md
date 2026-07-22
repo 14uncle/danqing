@@ -37,7 +37,7 @@
 ## Phase 7: TitleBar 接管原生标题栏
 - [x] **Task 12** 自绘标题栏窗口控制（依赖 5, 11）— Windows 去装饰、按钮可用、可拖拽 ✅ 2026-07-20（代码/测试/构建绿；showcase 人工 GUI 验证待补）
 
-### ⏸ Checkpoint Complete: 阶段 1 关闭
-- [ ] spec Success Criteria 10/10 通过
-- [ ] 全部 Commands 绿；`tasks/todo-phase1.md` 全部勾选
-- [ ] 人工终审，阶段 1 关闭
+### ✅ Checkpoint Complete: 阶段 1 关闭
+- [x] spec Success Criteria 10/10 通过
+- [x] 全部 Commands 绿；`tasks/todo-phase1.md` 全部勾选
+- [x] 人工终审，阶段 1 关闭
