@@ -244,7 +244,7 @@ fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
             Text::bind(|s: &Showcase| {
                 let chars = s.textarea_value.chars().count();
                 let lines = s.textarea_value.lines().count();
-                format!("字数:{} 行数:{}", chars, lines)
+                format!("字数：{} 行数：{}", chars, lines)
             })
             .font_size(t.font_size_body())
             .color(t.text_primary()),
