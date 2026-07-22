@@ -13,6 +13,9 @@ use crate::{Color, Constraints, Edges, LightTheme, Point, Rect, Size, Theme};
 /// 消息工厂：点击时产出一条应用消息。
 type MsgFactory = Box<dyn Fn() -> Box<dyn Any>>;
 
+/// 颜色绑定闭包：从类型擦除的应用状态产出按钮背景色。
+type ColorBinding = Box<dyn Fn(&dyn Any) -> Color>;
+
 /// 按钮组件。
 ///
 /// 内含一个子组件 (通常是文本标签),自带内边距与背景;
@@ -21,6 +24,7 @@ pub struct Button {
     child: Node,
     on_click: Option<MsgFactory>,
     color: Color,
+    color_binding: Option<ColorBinding>,
     hover_color: Option<Color>,
     focus_color: Color,
     radius: f32,
@@ -46,6 +50,7 @@ impl Button {
             child: Box::new(child),
             on_click: None,
             color: theme.accent(),
+            color_binding: None,
             hover_color: None,
             focus_color: Color::WHITE,
             radius: theme.radius_md(),
@@ -67,6 +72,19 @@ impl Button {
     /// 设置背景色。
     pub fn color(mut self, color: Color) -> Self {
         self.color = color;
+        self
+    }
+
+    /// 绑定背景色：每帧从应用状态读取背景色 (如导航选中态)。
+    ///
+    /// 与 [`crate::widget::Text::bind`] 同构;设置后覆盖 `color` 的静态值。
+    pub fn bind_color<S: 'static>(mut self, f: impl Fn(&S) -> Color + 'static) -> Self {
+        self.color_binding = Some(Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("Button 颜色绑定的状态类型不匹配");
+            f(state)
+        }));
         self
     }
 
@@ -114,6 +132,9 @@ impl Button {
 
 impl Widget for Button {
     fn sync(&mut self, state: &dyn Any) {
+        if let Some(binding) = &self.color_binding {
+            self.color = binding(state);
+        }
         self.child.sync(state);
     }
 
@@ -294,5 +315,20 @@ mod tests {
         let button = Button::new(Text::new("OK")).color(custom).radius(16.0);
         assert_eq!(button.color_value(), custom);
         assert_eq!(button.radius_value(), 16.0);
+    }
+
+    #[test]
+    fn bind_color_updates_color_on_sync() {
+        struct Nav {
+            selected: bool,
+        }
+        let idle = LightTheme.accent();
+        let active = Color::from_srgb8(37, 99, 235);
+        let mut button = Button::new(Text::new("基础"))
+            .bind_color(move |s: &Nav| if s.selected { active } else { idle });
+        button.sync(&(Nav { selected: true }) as &dyn Any);
+        assert_eq!(button.color_value(), active, "选中时应取绑定色");
+        button.sync(&(Nav { selected: false }) as &dyn Any);
+        assert_eq!(button.color_value(), idle, "未选中时应回退绑定色");
     }
 }

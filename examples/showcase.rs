@@ -13,8 +13,8 @@ use danqing::widget::{
     Switcher, Text, TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
-    App, BackgroundConfig, Event, Key, LightTheme, NamedKey, Point, ScaleMode, Size, Theme,
-    WindowAction,
+    App, BackgroundConfig, Color, Event, Key, LightTheme, NamedKey, Point, Rect, ScaleMode, Size,
+    Theme, WindowAction,
 };
 use std::io::Write;
 
@@ -398,23 +398,104 @@ fn page_view(t: &LightTheme) -> impl Widget + 'static {
     )
 }
 
-/// 侧边栏：分类导航，选中项以 ▶ 前缀标示 (showcase 本地方案，不改框架)。
+/// 侧边栏导航项：选中时按钮背景加深 (Button::bind_color) 并在左缘绘制 accent 竖条。
+///
+/// 本组件为 showcase 导航专用，放在示例文件中以保持框架核心精简。
+struct NavItem {
+    button: Node,
+    index: usize,
+    selected: bool,
+    marker_color: Color,
+}
+
+impl NavItem {
+    /// 包装导航按钮,index 对应 Showcase.selected 的分类序号。
+    fn new(index: usize, marker_color: Color, button: impl Widget + 'static) -> Self {
+        Self {
+            button: Box::new(button),
+            index,
+            selected: false,
+            marker_color,
+        }
+    }
+}
+
+impl Widget for NavItem {
+    fn sync(&mut self, state: &dyn std::any::Any) {
+        let state = state
+            .downcast_ref::<Showcase>()
+            .expect("NavItem 绑定状态类型不匹配");
+        self.selected = state.selected == self.index;
+        self.button.sync(state);
+    }
+
+    fn layout(
+        &mut self,
+        constraints: danqing::Constraints,
+        texts: &mut danqing::TextBatch,
+    ) -> Size {
+        self.button.layout(constraints, texts)
+    }
+
+    fn paint(&self, area: Rect, rects: &mut danqing::RectBatch, texts: &mut danqing::TextBatch) {
+        self.button.paint(area, rects, texts);
+        if self.selected {
+            // 选中竖条：左缘内缩 4px,宽 3px,高为按钮的一半,圆角拉满成胶囊。
+            let bar_w = 3.0;
+            let bar_h = area.size.height * 0.5;
+            let bar = Rect::from_xywh(
+                area.origin.x + 4.0,
+                area.origin.y + (area.size.height - bar_h) / 2.0,
+                bar_w,
+                bar_h,
+            );
+            rects.push_rect(bar, self.marker_color, bar_w / 2.0);
+        }
+    }
+
+    fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
+        self.button.event(event, area, msgs)
+    }
+
+    fn children(&self) -> &[Node] {
+        std::slice::from_ref(&self.button)
+    }
+
+    fn children_mut(&mut self) -> &mut [Node] {
+        std::slice::from_mut(&mut self.button)
+    }
+}
+
+/// 比 accent 深一档的品牌蓝 (派生而非魔法值:RGB 缩 0.8)。
+fn accent_strong(t: &LightTheme) -> Color {
+    let a = t.accent();
+    Color::rgba(a.r * 0.8, a.g * 0.8, a.b * 0.8, a.a)
+}
+
+/// 侧边栏：分类导航;选中项背景加深并带 accent 竖条 (NavItem + Button::bind_color)。
 fn sidebar(t: &LightTheme) -> impl Widget + 'static {
     let mut col = Column::new().gap(t.spacing_sm()).cross_stretch();
     for (i, name) in CATEGORIES.iter().enumerate() {
         let name = *name;
-        col = col.child(
+        let accent = t.accent();
+        let strong = accent_strong(t);
+        let marker = t.surface();
+        col = col.child(NavItem::new(
+            i,
+            marker,
             Button::themed(
                 t,
-                Text::bind(move |s: &Showcase| {
-                    let prefix = if s.selected == i { "▶ " } else { "\u{3000}" };
-                    format!("{prefix}{name}")
-                })
-                .font_size(t.font_size_body())
-                .color(t.surface()),
+                Text::new(name)
+                    .font_size(t.font_size_body())
+                    .color(t.surface()),
+            )
+            .bind_color(
+                move |s: &Showcase| {
+                    if s.selected == i { strong } else { accent }
+                },
             )
             .on_click(move || Msg::Select(i)),
-        );
+        ));
     }
     UiBox::themed(t)
         .radius(t.radius_lg())

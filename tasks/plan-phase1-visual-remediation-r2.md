@@ -40,8 +40,9 @@
   - **Files:** `assets/fonts/ofl-sans.ttf`, `assets/fonts/OFL.txt`, `src/text/font.rs`, `tests/assets.rs`，可能新增 `tools/subset-font.py`
   - **Scope:** M
 
-- [ ] **Task 2: 导航选中态图形化**
+- [x] **Task 2: 导航选中态图形化** ✅ 2026-07-22
   - **Description:** 移除 showcase 侧边栏的 `"▶ "/全角空格` 文本前缀；改为按钮内 Row 布局：选中项前置 accent 小圆点（`UiBox` 圆形，直径约 6px）或左侧竖条，未选中项占同等宽度保持对齐；同时选中按钮背景用 `Button::color()` 区分为更深的品牌蓝。若发现框架缺"按状态绑定样式"的能力，在 showcase 本地解决，不改框架。
+  - **完成记录：** 框架缺颜色绑定能力，经作者拍板偏离"不改框架"一句：`Button::bind_color`（与 `Text::bind` 同构，附单元测试）;showcase 本地 `NavItem` 画左缘白色竖条，选中 = 深背景（accent RGB ×0.8 派生）+ 竖条 + 白字。
   - **Acceptance:**
     - 四个导航按钮选中项有图形标记 + 背景区分，未选中项整齐对齐。
     - 全窗口不再出现豆腐块字形。
