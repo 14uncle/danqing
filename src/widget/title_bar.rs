@@ -172,7 +172,7 @@ impl TitleBar {
             button_size: theme.spacing_lg() + theme.spacing_xs(),
             button_gap: 1.0,
             margin: theme.spacing_md(),
-            logo_size: theme.spacing_lg(),
+            logo_size: theme.spacing_xl(),
             logo_gap: theme.spacing_sm(),
             // 背景透明: 窗口渐变背景贯通到顶, 标题栏融入其中而非一条白带。
             bg: Color::TRANSPARENT,
@@ -907,7 +907,7 @@ mod tests {
         );
         assert!((bar.button_gap - 1.0).abs() < f32::EPSILON);
         assert_eq!(bar.margin, LightTheme.spacing_md());
-        assert_eq!(bar.logo_size, LightTheme.spacing_lg());
+        assert_eq!(bar.logo_size, LightTheme.spacing_xl());
         assert_eq!(bar.bg, Color::TRANSPARENT);
         assert_eq!(bar.logo_frame_color, LightTheme.accent());
         assert_eq!(bar.logo_fill_color, LightTheme.surface_input());
