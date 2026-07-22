@@ -73,6 +73,9 @@ impl ButtonRole {
     }
 }
 
+/// 红绿灯 hover 符号颜色 (macOS 惯例: 半透明深灰, 不随主题变化)。
+const TRAFFIC_GLYPH_COLOR: Color = Color::rgba(0.0, 0.0, 0.0, 0.55);
+
 /// 标题栏按钮。
 #[derive(Debug, Default, Clone, Copy)]
 struct TitleButton {
@@ -121,6 +124,18 @@ pub struct TitleBar {
     logo_fill_color: Color,
     /// LOGO 颜料点色。
     logo_dot_color: Color,
+    /// 红绿灯关闭按钮色。
+    traffic_close_color: Color,
+    /// 红绿灯最小化按钮色。
+    traffic_minimize_color: Color,
+    /// 红绿灯最大化按钮色。
+    traffic_maximize_color: Color,
+    /// 红绿灯按钮直径。
+    traffic_diameter: f32,
+    /// 红绿灯按钮间距。
+    traffic_gap: f32,
+    /// 红绿灯组前导边距。
+    traffic_leading: f32,
     /// 标题字号。
     font_size: u16,
     /// 三个按钮状态, 按角色序索引 (0= 关闭,1= 最大化,2= 最小化)。
@@ -165,6 +180,13 @@ impl TitleBar {
             logo_frame_color: theme.accent(),
             logo_fill_color: theme.surface(),
             logo_dot_color: theme.accent(),
+            traffic_close_color: theme.traffic_close(),
+            traffic_minimize_color: theme.traffic_minimize(),
+            traffic_maximize_color: theme.traffic_maximize(),
+            // macOS 红绿灯规格: 直径 12、间隙 8、前导边距 12, 取间距 token 近似值。
+            traffic_diameter: theme.spacing_md(),
+            traffic_gap: theme.spacing_sm(),
+            traffic_leading: theme.spacing_md(),
             font_size: theme.font_size_body(),
             buttons: [TitleButton::default(); 3],
             on_close: None,
@@ -206,26 +228,27 @@ impl TitleBar {
         self
     }
 
-    /// 计算指定角色按钮的 hover 背景矩形。
+    /// 计算指定角色按钮的矩形 (Standard 为整高方形, 红绿灯为圆形外接正方形)。
     fn button_rect(&self, area: Rect, role: ButtonRole) -> Rect {
         let placed = self.style.placed_roles();
         let pos = placed
             .iter()
             .position(|r| *r == role)
             .expect("placed_roles 覆盖全部角色");
-        let size = self.height;
-        let x = match self.style {
+        match self.style {
             TitleBarStyle::Standard => {
+                let size = self.height;
                 let right = area.origin.x + area.size.width;
-                right - (pos as f32 + 1.0) * size - pos as f32 * self.button_gap
+                let x = right - (pos as f32 + 1.0) * size - pos as f32 * self.button_gap;
+                Rect::from_xywh(x, area.origin.y, size, size)
             }
             TitleBarStyle::TrafficLights => {
-                // 左置按钮: 从左边距起按排列顺序铺开;
-                // 红绿灯的圆形外观与标准 macOS 尺寸在后续任务中实现。
-                area.origin.x + self.margin + pos as f32 * (size + self.button_gap)
+                let d = self.traffic_diameter;
+                let x = area.origin.x + self.traffic_leading + pos as f32 * (d + self.traffic_gap);
+                let y = area.origin.y + (self.height - d) / 2.0;
+                Rect::from_xywh(x, y, d, d)
             }
-        };
-        Rect::from_xywh(x, area.origin.y, size, size)
+        }
     }
 
     /// 计算第 i 个按钮图标矩形,在 hover 背景内居中。
@@ -239,12 +262,18 @@ impl TitleBar {
     /// 计算 LOGO 矩形。
     fn logo_rect(&self, area: Rect) -> Rect {
         let y = area.origin.y + (self.height - self.logo_size) / 2.0;
-        Rect::from_xywh(
-            area.origin.x + self.margin,
-            y,
-            self.logo_size,
-            self.logo_size,
-        )
+        let x = match self.style {
+            TitleBarStyle::Standard => area.origin.x + self.margin,
+            TitleBarStyle::TrafficLights => {
+                // LOGO 顺排在红绿灯组之后。
+                let buttons_end = area.origin.x
+                    + self.traffic_leading
+                    + 3.0 * self.traffic_diameter
+                    + 2.0 * self.traffic_gap;
+                buttons_end + self.logo_gap
+            }
+        };
+        Rect::from_xywh(x, y, self.logo_size, self.logo_size)
     }
 
     /// 返回鼠标位置命中的按钮角色, 无命中返回 `None`。
@@ -298,6 +327,15 @@ impl TitleBar {
             }
         } else {
             None
+        }
+    }
+
+    /// 指定角色的红绿灯填充色 (来自主题 token)。
+    fn traffic_color(&self, role: ButtonRole) -> Color {
+        match role {
+            ButtonRole::Close => self.traffic_close_color,
+            ButtonRole::Minimize => self.traffic_minimize_color,
+            ButtonRole::Maximize => self.traffic_maximize_color,
         }
     }
 
@@ -377,8 +415,21 @@ impl TitleBar {
                     color,
                 );
             }
-            // 最大化:□ 形方框, 四条直边。
+            // 最大化: Standard 为 □ 形方框, 红绿灯为 + 形 (水平 + 垂直线段)。
             ButtonRole::Maximize => {
+                if self.style == TitleBarStyle::TrafficLights {
+                    rects.push_rect(
+                        Rect::from_xywh(cx - extent, cy - half_thick, extent * 2.0, thickness),
+                        color,
+                        half_thick,
+                    );
+                    rects.push_rect(
+                        Rect::from_xywh(cx - half_thick, cy - extent, thickness, extent * 2.0),
+                        color,
+                        half_thick,
+                    );
+                    return;
+                }
                 let side = extent * 2.0;
                 let top = cy - extent;
                 let left = cx - extent;
@@ -512,17 +563,32 @@ impl Widget for TitleBar {
             self.text_color,
         );
 
-        // 三个按钮: 正常仅显示几何符号, 悬停 / 按下时出现矩形背景。
-        // 背景一律直角: 窗口圆角由 DWM 裁剪 (Windows) 或原生装饰
-        // (其他平台) 处理, 自绘圆角反而无法与真实窗体圆角 / 最大化
-        // 直角状态保持一致。
-        for role in self.style.placed_roles() {
-            let bg = self.button_rect(area, role);
-            let icon = self.button_icon_rect(bg);
-            if let Some(bg_color) = self.button_background_color(role) {
-                rects.push_rect(bg, bg_color, 0.0);
+        // 按钮绘制按样式分支。
+        match self.style {
+            TitleBarStyle::Standard => {
+                // 正常仅显示几何符号, 悬停 / 按下时出现矩形背景。
+                // 背景一律直角: 窗口圆角由 DWM 裁剪 (Windows) 或原生装饰
+                // (其他平台) 处理, 自绘圆角反而无法与真实窗体圆角 / 最大化
+                // 直角状态保持一致。
+                for role in self.style.placed_roles() {
+                    let bg = self.button_rect(area, role);
+                    let icon = self.button_icon_rect(bg);
+                    if let Some(bg_color) = self.button_background_color(role) {
+                        rects.push_rect(bg, bg_color, 0.0);
+                    }
+                    self.paint_button_symbol(rects, role, icon, self.button_symbol_color(role));
+                }
             }
-            self.paint_button_symbol(rects, role, icon, self.button_symbol_color(role));
+            TitleBarStyle::TrafficLights => {
+                // 红绿灯: 始终绘制主题色实心圆, 仅 hover 时叠加深色符号。
+                for role in self.style.placed_roles() {
+                    let circle = self.button_rect(area, role);
+                    rects.push_rect(circle, self.traffic_color(role), circle.size.width / 2.0);
+                    if self.buttons[role.index()].hovered {
+                        self.paint_button_symbol(rects, role, circle, TRAFFIC_GLYPH_COLOR);
+                    }
+                }
+            }
         }
     }
 
@@ -630,6 +696,172 @@ mod tests {
     fn default_style_is_platform_default() {
         let bar = TitleBar::new("丹青");
         assert_eq!(bar.style, TitleBarStyle::platform_default());
+    }
+
+    #[test]
+    fn platform_default_matches_host_os() {
+        let expected = if cfg!(target_os = "macos") {
+            TitleBarStyle::TrafficLights
+        } else {
+            TitleBarStyle::Standard
+        };
+        assert_eq!(TitleBarStyle::platform_default(), expected);
+    }
+
+    #[test]
+    fn traffic_colors_come_from_theme_tokens() {
+        let bar = TitleBar::themed(&LightTheme, "丹青");
+        assert_eq!(bar.traffic_close_color, LightTheme.traffic_close());
+        assert_eq!(bar.traffic_minimize_color, LightTheme.traffic_minimize());
+        assert_eq!(bar.traffic_maximize_color, LightTheme.traffic_maximize());
+    }
+
+    #[test]
+    fn traffic_lights_buttons_are_left_ordered_and_centered() {
+        let bar = TitleBar::new("丹青").style(TitleBarStyle::TrafficLights);
+        let area = title_bar_area();
+
+        let close = bar.button_rect(area, ButtonRole::Close);
+        let minimize = bar.button_rect(area, ButtonRole::Minimize);
+        let maximize = bar.button_rect(area, ButtonRole::Maximize);
+
+        // 左置: 整组位于左半区, 顺序 关闭 → 最小化 → 最大化。
+        assert!(close.origin.x >= area.origin.x);
+        assert!(close.origin.x < minimize.origin.x);
+        assert!(minimize.origin.x < maximize.origin.x);
+        assert!(maximize.origin.x + maximize.size.width < area.size.width / 2.0);
+        // 圆形 (外接矩形为正方形) 且垂直居中。
+        for r in [close, minimize, maximize] {
+            assert_eq!(r.size.width, r.size.height);
+            let expected_y = area.origin.y + (bar.height - r.size.height) / 2.0;
+            assert!((r.origin.y - expected_y).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn standard_and_traffic_lights_hit_areas_do_not_cross() {
+        let area = title_bar_area();
+        let standard = TitleBar::new("丹青").style(TitleBarStyle::Standard);
+        let traffic = TitleBar::new("丹青").style(TitleBarStyle::TrafficLights);
+        let center_of = |r: Rect| {
+            Point::new(
+                r.origin.x + r.size.width / 2.0,
+                r.origin.y + r.size.height / 2.0,
+            )
+        };
+
+        // 红绿灯关闭按钮中心, 在 Standard 布局下不命中任何按钮。
+        let p = center_of(traffic.button_rect(area, ButtonRole::Close));
+        assert_eq!(standard.hit_button(area, p), None);
+        assert_eq!(traffic.hit_button(area, p), Some(ButtonRole::Close));
+
+        // Standard 关闭按钮中心, 在红绿灯布局下不命中任何按钮。
+        let p = center_of(standard.button_rect(area, ButtonRole::Close));
+        assert_eq!(traffic.hit_button(area, p), None);
+        assert_eq!(standard.hit_button(area, p), Some(ButtonRole::Close));
+    }
+
+    #[test]
+    fn traffic_lights_paint_circles_with_theme_colors() {
+        let mut bar = TitleBar::themed(&LightTheme, "丹青").style(TitleBarStyle::TrafficLights);
+        let area = title_bar_area();
+        let mut texts = TextBatch::new();
+        bar.layout(Constraints::tight(area.size), &mut texts);
+
+        let mut rects = RectBatch::new();
+        texts.clear();
+        bar.paint(area, &mut rects, &mut texts);
+
+        let d = bar.traffic_diameter;
+        let circles: Vec<_> = rects
+            .instance_rects()
+            .iter()
+            .zip(rects.instance_radii())
+            .zip(rects.instance_colors())
+            .filter(|((r, radii), _)| r.size == Size::new(d, d) && *radii == [d / 2.0; 4])
+            .map(|(_, c)| c)
+            .collect();
+        assert_eq!(circles.len(), 3, "应恰好绘制三个红绿灯圆形按钮");
+        for color in [
+            LightTheme.traffic_close(),
+            LightTheme.traffic_minimize(),
+            LightTheme.traffic_maximize(),
+        ] {
+            let expected = [color.r, color.g, color.b, color.a];
+            assert!(
+                circles.contains(&expected),
+                "缺少主题色圆形按钮: {expected:?}"
+            );
+        }
+        // 非 hover: 不绘制任何符号。
+        let glyph = [
+            TRAFFIC_GLYPH_COLOR.r,
+            TRAFFIC_GLYPH_COLOR.g,
+            TRAFFIC_GLYPH_COLOR.b,
+            TRAFFIC_GLYPH_COLOR.a,
+        ];
+        assert!(!rects.instance_colors().contains(&glyph));
+    }
+
+    #[test]
+    fn traffic_lights_hover_shows_glyph() {
+        let mut bar = TitleBar::themed(&LightTheme, "丹青").style(TitleBarStyle::TrafficLights);
+        let area = title_bar_area();
+        let mut texts = TextBatch::new();
+        bar.layout(Constraints::tight(area.size), &mut texts);
+
+        let center = bar.button_center(area, ButtonRole::Close.index());
+        let mut msgs = MsgQueue::new();
+        bar.event(&Event::CursorMoved(center), area, &mut msgs);
+
+        let mut rects = RectBatch::new();
+        texts.clear();
+        bar.paint(area, &mut rects, &mut texts);
+
+        let glyph = [
+            TRAFFIC_GLYPH_COLOR.r,
+            TRAFFIC_GLYPH_COLOR.g,
+            TRAFFIC_GLYPH_COLOR.b,
+            TRAFFIC_GLYPH_COLOR.a,
+        ];
+        assert!(
+            rects.instance_colors().contains(&glyph),
+            "hover 关闭按钮应绘制深色 × 符号"
+        );
+    }
+
+    #[test]
+    fn traffic_lights_maximize_button_emits_registered_message() {
+        let mut bar = TitleBar::new("丹青")
+            .style(TitleBarStyle::TrafficLights)
+            .on_maximize(|| WindowAction::MaximizeOrRestore);
+        let area = title_bar_area();
+        let center = bar.button_center(area, ButtonRole::Maximize.index());
+        let mut msgs = MsgQueue::new();
+
+        bar.event(&Event::CursorMoved(center), area, &mut msgs);
+        bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: center,
+            },
+            area,
+            &mut msgs,
+        );
+        bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: false,
+                position: center,
+            },
+            area,
+            &mut msgs,
+        );
+
+        assert_eq!(msgs.len(), 1);
+        let action = msgs[0].downcast_ref::<WindowAction>().unwrap();
+        assert_eq!(*action, WindowAction::MaximizeOrRestore);
     }
 
     #[test]

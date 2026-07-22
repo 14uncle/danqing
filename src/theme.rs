@@ -56,6 +56,12 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     fn caret(&self) -> Color;
     /// 危险 / 关闭按钮色。
     fn danger(&self) -> Color;
+    /// macOS 红绿灯关闭按钮色。
+    fn traffic_close(&self) -> Color;
+    /// macOS 红绿灯最小化按钮色。
+    fn traffic_minimize(&self) -> Color;
+    /// macOS 红绿灯最大化按钮色。
+    fn traffic_maximize(&self) -> Color;
 
     /// 小字号 (如提示、标签)。
     fn font_size_small(&self) -> u16;
@@ -149,6 +155,21 @@ impl Theme for LightTheme {
         Color::from_srgb8(239, 68, 68)
     }
 
+    fn traffic_close(&self) -> Color {
+        // macOS 红绿灯标准红 #FF5F57。
+        Color::from_srgb8(255, 95, 87)
+    }
+
+    fn traffic_minimize(&self) -> Color {
+        // macOS 红绿灯标准黄 #FEBC2E。
+        Color::from_srgb8(254, 188, 46)
+    }
+
+    fn traffic_maximize(&self) -> Color {
+        // macOS 红绿灯标准绿 #28C840。
+        Color::from_srgb8(40, 200, 64)
+    }
+
     fn font_size_small(&self) -> u16 {
         12
     }
@@ -229,6 +250,14 @@ impl Theme for LightTheme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn light_theme_traffic_colors_match_macos_palette() {
+        let theme = LightTheme;
+        assert_eq!(theme.traffic_close(), Color::from_srgb8(255, 95, 87));
+        assert_eq!(theme.traffic_minimize(), Color::from_srgb8(254, 188, 46));
+        assert_eq!(theme.traffic_maximize(), Color::from_srgb8(40, 200, 64));
+    }
 
     #[test]
     fn light_theme_implements_theme() {

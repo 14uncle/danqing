@@ -6,7 +6,7 @@
 
 - [x] **Task 1**: 按钮角色化重构 + `TitleBarStyle` 骨架（Standard 行为像素级不变）
   - 验收： 现有标题栏测试零修改通过；`.style()` builder 可用；`TitleBarStyle` 平铺导出
-- [ ] **Task 2**: Theme 红绿灯 token + TrafficLights 布局/绘制/hover 符号
+- [x] **Task 2**: Theme 红绿灯 token + TrafficLights 布局/绘制/hover 符号
   - 验收： 5 条模块内单测全绿（左侧顺序/命中/符号显隐/绿灯消息/平台默认）；无魔法颜色
 - [ ] **Task 3**: tests/title_bar_window.rs 红绿灯集成测试
   - 验收： 新增 4 条测试全绿（三按钮动作映射 + 拖拽/双击）
