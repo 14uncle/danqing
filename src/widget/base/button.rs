@@ -26,7 +26,9 @@ pub struct Button {
     color: Color,
     color_binding: Option<ColorBinding>,
     hover_color: Option<Color>,
+    hover_binding: Option<ColorBinding>,
     focus_color: Color,
+    focus_binding: Option<ColorBinding>,
     radius: f32,
     padding: Edges,
     hovered: bool,
@@ -52,7 +54,9 @@ impl Button {
             color: theme.accent(),
             color_binding: None,
             hover_color: None,
+            hover_binding: None,
             focus_color: Color::WHITE,
+            focus_binding: None,
             radius: theme.radius_md(),
             padding: Edges::symmetric(theme.spacing_lg(), theme.spacing_md()),
             hovered: false,
@@ -83,6 +87,34 @@ impl Button {
             let state = state
                 .downcast_ref::<S>()
                 .expect("Button 颜色绑定的状态类型不匹配");
+            f(state)
+        }));
+        self
+    }
+
+    /// 绑定悬停背景色：每帧从应用状态读取悬停色。
+    ///
+    /// 与 [`Button::bind_color`] 同构;设置后悬停不再按 1.2 倍提亮,
+    /// 而是直接使用绑定值 (适用于 ghost 按钮等需要精确悬停色的场景)。
+    pub fn bind_hover_color<S: 'static>(mut self, f: impl Fn(&S) -> Color + 'static) -> Self {
+        self.hover_binding = Some(Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("Button 悬停色绑定的状态类型不匹配");
+            f(state)
+        }));
+        self
+    }
+
+    /// 绑定焦点环颜色：每帧从应用状态读取焦点环色。
+    ///
+    /// 与 [`Button::bind_color`] 同构;ghost 按钮 (透明背景) 上白色焦点环
+    /// 不可见, 可用此绑定切换为 accent 等可见色。
+    pub fn bind_focus_color<S: 'static>(mut self, f: impl Fn(&S) -> Color + 'static) -> Self {
+        self.focus_binding = Some(Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("Button 焦点环色绑定的状态类型不匹配");
             f(state)
         }));
         self
@@ -134,6 +166,12 @@ impl Widget for Button {
     fn sync(&mut self, state: &dyn Any) {
         if let Some(binding) = &self.color_binding {
             self.color = binding(state);
+        }
+        if let Some(binding) = &self.hover_binding {
+            self.hover_color = Some(binding(state));
+        }
+        if let Some(binding) = &self.focus_binding {
+            self.focus_color = binding(state);
         }
         self.child.sync(state);
     }
@@ -274,6 +312,11 @@ impl Button {
         self.focus_color
     }
 
+    /// 当前悬停色 (测试用)。
+    pub(crate) fn hover_color_value(&self) -> Option<Color> {
+        self.hover_color
+    }
+
     /// 当前圆角半径 (测试用)。
     pub(crate) fn radius_value(&self) -> f32 {
         self.radius
@@ -330,5 +373,46 @@ mod tests {
         assert_eq!(button.color_value(), active, "选中时应取绑定色");
         button.sync(&(Nav { selected: false }) as &dyn Any);
         assert_eq!(button.color_value(), idle, "未选中时应回退绑定色");
+    }
+
+    #[test]
+    fn bind_hover_color_updates_on_sync() {
+        struct Nav {
+            selected: bool,
+        }
+        let hover_selected = Color::from_srgb8(12, 94, 88);
+        let hover_idle = Color::from_srgb8(238, 246, 242);
+        let mut button = Button::new(Text::new("基础")).bind_hover_color(move |s: &Nav| {
+            if s.selected {
+                hover_selected
+            } else {
+                hover_idle
+            }
+        });
+        assert_eq!(button.hover_color_value(), None, "sync 前无悬停色");
+        button.sync(&(Nav { selected: true }) as &dyn Any);
+        assert_eq!(button.hover_color_value(), Some(hover_selected));
+        button.sync(&(Nav { selected: false }) as &dyn Any);
+        assert_eq!(button.hover_color_value(), Some(hover_idle));
+    }
+
+    #[test]
+    fn bind_focus_color_updates_on_sync() {
+        struct Nav {
+            selected: bool,
+        }
+        let focus_selected = Color::WHITE;
+        let focus_idle = LightTheme.accent();
+        let mut button = Button::new(Text::new("基础")).bind_focus_color(move |s: &Nav| {
+            if s.selected {
+                focus_selected
+            } else {
+                focus_idle
+            }
+        });
+        button.sync(&(Nav { selected: true }) as &dyn Any);
+        assert_eq!(button.focus_color_value(), focus_selected);
+        button.sync(&(Nav { selected: false }) as &dyn Any);
+        assert_eq!(button.focus_color_value(), focus_idle);
     }
 }

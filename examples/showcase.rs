@@ -401,7 +401,7 @@ fn page_view(t: &LightTheme) -> impl Widget + 'static {
     )
 }
 
-/// 侧边栏导航项：选中时按钮背景加深 (Button::bind_color) 并在左缘绘制 accent 竖条。
+/// 侧边栏导航项：选中时实心 accent (Button::bind_color 等状态绑定) 并在左缘绘制竖条。
 ///
 /// 本组件为 showcase 导航专用，放在示例文件中以保持框架核心精简。
 struct NavItem {
@@ -469,19 +469,30 @@ impl Widget for NavItem {
     }
 }
 
-/// 比 accent 深一档的品牌蓝 (派生而非魔法值:RGB 缩 0.8)。
+/// 比 accent 深一档的品牌色 (派生而非魔法值:RGB 缩 0.8)。
 fn accent_strong(t: &LightTheme) -> Color {
     let a = t.accent();
     Color::rgba(a.r * 0.8, a.g * 0.8, a.b * 0.8, a.a)
 }
 
-/// 侧边栏：分类导航;选中项背景加深并带 accent 竖条 (NavItem + Button::bind_color)。
+/// accent 的低透明淡染 (派生而非魔法值): ghost 导航项的 hover 底色。
+///
+/// 白玻璃侧栏上 `surface_variant` 与合成底色几乎同值, 亮度型 hover 不可辨;
+/// 带色相偏移的 accent wash 才能在玻璃上读出悬停态。
+fn accent_wash(t: &LightTheme, alpha: f32) -> Color {
+    let a = t.accent();
+    Color::rgba(a.r, a.g, a.b, alpha)
+}
+
+/// 侧边栏：分类导航;未选中项 ghost (透明底 + 深色字),选中项实心 accent + 白字 + 左缘竖条。
 fn sidebar(t: &LightTheme) -> impl Widget + 'static {
     let mut col = Column::new().gap(t.spacing_sm()).cross_stretch();
     for (i, name) in CATEGORIES.iter().enumerate() {
         let name = *name;
         let accent = t.accent();
         let strong = accent_strong(t);
+        let hover_bg = accent_wash(t, 0.12);
+        let idle_text = t.text_primary();
         let marker = t.surface();
         col = col.child(NavItem::new(
             i,
@@ -490,13 +501,33 @@ fn sidebar(t: &LightTheme) -> impl Widget + 'static {
                 t,
                 Text::new(name)
                     .font_size(t.font_size_body())
-                    .color(Color::WHITE),
+                    .bind_color(move |s: &Showcase| {
+                        if s.selected == i {
+                            Color::WHITE
+                        } else {
+                            idle_text
+                        }
+                    }),
             )
-            .bind_color(
+            .bind_color(move |s: &Showcase| {
+                if s.selected == i {
+                    accent
+                } else {
+                    Color::TRANSPARENT
+                }
+            })
+            .bind_hover_color(
                 move |s: &Showcase| {
-                    if s.selected == i { strong } else { accent }
+                    if s.selected == i { strong } else { hover_bg }
                 },
             )
+            .bind_focus_color(move |s: &Showcase| {
+                if s.selected == i {
+                    Color::WHITE
+                } else {
+                    accent
+                }
+            })
             .on_click(move || Msg::Select(i)),
         ));
     }
