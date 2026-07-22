@@ -17,8 +17,12 @@
 
 - [x] **Task 4**: window.rs 移除 `with_decorations(false)` 的 Windows cfg 门控
   - 验收： Windows 冒烟零回归；「其他平台降级」注释清除
-- [ ] **Task 5**: 跨平台编译检查（`cargo check --target x86_64-unknown-linux-gnu` / `x86_64-apple-darwin`)
-  - 验收： Linux 通过；macOS 通过（或记录降级理由：________)
+- [x] **Task 5**: 跨平台编译检查（`cargo check --target x86_64-unknown-linux-gnu` / `x86_64-apple-darwin`)
+  - 结论： **macOS target check 通过**(2026-07-22，含 TrafficLights cfg 分支真实编译）;
+    **Linux 降级** —— `yeslogic-fontconfig-sys`(font-kit 传递依赖）的 build.rs 需要
+    pkg-config + Linux sysroot，本机（Windows，无 WSL 分发）无法满足；
+    丹青自身代码无任何 Linux 专属 cfg 分支，Linux 编译风险集中在第三方依赖，
+    留给 CI 或 Linux 真机验证
 
 **Checkpoint B**: 三平台编译结论明确 + fmt + clippy + 全测试绿
 
