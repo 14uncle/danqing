@@ -70,8 +70,9 @@
   - **Files:** `src/theme.rs`, `src/widget/form/text_input.rs`, `src/widget/form/text_area.rs`, `tests/design_system.rs`
   - **Scope:** S
 
-- [ ] **Task 4: TitleBar 融入背景**
+- [x] **Task 4: TitleBar 融入背景** ✅ 2026-07-22
   - **Description:** `TitleBar` 不再画不透明背景条：背景条改为透明（不 push 背景 rect）或极低 alpha，让窗口背景图直接贯通到顶；按钮 hover 背景、关闭按钮 danger 反馈保留；确认与去装饰窗口圆角/阴影协调。同步更新 `title_bar.rs` 中断言背景色的测试。
+  - **完成记录：** `bg` 改 `Color::TRANSPARENT` 且 paint 跳过透明背景（附"不产不可见矩形"护栏测试）;LOGO 内填充改用 `surface_input` 保持辨识度；按钮 hover/关闭 danger 不变。
   - **Acceptance:**
     - 标题栏区域可见渐变背景，不再是一条白带；LOGO、标题、三按钮在其上清晰可辨。
     - 拖拽、双击最大化、三按钮功能不变（现有命中测试全绿）。

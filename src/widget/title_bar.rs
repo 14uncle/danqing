@@ -154,6 +154,9 @@ pub struct TitleBar {
     last_left_press: Option<(Instant, Point)>,
 }
 
+/// 品牌朱砂红 (#E34234)：仅用于 LOGO 颜料滴的品牌资产色，不属于 theme token 体系。
+const BRAND_CINNABAR: Color = Color::rgb(227.0 / 255.0, 66.0 / 255.0, 52.0 / 255.0);
+
 impl TitleBar {
     /// 创建标题栏，使用默认浅色主题。
     pub fn new(title: impl Into<String>) -> Self {
@@ -171,15 +174,17 @@ impl TitleBar {
             margin: theme.spacing_md(),
             logo_size: theme.spacing_lg(),
             logo_gap: theme.spacing_sm(),
-            bg: theme.surface(),
+            // 背景透明: 窗口渐变背景贯通到顶, 标题栏融入其中而非一条白带。
+            bg: Color::TRANSPARENT,
             text_color: theme.text_primary(),
             button_color: theme.text_secondary(),
             button_hover_color: theme.text_primary(),
             close_hover_color: theme.danger(),
             button_bg_color: theme.border(),
             logo_frame_color: theme.accent(),
-            logo_fill_color: theme.surface(),
-            logo_dot_color: theme.accent(),
+            logo_fill_color: theme.surface_input(),
+            // 朱砂滴为品牌专属色,不随 theme token 变化。
+            logo_dot_color: BRAND_CINNABAR,
             traffic_close_color: theme.traffic_close(),
             traffic_minimize_color: theme.traffic_minimize(),
             traffic_maximize_color: theme.traffic_maximize(),
@@ -520,29 +525,31 @@ impl Widget for TitleBar {
     }
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
-        // 背景条。
-        rects.push_rect(area, self.bg, 0.0);
+        // 背景条 (透明时跳过, 不浪费实例)。
+        if self.bg.a > 0.0 {
+            rects.push_rect(area, self.bg, 0.0);
+        }
 
         // LOGO: 玻璃画布 + 颜料滴。
         let logo_rect = self.logo_rect(area);
         let logo_size = logo_rect.size.width;
 
         // 外框：accent 描边效果的圆角矩形。
-        // 与 assets/logo/logo.svg 比例对应：外框内缩 6%，描边 16%，圆角 25%。
-        let outer_inset = logo_size * 0.06;
+        // 与 assets/logo/logo.svg 比例对应：外框内缩 16.4%，圆角 18%，描边 10.2%。
+        let outer_inset = logo_size * 0.164;
         let frame_rect = logo_rect.inset(outer_inset);
-        let frame_radius = logo_size * 0.25;
+        let frame_radius = logo_size * 0.18;
         rects.push_rect(frame_rect, self.logo_frame_color, frame_radius);
 
         // 内部填充：白色半透明，形成“环 + 面”。
-        let stroke = logo_size * 0.16;
+        let stroke = logo_size * 0.102;
         let fill_rect = frame_rect.inset(stroke);
         let fill_radius = (frame_radius - stroke).max(0.0);
         rects.push_rect(fill_rect, self.logo_fill_color, fill_radius);
 
-        // 颜料滴：实心 accent 圆，偏右下。
-        let dot_size = logo_size * 0.38;
-        let dot_offset = logo_size * 0.58;
+        // 朱砂滴：实心品牌红圆，中心在 78.1% 处骑跨右下角框线，半内半外。
+        let dot_size = logo_size * 0.258;
+        let dot_offset = logo_size * 0.781;
         let dot_rect = Rect::from_xywh(
             logo_rect.origin.x + dot_offset - dot_size / 2.0,
             logo_rect.origin.y + dot_offset - dot_size / 2.0,
@@ -762,6 +769,23 @@ mod tests {
     }
 
     #[test]
+    fn transparent_bg_emits_no_invisible_rect() {
+        let mut bar = TitleBar::new("丹青");
+        let area = title_bar_area();
+        let mut texts = TextBatch::new();
+        bar.layout(Constraints::tight(area.size), &mut texts);
+
+        let mut rects = RectBatch::new();
+        texts.clear();
+        bar.paint(area, &mut rects, &mut texts);
+
+        assert!(
+            rects.instance_colors().iter().all(|c| c[3] > 0.0),
+            "透明背景不应产生不可见矩形"
+        );
+    }
+
+    #[test]
     fn traffic_lights_paint_circles_with_theme_colors() {
         let mut bar = TitleBar::themed(&LightTheme, "丹青").style(TitleBarStyle::TrafficLights);
         let area = title_bar_area();
@@ -884,10 +908,10 @@ mod tests {
         assert!((bar.button_gap - 1.0).abs() < f32::EPSILON);
         assert_eq!(bar.margin, LightTheme.spacing_md());
         assert_eq!(bar.logo_size, LightTheme.spacing_lg());
-        assert_eq!(bar.bg, LightTheme.surface());
+        assert_eq!(bar.bg, Color::TRANSPARENT);
         assert_eq!(bar.logo_frame_color, LightTheme.accent());
-        assert_eq!(bar.logo_fill_color, LightTheme.surface());
-        assert_eq!(bar.logo_dot_color, LightTheme.accent());
+        assert_eq!(bar.logo_fill_color, LightTheme.surface_input());
+        assert_eq!(bar.logo_dot_color, BRAND_CINNABAR);
     }
 
     #[test]
