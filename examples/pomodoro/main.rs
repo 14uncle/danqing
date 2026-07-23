@@ -3,9 +3,9 @@
 
 //! 丹青番茄钟 POC —— 专注陪伴工具 × 场景沉浸。
 //!
-//! 最小番茄钟 (固定 25/5, 开始/暂停/重置) + 场景沉浸:
-//! 场景大图为主角, 中央大字倒计时, 底部玻璃胶囊控件条,
-//! 场景 前/后 切换带 800ms 交叉淡化, 色调随场景调色板流动。
+//! 最小番茄钟 (固定 25/5, 开始/暂停/重置) + 场景沉浸：
+//! 场景大图为主角，中央大字倒计时，底部玻璃胶囊控件条，
+//! 场景 前/后 切换带 800ms 交叉淡化，色调随场景调色板流动。
 
 mod fader;
 mod scenes;
@@ -24,7 +24,7 @@ use fader::SceneFader;
 use scenes::SCENES;
 use timer::Pomodoro;
 
-/// 全局噪声叠加 (防抖带颗粒, 复用阶段 1 资产)。
+/// 全局噪声叠加 (防抖带颗粒，复用阶段 1 资产)。
 const NOISE: &str = "assets/background/noise.png";
 /// 噪声叠加不透明度。
 const NOISE_OPACITY: f32 = 0.06;
@@ -38,7 +38,7 @@ const FADE_EASING: Easing = Easing::EaseInOut;
 struct PomodoroApp {
     /// 计时状态机 (纯逻辑)。
     timer: Pomodoro,
-    /// 注入时间轴: 自应用启动的累计时间 (由 tick 心跳推进)。
+    /// 注入时间轴：自应用启动的累计时间 (由 tick 心跳推进)。
     now: Duration,
     /// 场景交叉淡化器 (含当前场景索引)。
     fader: SceneFader,
@@ -58,7 +58,7 @@ enum Msg {
 }
 
 impl PomodoroApp {
-    /// 当前视觉调色板: 淡化中为两端调色板的插值 (色调随画面同步流动)。
+    /// 当前视觉调色板：淡化中为两端调色板的插值 (色调随画面同步流动)。
     fn palette(&self) -> ScenePalette {
         let (from, to, t) = self.fader.frame(self.now, |t| FADE_EASING.eval(t));
         SCENES[from].palette.lerp(SCENES[to].palette, t)
@@ -117,7 +117,7 @@ impl App for PomodoroApp {
     }
 }
 
-/// 中央倒计时块: 大字倒计时 + 阶段/场景标注。
+/// 中央倒计时块：大字倒计时 + 阶段/场景标注。
 fn countdown_block(t: SceneTheme) -> impl widget::Widget {
     Column::new()
         .cross_stretch()
@@ -139,7 +139,7 @@ fn countdown_block(t: SceneTheme) -> impl widget::Widget {
         ))
 }
 
-/// 主操作按钮 (开始/暂停): accent 底 + 场景基调色文字 (同场景色对, 对比天然成立)。
+/// 主操作按钮 (开始/暂停): accent 底 + 场景基调色文字 (同场景色对，对比天然成立)。
 fn primary_button(t: SceneTheme) -> Button {
     Button::themed(
         &t,
@@ -156,7 +156,7 @@ fn primary_button(t: SceneTheme) -> Button {
     .on_click(|| Msg::StartPause)
 }
 
-/// 幽灵按钮 (重置/场景切换): 透明底, 悬停浮现玻璃, 文字随场景。
+/// 幽灵按钮 (重置/场景切换): 透明底，悬停浮现玻璃，文字随场景。
 fn ghost_button(t: SceneTheme, label: &'static str, msg: Msg) -> Button {
     Button::themed(
         &t,

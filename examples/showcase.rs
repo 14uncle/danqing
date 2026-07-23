@@ -228,7 +228,7 @@ fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
                 .color(t.text_primary()),
         )
         .child(
-            // 透明尺寸壳: 只为 Scrollable 提供 400×160 视口, 背景职责归 TextArea,
+            // 透明尺寸壳：只为 Scrollable 提供 400×160 视口，背景职责归 TextArea,
             // 避免外层 UiBox 与 TextArea 双层 surface 叠出接缝。
             UiBox::new(Color::TRANSPARENT)
                 .size(400.0, 160.0)
@@ -315,21 +315,16 @@ impl Widget for Positioned {
         constraints.constrain(self.child_size)
     }
 
-    fn paint(
-        &self,
-        area: danqing::Rect,
-        rects: &mut danqing::RectBatch,
-        texts: &mut danqing::TextBatch,
-    ) {
+    fn paint(&self, area: Rect, rects: &mut danqing::RectBatch, texts: &mut danqing::TextBatch) {
         let origin = Point::new(area.origin.x + self.offset.x, area.origin.y + self.offset.y);
         self.child
-            .paint(danqing::Rect::new(origin, self.child_size), rects, texts);
+            .paint(Rect::new(origin, self.child_size), rects, texts);
     }
 
-    fn event(&mut self, event: &Event, area: danqing::Rect, msgs: &mut MsgQueue) -> EventResult {
+    fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
         let origin = Point::new(area.origin.x + self.offset.x, area.origin.y + self.offset.y);
         self.child
-            .event(event, danqing::Rect::new(origin, self.child_size), msgs)
+            .event(event, Rect::new(origin, self.child_size), msgs)
     }
 
     fn children(&self) -> &[Node] {
@@ -412,7 +407,7 @@ struct NavItem {
 }
 
 impl NavItem {
-    /// 包装导航按钮,index 对应 Showcase.selected 的分类序号。
+    /// 包装导航按钮，index 对应 Showcase.selected 的分类序号。
     fn new(index: usize, marker_color: Color, button: impl Widget + 'static) -> Self {
         Self {
             button: Box::new(button),
@@ -443,7 +438,7 @@ impl Widget for NavItem {
     fn paint(&self, area: Rect, rects: &mut danqing::RectBatch, texts: &mut danqing::TextBatch) {
         self.button.paint(area, rects, texts);
         if self.selected {
-            // 选中竖条：左缘内缩 4px,宽 3px,高为按钮的一半,圆角拉满成胶囊。
+            // 选中竖条：左缘内缩 4px，宽 3px，高为按钮的一半，圆角拉满成胶囊。
             let bar_w = 3.0;
             let bar_h = area.size.height * 0.5;
             let bar = Rect::from_xywh(
@@ -477,7 +472,7 @@ fn accent_strong(t: &LightTheme) -> Color {
 
 /// accent 的低透明淡染 (派生而非魔法值): ghost 导航项的 hover 底色。
 ///
-/// 白玻璃侧栏上 `surface_variant` 与合成底色几乎同值, 亮度型 hover 不可辨;
+/// 白玻璃侧栏上 `surface_variant` 与合成底色几乎同值，亮度型 hover 不可辨;
 /// 带色相偏移的 accent wash 才能在玻璃上读出悬停态。
 fn accent_wash(t: &LightTheme, alpha: f32) -> Color {
     let a = t.accent();
@@ -568,7 +563,6 @@ fn build_tree() -> Node {
 }
 
 fn main() -> anyhow::Result<()> {
-    // env_logger::init();
     init_log();
 
     let mut app = Showcase {
