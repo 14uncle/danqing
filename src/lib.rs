@@ -24,5 +24,7 @@ pub use render::{
     BackgroundConfig, Context as RenderContext, RectBatch, RenderError, ScaleMode, TextBatch,
 };
 pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo, Line, break_lines};
-pub use theme::{Easing, LightTheme, Shadow, Theme};
+pub use theme::{
+    Easing, LightTheme, Shadow, Theme, composite_over, contrast_ratio, relative_luminance,
+};
 pub use window::{WindowConfig, WindowError, run, run_app};

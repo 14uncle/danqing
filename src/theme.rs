@@ -30,6 +30,60 @@ pub enum Easing {
     EaseInOut,
 }
 
+impl Easing {
+    /// 对进度 `t` 求值 (输入输出均夹到 0..1)。
+    ///
+    /// `EaseInOut` 采用三次缓入缓出: 两端平缓、中段陡峭。
+    pub fn eval(self, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        match self {
+            Self::Linear => t,
+            Self::EaseInOut => {
+                if t < 0.5 {
+                    4.0 * t * t * t
+                } else {
+                    1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+                }
+            }
+        }
+    }
+}
+
+/// 计算颜色的相对亮度 (WCAG 定义, 0.0 黑 ~ 1.0 白)。
+///
+/// 输入视为 sRGB 编码 (与 [`Color::from_srgb8`] 的存储语义一致),
+/// 先逐通道解码为线性, 再按 Rec.709 权重加权。
+pub fn relative_luminance(color: Color) -> f32 {
+    fn decode(c: f32) -> f32 {
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    0.2126 * decode(color.r) + 0.7152 * decode(color.g) + 0.0722 * decode(color.b)
+}
+
+/// 计算两颜色的 WCAG 对比度 (1.0 ~ 21.0)。
+///
+/// 忽略 alpha; 半透明色请先经 [`composite_over`] 合成到底色再比较。
+pub fn contrast_ratio(a: Color, b: Color) -> f32 {
+    let la = relative_luminance(a);
+    let lb = relative_luminance(b);
+    let (hi, lo) = if la >= lb { (la, lb) } else { (lb, la) };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+/// 将半透明顶层色合成到不透明底色上 (标准 over 运算)。
+pub fn composite_over(top: Color, base: Color) -> Color {
+    let a = top.a.clamp(0.0, 1.0);
+    Color::rgb(
+        top.r * a + base.r * (1.0 - a),
+        top.g * a + base.g * (1.0 - a),
+        top.b * a + base.b * (1.0 - a),
+    )
+}
+
 /// 主题接口。
 ///
 /// 定义一套面向效率工具的现代毛玻璃浅色设计 token; 后续可扩展 `DarkTheme`。
@@ -74,6 +128,10 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     fn font_size_body(&self) -> u16;
     /// 标题字号。
     fn font_size_heading(&self) -> u16;
+    /// 展示级字号 (如番茄钟大字倒计时)。
+    fn font_size_display(&self) -> u16 {
+        120
+    }
 
     /// 超小间距。
     fn spacing_xs(&self) -> f32;
@@ -354,5 +412,92 @@ mod tests {
         let theme = LightTheme;
         assert!(matches!(theme.easing_standard(), Easing::EaseInOut));
         assert!(matches!(theme.easing_accelerate(), Easing::Linear));
+    }
+
+    #[test]
+    fn relative_luminance_black_is_zero_white_is_one() {
+        assert!(relative_luminance(Color::BLACK).abs() < 0.01);
+        assert!((relative_luminance(Color::WHITE) - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn relative_luminance_decodes_srgb() {
+        // sRGB 中灰 0.5 解码为线性后约为 0.214, 而非 0.5。
+        let gray = Color::rgb(0.5, 0.5, 0.5);
+        let l = relative_luminance(gray);
+        assert!((l - 0.214).abs() < 0.01, "中灰线性亮度应约 0.214, 实际 {l}");
+    }
+
+    #[test]
+    fn contrast_ratio_black_white_is_21() {
+        let ratio = contrast_ratio(Color::BLACK, Color::WHITE);
+        assert!(
+            (ratio - 21.0).abs() < 0.1,
+            "黑白对比度应约 21:1, 实际 {ratio}"
+        );
+    }
+
+    #[test]
+    fn contrast_ratio_is_symmetric_and_same_color_is_1() {
+        let a = Color::from_srgb8(15, 118, 110);
+        let b = Color::from_srgb8(240, 248, 246);
+        assert!((contrast_ratio(a, b) - contrast_ratio(b, a)).abs() < f32::EPSILON);
+        assert!((contrast_ratio(a, a) - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn composite_over_opaque_top_returns_top() {
+        let top = Color::rgba(0.2, 0.4, 0.6, 1.0);
+        let base = Color::BLACK;
+        assert_eq!(composite_over(top, base), top);
+    }
+
+    #[test]
+    fn composite_over_half_white_on_black_is_mid_gray() {
+        let top = Color::rgba(1.0, 1.0, 1.0, 0.5);
+        let out = composite_over(top, Color::BLACK);
+        assert!((out.r - 0.5).abs() < f32::EPSILON);
+        assert!((out.g - 0.5).abs() < f32::EPSILON);
+        assert!((out.b - 0.5).abs() < f32::EPSILON);
+        assert!((out.a - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn easing_eval_endpoints_are_identity() {
+        for e in [Easing::Linear, Easing::EaseInOut] {
+            assert!((e.eval(0.0) - 0.0).abs() < f32::EPSILON);
+            assert!((e.eval(1.0) - 1.0).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn easing_eval_is_monotonic() {
+        for e in [Easing::Linear, Easing::EaseInOut] {
+            let mut prev = e.eval(0.0);
+            for i in 1..=10 {
+                let cur = e.eval(i as f32 / 10.0);
+                assert!(cur >= prev, "{e:?} 在 {i}/10 处不单调");
+                prev = cur;
+            }
+        }
+    }
+
+    #[test]
+    fn easing_eval_clamps_t() {
+        for e in [Easing::Linear, Easing::EaseInOut] {
+            assert!((e.eval(-0.5) - 0.0).abs() < f32::EPSILON);
+            assert!((e.eval(1.5) - 1.0).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn easing_ease_in_out_midpoint_is_half() {
+        assert!((Easing::EaseInOut.eval(0.5) - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn display_font_size_is_largest_tier() {
+        let theme = LightTheme;
+        assert!(theme.font_size_display() > theme.font_size_heading());
     }
 }

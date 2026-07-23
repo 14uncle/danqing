@@ -42,6 +42,20 @@ impl Color {
     pub const fn from_srgb8(r: u8, g: u8, b: u8) -> Self {
         Self::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
     }
+
+    /// 向另一颜色线性插值 (分量独立,`t` 夹到 0..1)。
+    ///
+    /// 用于主题/场景过渡动画;在存储空间 (sRGB 编码) 内插值,
+    /// 与逐帧渲染的观感一致。
+    pub fn lerp(self, other: Color, t: f32) -> Self {
+        let t = t.clamp(0.0, 1.0);
+        Self::rgba(
+            self.r + (other.r - self.r) * t,
+            self.g + (other.g - self.g) * t,
+            self.b + (other.b - self.b) * t,
+            self.a + (other.a - self.a) * t,
+        )
+    }
 }
 
 /// 二维点，逻辑像素坐标 (原点为窗口左上角，y 向下)。
@@ -369,6 +383,33 @@ mod tests {
         assert_eq!(c.g, 0.0);
         assert!((c.b - 128.0 / 255.0).abs() < f32::EPSILON);
         assert_eq!(c.a, 1.0);
+    }
+
+    #[test]
+    fn color_lerp_endpoints() {
+        let a = Color::rgba(0.2, 0.4, 0.6, 0.8);
+        let b = Color::rgba(0.8, 0.2, 0.4, 0.4);
+        assert_eq!(a.lerp(b, 0.0), a);
+        assert_eq!(a.lerp(b, 1.0), b);
+    }
+
+    #[test]
+    fn color_lerp_midpoint() {
+        let a = Color::rgba(0.0, 0.2, 0.4, 0.0);
+        let b = Color::rgba(1.0, 0.8, 0.0, 1.0);
+        let mid = a.lerp(b, 0.5);
+        assert!((mid.r - 0.5).abs() < f32::EPSILON);
+        assert!((mid.g - 0.5).abs() < f32::EPSILON);
+        assert!((mid.b - 0.2).abs() < f32::EPSILON);
+        assert!((mid.a - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn color_lerp_clamps_t() {
+        let a = Color::BLACK;
+        let b = Color::WHITE;
+        assert_eq!(a.lerp(b, -0.5), a);
+        assert_eq!(a.lerp(b, 1.5), b);
     }
 
     #[test]

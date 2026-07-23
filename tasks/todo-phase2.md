@@ -3,7 +3,7 @@
 > 详见 `tasks/plan-phase2.md`(验收标准、依赖、风险)。每任务完成后勾选,检查点需人工确认。
 
 ## Phase 1: 框架纯逻辑
-- [ ] **Task 1** 颜色插值、对比度与动效求值纯逻辑 — `cargo test --lib theme/layout` 绿
+- [x] **Task 1** 颜色插值、对比度与动效求值纯逻辑 — `cargo test --lib theme/layout` 绿 ✅ f73b373
 - [ ] **Task 2** ScenePalette + SceneTheme + SceneSpec(依赖 1)— token 护栏 + lerp + re-export
 
 ### ⏸ Checkpoint 1: 框架 token 就绪
