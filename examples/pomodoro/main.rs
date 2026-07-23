@@ -8,6 +8,9 @@
 
 mod timer;
 
+/// 场景清单常量 (生成文件); Task 6 界面组装接入。
+pub mod scenes;
+
 use std::time::Duration;
 
 use danqing::widget::{self, Center, Column, Node, Text, TitleBar};

@@ -12,7 +12,7 @@
 
 ## Phase 2: 状态机 / 资产管线 / 渲染管线(可并行)
 - [x] **Task 3** 番茄钟状态机 + example 骨架 — `cargo test --example pomodoro` 机制验证 ✅(12 测试绿) + 12s 冒烟无 panic
-- [ ] **Task 4** 场景生成管线 export-scenes.py(依赖 2)— 4 张场景 PNG + scenes.rs,人工过目击调
+- [x] **Task 4** 场景生成管线 export-scenes.py(依赖 2)— 4 张场景 PNG(生成期护栏全过, 烟熏玻璃修正) + scenes.rs 形状校验 ✅
 - [ ] **Task 5** 背景管线多场景 + 交叉淡化 + App 通道 — showcase 单图路径回归无异常
 
 ### ⏸ Checkpoint 2: 状态机 / 资产 / 管线就绪
