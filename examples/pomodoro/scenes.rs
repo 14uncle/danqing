@@ -64,3 +64,52 @@ pub const SCENES: [SceneSpec; 4] = [
         },
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    //! 对比度护栏: 与 tools/export-scenes.py 生成期护栏同规则,
+    //! 防止 scenes.rs 被手改后护栏静默失效 (spec: 大字 ≥3:1, 控件 ≥4:1)。
+    use super::*;
+    use danqing::{composite_over, contrast_ratio};
+
+    /// 大字 (倒计时) 对场景背景极值的最低对比度。
+    const DISPLAY_MIN: f32 = 3.0;
+    /// 控件文字对玻璃合成底的最低对比度。
+    const CONTROL_MIN: f32 = 4.0;
+
+    #[test]
+    fn all_scenes_pass_contrast_guards() {
+        assert_eq!(SCENES.len(), 4, "POC 应有 4 个场景");
+        for spec in &SCENES {
+            let p = &spec.palette;
+            for (label, backdrop) in [
+                ("backdrop_light", p.backdrop_light),
+                ("backdrop_dark", p.backdrop_dark),
+            ] {
+                let display = contrast_ratio(p.text_primary, backdrop);
+                assert!(
+                    display >= DISPLAY_MIN,
+                    "{}: 大字 vs {label} = {display:.2} < {DISPLAY_MIN}",
+                    spec.name
+                );
+                let glass = composite_over(p.surface, backdrop);
+                let control = contrast_ratio(p.text_primary, glass);
+                assert!(
+                    control >= CONTROL_MIN,
+                    "{}: 控件文字 vs 玻璃({label}) = {control:.2} < {CONTROL_MIN}",
+                    spec.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scene_images_are_unique_and_named() {
+        for (i, a) in SCENES.iter().enumerate() {
+            for b in &SCENES[i + 1..] {
+                assert_ne!(a.image, b.image, "场景图路径不应重复");
+                assert_ne!(a.name, b.name, "场景名不应重复");
+            }
+        }
+    }
+}

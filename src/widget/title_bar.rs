@@ -152,10 +152,39 @@ pub struct TitleBar {
     area: Rect,
     /// 上次在非按钮区按下左键的时间与位置，用于识别双击最大化。
     last_left_press: Option<(Instant, Point)>,
+    /// 主题绑定: 设置后每帧 sync 重取流动色 (场景色调流动)。
+    theme_binding: Option<ThemeBinding>,
 }
 
 /// 品牌朱砂红 (#E34234)：仅用于 LOGO 颜料滴的品牌资产色，不属于 theme token 体系。
 const BRAND_CINNABAR: Color = Color::rgb(227.0 / 255.0, 66.0 / 255.0, 52.0 / 255.0);
+
+/// 随主题流动的标题栏颜色子集 (构建后仍可经 [`TitleBar::bind_theme`] 每帧刷新)。
+#[derive(Debug, Clone, Copy)]
+struct FlowingColors {
+    text_color: Color,
+    button_color: Color,
+    button_hover_color: Color,
+    button_bg_color: Color,
+    logo_frame_color: Color,
+    logo_fill_color: Color,
+}
+
+impl FlowingColors {
+    fn from_theme(theme: &impl Theme) -> Self {
+        Self {
+            text_color: theme.text_primary(),
+            button_color: theme.text_secondary(),
+            button_hover_color: theme.text_primary(),
+            button_bg_color: theme.border(),
+            logo_frame_color: theme.accent(),
+            logo_fill_color: theme.surface_input(),
+        }
+    }
+}
+
+/// 主题绑定闭包: 每帧从类型擦除的应用状态产出流动色 (与 `Button::bind_color` 同构)。
+type ThemeBinding = std::boxed::Box<dyn Fn(&dyn Any) -> FlowingColors>;
 
 impl TitleBar {
     /// 创建标题栏，使用默认浅色主题。
@@ -165,6 +194,7 @@ impl TitleBar {
 
     /// 使用指定主题创建标题栏。
     pub fn themed(theme: &impl Theme, title: impl Into<String>) -> Self {
+        let flowing = FlowingColors::from_theme(theme);
         Self {
             title: title.into(),
             style: TitleBarStyle::platform_default(),
@@ -176,13 +206,13 @@ impl TitleBar {
             logo_gap: theme.spacing_sm(),
             // 背景透明: 窗口渐变背景贯通到顶, 标题栏融入其中而非一条白带。
             bg: Color::TRANSPARENT,
-            text_color: theme.text_primary(),
-            button_color: theme.text_secondary(),
-            button_hover_color: theme.text_primary(),
+            text_color: flowing.text_color,
+            button_color: flowing.button_color,
+            button_hover_color: flowing.button_hover_color,
             close_hover_color: theme.danger(),
-            button_bg_color: theme.border(),
-            logo_frame_color: theme.accent(),
-            logo_fill_color: theme.surface_input(),
+            button_bg_color: flowing.button_bg_color,
+            logo_frame_color: flowing.logo_frame_color,
+            logo_fill_color: flowing.logo_fill_color,
             // 朱砂滴为品牌专属色,不随 theme token 变化。
             logo_dot_color: BRAND_CINNABAR,
             traffic_close_color: theme.traffic_close(),
@@ -200,7 +230,24 @@ impl TitleBar {
             on_drag: None,
             area: Rect::default(),
             last_left_press: None,
+            theme_binding: None,
         }
+    }
+
+    /// 绑定主题: 每帧从应用状态重取主题, 刷新随场景流动的颜色
+    /// (标题文字 / 按钮符号 / LOGO 框与填充); 其余规格 (尺寸、间距、
+    /// 品牌色、红绿灯色) 保持构建时的主题值。
+    pub fn bind_theme<S: 'static, T: Theme + 'static>(
+        mut self,
+        f: impl Fn(&S) -> T + 'static,
+    ) -> Self {
+        self.theme_binding = Some(std::boxed::Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("TitleBar 主题绑定的状态类型不匹配");
+            FlowingColors::from_theme(&f(state))
+        }));
+        self
     }
 
     /// 设置按钮布局样式，覆盖平台默认值。
@@ -518,6 +565,18 @@ impl TitleBar {
 }
 
 impl Widget for TitleBar {
+    fn sync(&mut self, state: &dyn Any) {
+        if let Some(binding) = &self.theme_binding {
+            let flowing = binding(state);
+            self.text_color = flowing.text_color;
+            self.button_color = flowing.button_color;
+            self.button_hover_color = flowing.button_hover_color;
+            self.button_bg_color = flowing.button_bg_color;
+            self.logo_frame_color = flowing.logo_frame_color;
+            self.logo_fill_color = flowing.logo_fill_color;
+        }
+    }
+
     fn layout(&mut self, constraints: Constraints, _texts: &mut TextBatch) -> Size {
         let size = constraints.constrain(Size::new(constraints.max_width, self.height));
         self.area = Rect::new(Point::ZERO, size);
@@ -912,6 +971,54 @@ mod tests {
         assert_eq!(bar.logo_frame_color, LightTheme.accent());
         assert_eq!(bar.logo_fill_color, LightTheme.surface_input());
         assert_eq!(bar.logo_dot_color, BRAND_CINNABAR);
+    }
+
+    #[test]
+    fn bound_theme_refreshes_flowing_colors_each_sync() {
+        // 场景色调流动: 标题栏构建于场景 0 的主题, 但每帧 sync 应随
+        // 应用状态重取主题色 (否则亮场景下标题文字/按钮符号发虚)。
+        struct AppState {
+            alt: bool,
+        }
+        let alt_theme = |alt: bool| {
+            if alt {
+                crate::SceneTheme::new(crate::ScenePalette {
+                    base: Color::from_srgb8(0x10, 0x10, 0x10),
+                    accent: Color::from_srgb8(0x20, 0x20, 0x20),
+                    text_primary: Color::from_srgb8(0x30, 0x30, 0x30),
+                    text_secondary: Color::from_srgb8(0x40, 0x40, 0x40),
+                    surface: Color::from_srgb8(0x50, 0x50, 0x50),
+                    surface_input: Color::from_srgb8(0x60, 0x60, 0x60),
+                    backdrop_light: Color::from_srgb8(0x70, 0x70, 0x70),
+                    backdrop_dark: Color::from_srgb8(0x80, 0x80, 0x80),
+                })
+            } else {
+                crate::SceneTheme::new(crate::ScenePalette {
+                    base: Color::from_srgb8(0x90, 0x90, 0x90),
+                    accent: Color::from_srgb8(0xA0, 0xA0, 0xA0),
+                    text_primary: Color::from_srgb8(0xB0, 0xB0, 0xB0),
+                    text_secondary: Color::from_srgb8(0xC0, 0xC0, 0xC0),
+                    surface: Color::from_srgb8(0xD0, 0xD0, 0xD0),
+                    surface_input: Color::from_srgb8(0xE0, 0xE0, 0xE0),
+                    backdrop_light: Color::from_srgb8(0xF0, 0xF0, 0xF0),
+                    backdrop_dark: Color::from_srgb8(0x08, 0x08, 0x08),
+                })
+            }
+        };
+        let mut bar =
+            TitleBar::themed(&LightTheme, "丹青").bind_theme(move |s: &AppState| alt_theme(s.alt));
+
+        bar.sync(&AppState { alt: false });
+        assert_eq!(bar.text_color, Color::from_srgb8(0xB0, 0xB0, 0xB0));
+        assert_eq!(bar.button_color, Color::from_srgb8(0xC0, 0xC0, 0xC0));
+        assert_eq!(bar.logo_frame_color, Color::from_srgb8(0xA0, 0xA0, 0xA0));
+        assert_eq!(bar.logo_fill_color, Color::from_srgb8(0xE0, 0xE0, 0xE0));
+
+        bar.sync(&AppState { alt: true });
+        assert_eq!(bar.text_color, Color::from_srgb8(0x30, 0x30, 0x30));
+        assert_eq!(bar.button_color, Color::from_srgb8(0x40, 0x40, 0x40));
+        assert_eq!(bar.logo_frame_color, Color::from_srgb8(0x20, 0x20, 0x20));
+        assert_eq!(bar.logo_fill_color, Color::from_srgb8(0x60, 0x60, 0x60));
     }
 
     #[test]

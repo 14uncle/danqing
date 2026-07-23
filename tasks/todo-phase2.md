@@ -16,14 +16,14 @@
 - [x] **Task 5** 背景管线多场景 + 交叉淡化 + App 通道 — showcase 单图回归 ✅(校验层无错误; WGSL `from` 保留字已修)
 
 ### ⏸ Checkpoint 2: 状态机 / 资产 / 管线就绪
-- [ ] `cargo test --lib --tests` + `cargo test --example pomodoro` 全绿;clippy 零警告
+- [x] `cargo test --lib --tests` + `cargo test --example pomodoro` 全绿;clippy 零警告
 - [ ] showcase 人工回归;4 张场景图人工 review
 
 ## Phase 3: POC 组装与终验
 - [x] **Task 6** POC 界面组装(依赖 2/3/4/5)— 计时全功能 + 场景即时切换,wgpu 校验层无错误
-- [ ] **Task 7** 过渡动画 + 色调流动 + 4 场景对比度护栏 + spec 终验(依赖 6)
+- [x] **Task 7** 过渡动画 + 色调流动 + 4 场景对比度护栏 + spec 终验(依赖 6)
 
 ### ✅ Checkpoint Complete: 阶段 2 POC 关闭
-- [ ] spec Success Criteria 7/7 通过
-- [ ] 全部 Commands 绿;本 todo 全部勾选
+- [x] spec Success Criteria 7/7 通过
+- [ ] 全部 Commands 绿;本 todo 全部勾选 (待人工终审)
 - [ ] 人工终审(重点:场景沉浸观感是否成立)

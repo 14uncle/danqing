@@ -5,8 +5,9 @@
 //!
 //! 最小番茄钟 (固定 25/5, 开始/暂停/重置) + 场景沉浸:
 //! 场景大图为主角, 中央大字倒计时, 底部玻璃胶囊控件条,
-//! 场景 ◀/▶ 切换, 色调随场景调色板流动 (Task 7 加交叉淡化)。
+//! 场景 前/后 切换带 800ms 交叉淡化, 色调随场景调色板流动。
 
+mod fader;
 mod scenes;
 mod timer;
 
@@ -16,9 +17,10 @@ use danqing::widget::{
     self, Box as UiBox, Button, Center, Column, Node, Padding, Row, Text, TitleBar,
 };
 use danqing::{
-    AnimationCtx, App, BackgroundConfig, BackgroundFrame, Color, ScaleMode, ScenePalette,
+    AnimationCtx, App, BackgroundConfig, BackgroundFrame, Color, Easing, ScaleMode, ScenePalette,
     SceneTheme, Size, Theme, WindowAction, WindowConfig,
 };
+use fader::SceneFader;
 use scenes::SCENES;
 use timer::Pomodoro;
 
@@ -26,6 +28,11 @@ use timer::Pomodoro;
 const NOISE: &str = "assets/background/noise.png";
 /// 噪声叠加不透明度。
 const NOISE_OPACITY: f32 = 0.06;
+/// 场景交叉淡化时长 (spec: 600~1000ms)。
+const FADE_DURATION: Duration = Duration::from_millis(800);
+
+/// 淡化缓动曲线 (淡入淡出两端柔和)。
+const FADE_EASING: Easing = Easing::EaseInOut;
 
 /// 番茄钟应用状态。
 struct PomodoroApp {
@@ -33,8 +40,8 @@ struct PomodoroApp {
     timer: Pomodoro,
     /// 注入时间轴: 自应用启动的累计时间 (由 tick 心跳推进)。
     now: Duration,
-    /// 当前场景索引。
-    scene: usize,
+    /// 场景交叉淡化器 (含当前场景索引)。
+    fader: SceneFader,
 }
 
 /// 应用消息。
@@ -51,9 +58,10 @@ enum Msg {
 }
 
 impl PomodoroApp {
-    /// 当前场景调色板。
+    /// 当前视觉调色板: 淡化中为两端调色板的插值 (色调随画面同步流动)。
     fn palette(&self) -> ScenePalette {
-        SCENES[self.scene].palette
+        let (from, to, t) = self.fader.frame(self.now, |t| FADE_EASING.eval(t));
+        SCENES[from].palette.lerp(SCENES[to].palette, t)
     }
 
     /// 当前场景主题 (颜色 token 随调色板流动)。
@@ -69,8 +77,14 @@ impl App for PomodoroApp {
         match msg {
             Msg::StartPause => self.timer.toggle(self.now),
             Msg::Reset => self.timer.reset(),
-            Msg::PrevScene => self.scene = (self.scene + SCENES.len() - 1) % SCENES.len(),
-            Msg::NextScene => self.scene = (self.scene + 1) % SCENES.len(),
+            Msg::PrevScene => {
+                let target = (self.fader.current() + SCENES.len() - 1) % SCENES.len();
+                self.fader.switch_to(target, self.now);
+            }
+            Msg::NextScene => {
+                let target = (self.fader.current() + 1) % SCENES.len();
+                self.fader.switch_to(target, self.now);
+            }
         }
     }
 
@@ -81,6 +95,7 @@ impl App for PomodoroApp {
                 .cross_stretch()
                 .child(
                     TitleBar::themed(&t, "丹青 · 番茄钟")
+                        .bind_theme(|s: &PomodoroApp| s.theme())
                         .on_close(|| WindowAction::Close)
                         .on_minimize(|| WindowAction::Minimize)
                         .on_maximize(|| WindowAction::MaximizeOrRestore)
@@ -97,13 +112,8 @@ impl App for PomodoroApp {
     }
 
     fn background_frame(&self) -> Option<BackgroundFrame> {
-        // Task 6: 即时切换 (from == to, fade 恒 1);Task 7 接淡化。
-        Some(BackgroundFrame::new(
-            self.scene,
-            self.scene,
-            1.0,
-            self.palette().base,
-        ))
+        let (from, to, fade) = self.fader.frame(self.now, |t| FADE_EASING.eval(t));
+        Some(BackgroundFrame::new(from, to, fade, self.palette().base))
     }
 }
 
@@ -118,7 +128,11 @@ fn countdown_block(t: SceneTheme) -> impl widget::Widget {
         ))
         .child(Center::new(
             Text::bind(|s: &PomodoroApp| {
-                format!("{} · {}", s.timer.phase().label(), SCENES[s.scene].name)
+                format!(
+                    "{} · {}",
+                    s.timer.phase().label(),
+                    SCENES[s.fader.current()].name
+                )
             })
             .font_size(t.font_size_body())
             .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
@@ -176,7 +190,7 @@ fn main() -> anyhow::Result<()> {
     let mut app = PomodoroApp {
         timer: Pomodoro::new(),
         now: Duration::ZERO,
-        scene: 0,
+        fader: SceneFader::new(0, FADE_DURATION),
     };
 
     let background = BackgroundConfig::with_scenes(SCENES.iter().map(|s| s.image))
