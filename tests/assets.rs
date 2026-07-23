@@ -52,14 +52,6 @@ fn background_images_exist() {
 }
 
 #[test]
-fn fallback_font_exists() {
-    let path = assets_dir().join("fonts").join("fallback-font.ttf");
-    assert!(path.exists(), "回退字体应存在: {}", path.display());
-    let meta = std::fs::metadata(&path).unwrap();
-    assert!(meta.len() > 0, "回退字体不应为空");
-}
-
-#[test]
 fn ofl_sans_font_exists() {
     let path = assets_dir().join("fonts").join("ofl-sans.ttf");
     assert!(path.exists(), "内嵌黑体应存在: {}", path.display());

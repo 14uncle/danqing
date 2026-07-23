@@ -19,7 +19,7 @@
 
 - **语言**:Rust 2024 edition
 - **窗口/事件**:`winit` 0.30;**自绘**:`wgpu` 30(均已就位)
-- **字体**:沿用 `assets/fonts/` 现有字体(ZCOOL XiaoWei 回退),大字号呈现"细体"观感;若验证后观感不足,引入新字体属 Ask first
+- **字体**:沿用 `assets/fonts/` 现有字体(系统黑体优先,内嵌 OFL 黑体兜底);若验证后观感不足,引入新字体属 Ask first
 - **位图**:`image`(png)已在依赖中,无新增
 - **场景生成**:Python + Pillow 脚本(演进 `tools/export-background.py`),产出 PNG + 调色板
 
