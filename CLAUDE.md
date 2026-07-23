@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-丹青 (danqing) 是一个 Rust 跨平台自绘 UI 框架,使用 `winit` 0.30 处理窗口与事件,`wgpu` 30 自绘,保留模式组件树。基础里程碑 M1~M3(渲染与组件树、焦点与输入、滚动与多行文本)已关闭,文档归档在 `tasks/archive/`;当前处于 **阶段 1 —— 设计系统 + 品牌视觉**,为效率工具场景建立毛玻璃(Glassmorphism)浅色设计系统。阶段 2 将落地首个 POC——剪贴板历史管理器(计划示例 `examples/clipboard.rs`,当前尚未创建)。
+丹青 (danqing) 是一个 Rust 跨平台自绘 UI 框架,使用 `winit` 0.30 处理窗口与事件,`wgpu` 30 自绘,保留模式组件树。基础里程碑 M1~M3(渲染与组件树、焦点与输入、滚动与多行文本)已关闭,文档归档在 `tasks/archive/`;**阶段 1 —— 设计系统 + 品牌视觉**已关闭(玉色 accent、破框朱砂 LOGO、毛玻璃主题落地)。**阶段 2 将落地首个 POC——专注陪伴工具(番茄钟)**,采用潮汐式场景沉浸美学(场景大图为主角、色调随场景流动、UI 退后);产品分专注陪伴/效率工具两族,美学剂量不同,剪贴板历史管理器为第二 POC。转向决策见 `docs/ideas/danqing-scene-immersion-pivot.md`。
 
 ## Common commands
 
