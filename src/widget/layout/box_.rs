@@ -194,13 +194,16 @@ impl Widget for Box {
     }
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
-        rects.push_rect(area, self.effective_color(), self.radius);
+        // 填充与描边共用同一份像素对齐几何: 轮廓精确重合 (贴合),
+        // 且细描边落在完整像素行上满强度渲染; 子组件随表面对齐。
+        let surface = area.snap_to_pixels();
+        rects.push_rect(surface, self.effective_color(), self.radius);
         if let Some(child) = &self.child {
-            child.paint(area, rects, texts);
+            child.paint(surface, rects, texts);
         }
-        // 边框骑缝绘制(内外各半),最后画避免被不透明子组件盖住内半。
+        // 边框内缩在填充轮廓之内 (外缘与填充边缘重合),最后画避免被子组件盖住。
         if let Some(border) = self.border_color {
-            rects.push_rounded_border(area, border, self.radius, self.border_width);
+            rects.push_rounded_border(surface, border, self.radius, self.border_width);
         }
     }
 
@@ -333,5 +336,45 @@ mod tests {
             .child(Box::new(Color::BLACK));
         let size = box_.layout(Constraints::loose(Size::new(1280.0, 800.0)), &mut texts);
         assert_eq!(size, Size::new(400.0, 160.0));
+    }
+
+    #[test]
+    fn paint_snaps_fill_and_border_to_same_pixel_grid() {
+        // 填充与描边必须共用同一份像素对齐几何: 分数坐标下两者轮廓精确重合
+        // (描边不外露填充底色——卡片边框不贴合回归), 且描边落在完整像素行上
+        // (输入框底边发虚回归)。
+        let theme = LightTheme;
+        let box_ = Box::themed(&theme);
+        let area = Rect::from_xywh(208.3, 127.553, 400.0, 65.9);
+        let snapped = area.snap_to_pixels();
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        box_.paint(area, &mut rects, &mut texts);
+        let instances = rects.instance_rects();
+        assert!(instances.len() > 4, "填充 + 四边描边: {instances:?}");
+        // 第一个实例是填充, 必须与对齐矩形完全一致。
+        assert_eq!(instances[0], snapped, "填充应绘制在对齐后的矩形上");
+        // 所有实例 (填充 + 描边) 不得越出对齐矩形, 且四边均有实例贴边。
+        let eps = 1e-4;
+        let (sx0, sy0) = (snapped.origin.x, snapped.origin.y);
+        let (sx1, sy1) = (sx0 + snapped.size.width, sy0 + snapped.size.height);
+        for r in &instances {
+            assert!(
+                r.origin.x >= sx0 - eps
+                    && r.origin.y >= sy0 - eps
+                    && r.origin.x + r.size.width <= sx1 + eps
+                    && r.origin.y + r.size.height <= sy1 + eps,
+                "实例不得越出对齐矩形: {r:?}"
+            );
+        }
+        let touches = |pred: &dyn Fn(&Rect) -> bool| instances.iter().any(pred);
+        assert!(touches(&|r: &Rect| (r.origin.y - sy0).abs() < eps));
+        assert!(touches(&|r: &Rect| (r.origin.y + r.size.height - sy1)
+            .abs()
+            < eps));
+        assert!(touches(&|r: &Rect| (r.origin.x - sx0).abs() < eps));
+        assert!(touches(
+            &|r: &Rect| (r.origin.x + r.size.width - sx1).abs() < eps
+        ));
     }
 }

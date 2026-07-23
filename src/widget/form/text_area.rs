@@ -354,8 +354,10 @@ impl Widget for TextArea {
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
         self.area.set(area);
 
-        // 背景
-        rects.push_rect(area, self.background, self.radius);
+        // 背景与边框共用同一份像素对齐几何: 轮廓精确重合 (贴合),
+        // 且 1px 描边落在完整像素行上满强度渲染 (底边发虚的根因对策)。
+        let surface = area.snap_to_pixels();
+        rects.push_rect(surface, self.background, self.radius);
 
         // 边框: 聚焦时使用 accent,否则使用默认边框色。
         let border_color = if self.focused {
@@ -363,7 +365,7 @@ impl Widget for TextArea {
         } else {
             self.border_color
         };
-        rects.push_rounded_border(area, border_color, self.radius, self.border_width);
+        rects.push_rounded_border(surface, border_color, self.radius, self.border_width);
 
         let text_x = area.origin.x + self.padding.left;
         let ascent = texts.ascent(f32::from(self.font_size));

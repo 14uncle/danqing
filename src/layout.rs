@@ -169,6 +169,24 @@ impl Rect {
             None
         }
     }
+
+    /// 将原点与范围四舍五入到最近的整数像素边界。
+    ///
+    /// 表面组件 (Box / TextInput / TextArea) 的填充与描边共用对齐后的矩形:
+    /// 两者轮廓精确重合 (贴合), 且 1px 细描边落在完整像素行上满强度渲染
+    /// (细线发虚的根因对策)。每边偏移不超过 0.5px, 对布局与命中无影响。
+    /// 极端小矩形对齐后退化时保留原矩形。
+    pub fn snap_to_pixels(&self) -> Self {
+        let x0 = self.origin.x.round();
+        let y0 = self.origin.y.round();
+        let x1 = (self.origin.x + self.size.width).round();
+        let y1 = (self.origin.y + self.size.height).round();
+        if x1 > x0 && y1 > y0 {
+            Self::from_xywh(x0, y0, x1 - x0, y1 - y0)
+        } else {
+            *self
+        }
+    }
 }
 
 /// 四边间距 (用于 Padding 等),逻辑像素。
@@ -336,6 +354,29 @@ mod tests {
         assert!(rect.contains(Point::new(109.9, 69.9)));
         assert!(!rect.contains(Point::new(110.0, 70.0))); // 右下角不含
         assert!(!rect.contains(Point::new(9.9, 30.0)));
+    }
+
+    #[test]
+    fn rect_snap_to_pixels_rounds_origin_and_extent() {
+        // 四舍五入到最近整数: 每边偏移 ≤ 0.5px。
+        let rect = Rect::from_xywh(285.3, 142.553, 240.0, 35.951);
+        assert_eq!(
+            rect.snap_to_pixels(),
+            Rect::from_xywh(285.0, 143.0, 240.0, 36.0)
+        );
+        // 范围独立四舍五入 (110.6 → 111, 70.6 → 71), 每边偏移仍 ≤ 0.5px。
+        let rect = Rect::from_xywh(10.4, 20.4, 100.2, 50.2);
+        assert_eq!(
+            rect.snap_to_pixels(),
+            Rect::from_xywh(10.0, 20.0, 101.0, 51.0)
+        );
+        // 整数矩形对齐后不变 (幂等)。
+        let rect = Rect::from_xywh(10.0, 20.0, 100.0, 50.0);
+        assert_eq!(rect.snap_to_pixels(), rect);
+        assert_eq!(rect.snap_to_pixels().snap_to_pixels(), rect);
+        // 极端小矩形对齐后退化 (两边落入同一像素): 保留原矩形。
+        let tiny = Rect::from_xywh(5.1, 5.1, 0.1, 0.1);
+        assert_eq!(tiny.snap_to_pixels(), tiny);
     }
 
     #[test]
