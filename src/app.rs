@@ -10,6 +10,7 @@ use std::any::Any;
 use std::time::{Duration, Instant};
 
 use crate::event::Event;
+use crate::render::BackgroundFrame;
 use crate::widget::Node;
 
 /// 动画 / 时间上下文，由框架每帧传入 `Widget::animate`。
@@ -44,4 +45,12 @@ pub trait App: Any {
     /// 原始事件钩子：键盘事件直送应用层 (M1 无焦点系统);
     /// 未被组件树消费的鼠标事件也会到达这里。
     fn event(&mut self, _event: &Event) {}
+
+    /// 每帧背景状态: 场景选择 / 淡化进度 / 清屏色。
+    ///
+    /// 默认 `None` —— 保持 `BackgroundConfig` 初始化时的静态背景
+    /// (showcase 等单背景应用无需实现)。窗口在每帧渲染前查询并写入渲染上下文。
+    fn background_frame(&self) -> Option<BackgroundFrame> {
+        None
+    }
 }

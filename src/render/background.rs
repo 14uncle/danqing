@@ -27,10 +27,14 @@ pub enum ScaleMode {
 /// 窗口背景配置。
 ///
 /// 由 `WindowConfig` 持有;`Context` 在初始化时读取并上传纹理。
+/// 多场景模式经 [`BackgroundConfig::with_scenes`] 配置,
+/// 未配置场景时回退到 `image` 单图路径 (行为与阶段 1 一致)。
 #[derive(Debug, Clone, Default)]
 pub struct BackgroundConfig {
     /// 主背景图路径 (通常为 `assets/background/gradient.png`)。
     pub image: Option<PathBuf>,
+    /// 场景图路径列表 (多场景模式; 非空时优先于 `image`)。
+    pub scenes: Vec<PathBuf>,
     /// 可选光晕叠加图路径 (通常为 `assets/background/glow.png`)。
     pub glow: Option<PathBuf>,
     /// 可选噪声叠加图路径 (通常为 `assets/background/noise.png`)。
@@ -43,11 +47,55 @@ pub struct BackgroundConfig {
     pub noise_opacity: f32,
 }
 
+/// 每帧背景状态: 由 `App::background_frame` 产出, 驱动场景选择与交叉淡化。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BackgroundFrame {
+    /// 淡化起点场景索引 (fade=0 时显示)。
+    pub from: usize,
+    /// 淡化终点场景索引 (fade=1 时显示)。
+    pub to: usize,
+    /// 淡化进度 (0.0 ..= 1.0, 构造时 clamp)。
+    pub fade: f32,
+    /// 本帧清屏色 (随场景基调流动)。
+    pub clear_color: crate::Color,
+}
+
+impl BackgroundFrame {
+    /// 构造每帧背景状态;`fade` 夹到 0..1。
+    pub fn new(from: usize, to: usize, fade: f32, clear_color: crate::Color) -> Self {
+        Self {
+            from,
+            to,
+            fade: fade.clamp(0.0, 1.0),
+            clear_color,
+        }
+    }
+}
+
+/// 将每帧背景状态解析为合法的场景索引对 (纯逻辑, 便于测试)。
+///
+/// 索引越界时夹到最后一个场景;场景数为 0 时返回 None (无背景可画)。
+fn resolve_frame(frame: BackgroundFrame, scene_count: usize) -> Option<(usize, usize, f32)> {
+    if scene_count == 0 {
+        return None;
+    }
+    let last = scene_count - 1;
+    Some((frame.from.min(last), frame.to.min(last), frame.fade))
+}
+
 impl BackgroundConfig {
     /// 使用指定主背景图创建配置, 其余为默认值。
     pub fn with_image(path: impl Into<PathBuf>) -> Self {
         Self {
             image: Some(path.into()),
+            ..Self::default()
+        }
+    }
+
+    /// 使用场景图列表创建配置 (多场景模式, 覆盖 `image`)。
+    pub fn with_scenes(paths: impl IntoIterator<Item = impl Into<PathBuf>>) -> Self {
+        Self {
+            scenes: paths.into_iter().map(Into::into).collect(),
             ..Self::default()
         }
     }
@@ -93,19 +141,25 @@ const VERTS_PER_LAYER: usize = 6;
 /// 每层使用独立的 uniform buffer 与顶点区段: `Queue::write_buffer`
 /// 在单次 submit 前统一生效, 同一帧内多次写同一块 buffer 时
 /// 只有最后一次写入可见, 因此跨 draw 复用会导致所有层参数相同。
+///
+/// 场景层 (层 0) 绑定 from/to 两张场景图按 fade 交叉淡化;
+/// 单图与叠加层把同一张图绑到两个纹理槽, fade 恒 0。
 pub struct BackgroundPipeline {
     pipeline: wgpu::RenderPipeline,
-    /// 每层一个 uniform buffer (不透明度)。
+    /// 每层一个 uniform buffer (不透明度 + 淡化进度)。
     uniform_bufs: [wgpu::Buffer; LAYER_COUNT],
     uniform_binds: [wgpu::BindGroup; LAYER_COUNT],
     /// 三层 quad 共用的顶点缓冲 (每层 [`VERTS_PER_LAYER`] 个顶点)。
     vertex_buf: wgpu::Buffer,
-    background: Option<BackgroundTexture>,
+    /// 场景纹理列表 (单图路径视为只有一个场景的列表)。
+    scenes: Vec<BackgroundTexture>,
     glow: Option<BackgroundTexture>,
     noise: Option<BackgroundTexture>,
     scale: ScaleMode,
     glow_opacity: f32,
     noise_opacity: f32,
+    /// 应用层每帧写入的背景状态 (场景选择 / 淡化 / 清屏色)。
+    frame: Option<BackgroundFrame>,
 }
 
 /// 单个顶点: 归一化位置 (0..1) + UV。
@@ -185,7 +239,11 @@ impl BackgroundPipeline {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("background pipeline layout"),
-            bind_group_layouts: &[Some(&uniform_layout), Some(&texture_layout)],
+            bind_group_layouts: &[
+                Some(&uniform_layout),
+                Some(&texture_layout),
+                Some(&texture_layout),
+            ],
             ..Default::default()
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -228,10 +286,16 @@ impl BackgroundPipeline {
             mapped_at_creation: false,
         });
 
-        let background = config
-            .image
-            .as_deref()
-            .and_then(|p| load_texture(device, queue, &texture_layout, p, "background"));
+        // 场景路径列表: 多场景配置优先, 否则回退到单图路径。
+        let scene_paths: Vec<&Path> = if !config.scenes.is_empty() {
+            config.scenes.iter().map(PathBuf::as_path).collect()
+        } else {
+            config.image.as_deref().into_iter().collect()
+        };
+        let scenes: Vec<BackgroundTexture> = scene_paths
+            .into_iter()
+            .filter_map(|p| load_texture(device, queue, &texture_layout, p, "scene"))
+            .collect();
         let glow = config
             .glow
             .as_deref()
@@ -246,18 +310,24 @@ impl BackgroundPipeline {
             uniform_bufs,
             uniform_binds,
             vertex_buf,
-            background,
+            scenes,
             glow,
             noise,
             scale: config.scale,
             glow_opacity: config.glow_opacity.clamp(0.0, 1.0),
             noise_opacity: config.noise_opacity.clamp(0.0, 1.0),
+            frame: None,
         }
     }
 
     /// 是否存在可绘制的背景。
     pub fn has_background(&self) -> bool {
-        self.background.is_some()
+        !self.scenes.is_empty()
+    }
+
+    /// 写入应用层产出的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
+    pub fn set_frame(&mut self, frame: BackgroundFrame) {
+        self.frame = Some(frame);
     }
 
     /// 绘制背景层 (在 RectBatch 之前调用)。
@@ -267,7 +337,13 @@ impl BackgroundPipeline {
         encoder: &mut wgpu::CommandEncoder,
         target: &DrawTarget,
     ) {
-        let Some(bg) = &self.background else {
+        let frame = self.frame.unwrap_or(BackgroundFrame {
+            from: 0,
+            to: 0,
+            fade: 0.0,
+            clear_color: target.clear_color,
+        });
+        let Some((from, to, fade)) = resolve_frame(frame, self.scenes.len()) else {
             return;
         };
 
@@ -278,10 +354,10 @@ impl BackgroundPipeline {
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: f64::from(target.clear_color.r),
-                        g: f64::from(target.clear_color.g),
-                        b: f64::from(target.clear_color.b),
-                        a: f64::from(target.clear_color.a),
+                        r: f64::from(frame.clear_color.r),
+                        g: f64::from(frame.clear_color.g),
+                        b: f64::from(frame.clear_color.b),
+                        a: f64::from(frame.clear_color.a),
                     }),
                     store: wgpu::StoreOp::Store,
                 },
@@ -296,8 +372,18 @@ impl BackgroundPipeline {
         pass.set_pipeline(&self.pipeline);
         pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
 
-        // 层 0 主背景图 / 层 1 光晕 / 层 2 噪声
-        self.draw_layer(&mut pass, queue, target, 0, bg, self.scale, 1.0);
+        // 层 0 场景 (from/to 交叉淡化) / 层 1 光晕 / 层 2 噪声
+        self.draw_layer(
+            &mut pass,
+            queue,
+            target,
+            0,
+            &self.scenes[from],
+            &self.scenes[to],
+            self.scale,
+            1.0,
+            fade,
+        );
         if let Some(glow) = &self.glow {
             self.draw_layer(
                 &mut pass,
@@ -305,8 +391,10 @@ impl BackgroundPipeline {
                 target,
                 1,
                 glow,
+                glow,
                 ScaleMode::Cover,
                 self.glow_opacity,
+                0.0,
             );
         }
         if let Some(noise) = &self.noise {
@@ -316,13 +404,15 @@ impl BackgroundPipeline {
                 target,
                 2,
                 noise,
+                noise,
                 ScaleMode::Stretch,
                 self.noise_opacity,
+                0.0,
             );
         }
     }
 
-    /// 绘制单个叠加层: 上传该层顶点与不透明度, 绑定资源后绘制。
+    /// 绘制单个叠加层: 上传该层顶点与 uniform, 绑定资源后绘制。
     #[allow(clippy::too_many_arguments)]
     fn draw_layer(
         &self,
@@ -330,21 +420,34 @@ impl BackgroundPipeline {
         queue: &wgpu::Queue,
         target: &DrawTarget,
         layer: usize,
-        texture: &BackgroundTexture,
+        tex_from: &BackgroundTexture,
+        tex_to: &BackgroundTexture,
         scale: ScaleMode,
         opacity: f32,
+        fade: f32,
     ) {
+        // 淡化要求 from/to 同尺寸 (场景生成管线保证统一画布);
+        // UV 按 from 纹理计算, 尺寸不一致时退回只画 from。
+        let (tex_from, tex_to, fade) =
+            if (tex_from.width, tex_from.height) != (tex_to.width, tex_to.height) {
+                log::warn!("场景图尺寸不一致, 跳过淡化");
+                (tex_from, tex_from, 0.0)
+            } else {
+                (tex_from, tex_to, fade)
+            };
         self.upload_quad(
             queue,
             target,
             layer,
-            texture.width,
-            texture.height,
+            tex_from.width,
+            tex_from.height,
             scale,
             opacity,
+            fade,
         );
         pass.set_bind_group(0, &self.uniform_binds[layer], &[]);
-        pass.set_bind_group(1, &texture.bind_group, &[]);
+        pass.set_bind_group(1, &tex_from.bind_group, &[]);
+        pass.set_bind_group(2, &tex_to.bind_group, &[]);
         let first = (layer * VERTS_PER_LAYER) as u32;
         pass.draw(first..first + VERTS_PER_LAYER as u32, 0..1);
     }
@@ -360,6 +463,7 @@ impl BackgroundPipeline {
         img_h: u32,
         scale: ScaleMode,
         opacity: f32,
+        fade: f32,
     ) {
         let screen_w = target.width;
         let screen_h = target.height;
@@ -426,7 +530,7 @@ impl BackgroundPipeline {
         queue.write_buffer(
             &self.uniform_bufs[layer],
             0,
-            bytemuck::cast_slice(&[opacity, 0.0, 0.0, 0.0f32]),
+            bytemuck::cast_slice(&[opacity, fade, 0.0, 0.0f32]),
         );
     }
 }
@@ -564,5 +668,41 @@ mod tests {
     #[test]
     fn scale_mode_default_is_stretch() {
         assert_eq!(ScaleMode::default(), ScaleMode::Stretch);
+    }
+
+    #[test]
+    fn background_config_with_scenes() {
+        let cfg =
+            BackgroundConfig::with_scenes(["a.png", "b.png", "c.png"]).scale(ScaleMode::Cover);
+        assert_eq!(cfg.scenes.len(), 3);
+        assert!(cfg.image.is_none());
+        assert_eq!(cfg.scale, ScaleMode::Cover);
+    }
+
+    #[test]
+    fn background_frame_clamps_fade() {
+        let c = crate::Color::BLACK;
+        assert!((BackgroundFrame::new(0, 1, -0.5, c).fade - 0.0).abs() < f32::EPSILON);
+        assert!((BackgroundFrame::new(0, 1, 1.5, c).fade - 1.0).abs() < f32::EPSILON);
+        assert!((BackgroundFrame::new(0, 1, 0.4, c).fade - 0.4).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn resolve_frame_clamps_indices_to_scene_count() {
+        let c = crate::Color::BLACK;
+        assert_eq!(
+            resolve_frame(BackgroundFrame::new(0, 7, 0.5, c), 4),
+            Some((0, 3, 0.5))
+        );
+        assert_eq!(
+            resolve_frame(BackgroundFrame::new(9, 9, 1.0, c), 2),
+            Some((1, 1, 1.0))
+        );
+    }
+
+    #[test]
+    fn resolve_frame_empty_scenes_is_none() {
+        let c = crate::Color::BLACK;
+        assert_eq!(resolve_frame(BackgroundFrame::new(0, 0, 0.0, c), 0), None);
     }
 }

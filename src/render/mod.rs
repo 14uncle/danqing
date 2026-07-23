@@ -10,7 +10,7 @@ mod background;
 mod rect;
 mod text;
 
-pub use background::{BackgroundConfig, BackgroundPipeline, ScaleMode};
+pub use background::{BackgroundConfig, BackgroundFrame, BackgroundPipeline, ScaleMode};
 pub use rect::{DrawTarget, RectBatch, RectPipeline};
 pub use text::{TextBatch, TextPipeline};
 
@@ -170,6 +170,15 @@ impl Context {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
         log::debug!("surface 重建：{width}x{height}");
+    }
+
+    /// 写入应用层产出的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
+    ///
+    /// 由 `App::background_frame` 的返回值驱动;未提供时保持配置初始化时的静态背景。
+    pub fn set_background_frame(&mut self, frame: BackgroundFrame) {
+        if let Some(bg) = self.background_pipeline.as_mut() {
+            bg.set_frame(frame);
+        }
     }
 
     /// 渲染一帧：背景图 (如有) → 矩形 pass → 文本 pass。

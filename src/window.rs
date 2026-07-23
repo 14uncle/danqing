@@ -635,11 +635,15 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     }
                     self.update_ime();
                 }
-                if let Some(context) = &mut self.context
-                    && !context.render(&rects, &mut self.texts)
-                {
-                    event_loop.exit();
-                    return;
+                if let Some(context) = &mut self.context {
+                    // 应用层提供的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
+                    if let Some(frame) = self.app.background_frame() {
+                        context.set_background_frame(frame);
+                    }
+                    if !context.render(&rects, &mut self.texts) {
+                        event_loop.exit();
+                        return;
+                    }
                 }
                 if !self.first_frame_done {
                     self.first_frame_done = true;
