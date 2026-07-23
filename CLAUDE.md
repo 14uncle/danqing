@@ -15,6 +15,11 @@ cargo run --example showcase
 # 全部测试(纯逻辑,无需 GPU)
 cargo test --lib --tests
 
+# 性能基准(release 启动到可见 ≤1s、常驻内存 WS ≤360MB(核显记账);须先 cargo build --release --example showcase)
+powershell -NoProfile -File tools/benchmark.ps1
+# 内存探针:Rust 堆 vs 进程占用
+cargo run --release --example mem_probe
+
 # 运行单个测试
 # 模块内单元测试
 cargo test widget::layout::flow::tests::column_stacks_fit_children -- --exact
@@ -64,7 +69,7 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 ## Build notes
 
 - 字体、LOGO、背景图等二进制视觉资产统一放在仓库根目录 `assets/` 下并提交到版本控制:
-  - `assets/fonts/` — 内嵌 OFL 黑体(思源黑体 GB2312 子集)与任何自定义字体。
+  - `assets/fonts/` — 内嵌 OFL 黑体(思源黑体 GB2312 子集,加载链首选)与任何自定义字体。
   - `assets/logo/` — 多尺寸 PNG / ICO。
   - `assets/background/` — 渐变背景图、噪声纹理等。
 - `build.rs` 不再下载字体或生成视觉资产;代码通过相对路径或 `include_bytes!` 直接从 `assets/` 加载。

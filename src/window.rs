@@ -224,6 +224,8 @@ struct Handler<'a, A: App> {
     clipboard: Option<arboard::Clipboard>,
     /// 是否已完成首帧渲染 (用于一次性诊断计时)。
     first_frame_done: bool,
+    /// 进程入口时间 (run_app 起点, 用于启动总耗时基准)。
+    boot: Instant,
 }
 
 impl<A: App> Handler<'_, A> {
@@ -521,6 +523,8 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         }
         window.set_visible(true);
         log::info!("窗口已显示");
+        // 机器可读启动基准 (ASCII, 供 tools/benchmark.ps1 解析)。
+        log::info!("perf startup_to_visible {:?}", self.boot.elapsed());
         self.window = Some(window);
         // 持续渲染模式：请求首帧，之后每帧结束再请求下一帧
         if let Some(window) = &self.window {
@@ -662,6 +666,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
 
 /// 打开窗口并运行应用：事件分发、消息驱动、每帧重绘，直到窗口关闭。
 pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowError> {
+    let boot = Instant::now();
     let event_loop = EventLoop::new()?;
     let texts_start = Instant::now();
     let texts = TextBatch::new();
@@ -684,6 +689,7 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
         start: Instant::now(),
         clipboard: None,
         first_frame_done: false,
+        boot,
     };
     let run_start = Instant::now();
     event_loop.run_app(&mut handler)?;

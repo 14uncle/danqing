@@ -20,7 +20,7 @@
 - **语言**：Rust 2021 edition
 - **窗口/事件**：`winit` 0.30
 - **自绘**：`wgpu` 0.30
-- **字体**：内嵌 OFL 黑体（思源黑体 / Noto Sans SC GB2312 子集，位于 `assets/fonts/ofl-sans.ttf`，提交在版本控制中）；系统黑体优先，内嵌黑体兜底
+- **字体**：内嵌 OFL 黑体（思源黑体 / Noto Sans SC GB2312 子集，位于 `assets/fonts/ofl-sans.ttf`，提交在版本控制中）为加载链首选（内存与启动耗时远低于系统 CJK 字体），系统黑体兜底
 - **位图加载**：阶段 1 使用固定渐变/噪声图作为毛玻璃背景，位图资源提交到 `assets/`。
 - **构建工具**：`cargo`
 

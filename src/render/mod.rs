@@ -109,6 +109,9 @@ impl Context {
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 compatible_surface: Some(&surface),
+                // 低功耗优先: 避免混合显卡机器唤醒独显的 1~2s 抖动,
+                // 且对常驻陪伴类工具更省电; 本框架渲染负载对核显无压力。
+                power_preference: wgpu::PowerPreference::LowPower,
                 ..Default::default()
             })
             .await?;
