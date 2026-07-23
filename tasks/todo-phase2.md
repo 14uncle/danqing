@@ -11,7 +11,7 @@
 - [ ] 人工确认 ScenePalette 字段集(生成管线输入契约)
 
 ## Phase 2: 状态机 / 资产管线 / 渲染管线(可并行)
-- [ ] **Task 3** 番茄钟状态机 + example 骨架 — `cargo test --example pomodoro` 机制验证 + 状态机测试绿
+- [x] **Task 3** 番茄钟状态机 + example 骨架 — `cargo test --example pomodoro` 机制验证 ✅(12 测试绿) + 12s 冒烟无 panic
 - [ ] **Task 4** 场景生成管线 export-scenes.py(依赖 2)— 4 张场景 PNG + scenes.rs,人工过目击调
 - [ ] **Task 5** 背景管线多场景 + 交叉淡化 + App 通道 — showcase 单图路径回归无异常
 
