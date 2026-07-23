@@ -26,6 +26,7 @@ Usage:
     python tools/export-scenes.py
 """
 
+import math
 import sys
 from pathlib import Path
 
@@ -38,6 +39,14 @@ SCENES_RS = REPO_ROOT / "examples" / "pomodoro" / "scenes.rs"
 # 3:2 canvas matching the POC window aspect (960x640); Cover scales cleanly.
 WIDTH, HEIGHT = 1536, 1024
 SIZE = (WIDTH, HEIGHT)
+
+# Hard-edged elements (ridges/streaks/embers) render at SS x and LANCZOS
+# downsample back: cheap SSAA — Pillow ImageDraw has no anti-aliasing,
+# and window Cover upscale (e.g. 1920x1080 maximized) makes baked-in
+# staircase edges painfully visible. Smooth elements (gradient/glow/veil)
+# stay at native resolution: nothing to alias there, and their big
+# gaussian blurs would be orders of magnitude slower at SS x.
+SS = 4
 
 # Center sampling region for backdrop extremes (where the countdown sits).
 CENTER_BOX = (0.30, 0.35, 0.70, 0.65)  # x0, y0, x1, y1 fractions
@@ -126,20 +135,24 @@ def radial_overlay(
 
 
 def build_ridges(layers: list[dict]) -> Image.Image:
-    """Deterministic mountain ridgelines (midpoint-displacement silhouettes)."""
-    overlay = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+    """Deterministic mountain ridgelines (midpoint-displacement silhouettes).
+
+    Rendered at SS x and downsampled for anti-aliased edges.
+    """
+    w, h = WIDTH * SS, HEIGHT * SS
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     for layer in layers:
         state = layer["seed"]
         n = 9
-        xs = [i * WIDTH // (n - 1) for i in range(n)]
+        xs = [i * w // (n - 1) for i in range(n)]
 
         def rnd() -> float:
             nonlocal state
             state = (state * 1103515245 + 12345) & 0x7FFFFFFF
             return (state >> 16) / 32768.0
 
-        base_y = layer["base_y"] * HEIGHT
-        amp = layer["amp"] * HEIGHT
+        base_y = layer["base_y"] * h
+        amp = layer["amp"] * h
         pts = [(x, base_y - rnd() * amp) for x in xs]
         # Smooth-ish: interpolate midpoints between peaks.
         smooth = []
@@ -148,14 +161,44 @@ def build_ridges(layers: list[dict]) -> Image.Image:
             smooth.append((x0, y0))
             smooth.append(((x0 + x1) / 2, (y0 + y1) / 2))
         smooth.append(pts[-1])
-        polygon = smooth + [(WIDTH, HEIGHT), (0, HEIGHT)]
+        polygon = smooth + [(w, h), (0, h)]
         ImageDraw.Draw(overlay).polygon(polygon, fill=(*layer["color"], layer["alpha"]))
+    overlay = overlay.resize(SIZE, Image.LANCZOS)
     return overlay.filter(ImageFilter.GaussianBlur(radius=1.5))
 
 
+def build_waves(layers: list[dict]) -> Image.Image:
+    """Sea waves: sinusoidal silhouettes layered toward the bottom (SS x for AA).
+
+    Each layer: base_y/amp (height fractions), freq (cycles across width),
+    phase (radians), color, alpha. Filled below the curve like ridges,
+    but the sinusoid reads as swell instead of a mountain line.
+    """
+    w, h = WIDTH * SS, HEIGHT * SS
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    for layer in layers:
+        base_y = layer["base_y"] * h
+        amp = layer["amp"] * h
+        freq = layer["freq"]
+        phase = layer.get("phase", 0.0)
+        steps = 160
+        pts = [
+            (
+                w * i / steps,
+                base_y + amp * math.sin(2.0 * math.pi * freq * i / steps + phase),
+            )
+            for i in range(steps + 1)
+        ]
+        draw.polygon(pts + [(w, h), (0, h)], fill=(*layer["color"], layer["alpha"]))
+    overlay = overlay.resize(SIZE, Image.LANCZOS)
+    return overlay.filter(ImageFilter.GaussianBlur(radius=1.2))
+
+
 def build_streaks(count: int, color: tuple, alpha: int, seed: int) -> Image.Image:
-    """Rain streaks: faint short diagonal lines."""
-    overlay = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+    """Rain streaks: faint short diagonal lines. SS x + downsample for AA."""
+    w, h = WIDTH * SS, HEIGHT * SS
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     state = seed
 
@@ -165,17 +208,19 @@ def build_streaks(count: int, color: tuple, alpha: int, seed: int) -> Image.Imag
         return (state >> 16) / 32768.0
 
     for _ in range(count):
-        x = rnd() * WIDTH
-        y = rnd() * HEIGHT
-        length = 24 + rnd() * 48
+        x = rnd() * w
+        y = rnd() * h
+        length = (24 + rnd() * 48) * SS
         dx = length * 0.18
-        draw.line([(x, y), (x + dx, y + length)], fill=(*color, alpha), width=2)
+        draw.line([(x, y), (x + dx, y + length)], fill=(*color, alpha), width=2 * SS)
+    overlay = overlay.resize(SIZE, Image.LANCZOS)
     return overlay.filter(ImageFilter.GaussianBlur(radius=1.0))
 
 
 def build_embers(count: int, color: tuple, seed: int) -> Image.Image:
-    """Bonfire embers: tiny bright dots rising above the glow."""
-    overlay = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+    """Bonfire embers: tiny bright dots rising above the glow. SS x for AA."""
+    w, h = WIDTH * SS, HEIGHT * SS
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     state = seed
 
@@ -185,11 +230,12 @@ def build_embers(count: int, color: tuple, seed: int) -> Image.Image:
         return (state >> 16) / 32768.0
 
     for _ in range(count):
-        x = WIDTH * (0.30 + rnd() * 0.40)
-        y = HEIGHT * (0.35 + rnd() * 0.35)
-        r = 1 + rnd() * 2.2
+        x = w * (0.30 + rnd() * 0.40)
+        y = h * (0.35 + rnd() * 0.35)
+        r = (1 + rnd() * 2.2) * SS
         a = int(60 + rnd() * 140)
         draw.ellipse([x - r, y - r, x + r, y + r], fill=(*color, a))
+    overlay = overlay.resize(SIZE, Image.LANCZOS)
     return overlay.filter(ImageFilter.GaussianBlur(radius=0.6))
 
 
@@ -247,6 +293,17 @@ SCENES = [
         ],
         "glow": {"color": (255, 255, 255), "center": (0.5, 0.30), "radius": 0.48, "peak": 90},
         "veil": {"color": (255, 255, 255), "center": (0.5, 0.48), "radius": 0.55, "peak": 55},
+        "waves": [
+            # 远涌: 低饱和亮带, 长波缓幅。
+            {"base_y": 0.72, "amp": 0.012, "freq": 3.0, "phase": 0.0,
+             "color": (214, 240, 245), "alpha": 60},
+            # 中浪: 相位错开, 更亮。
+            {"base_y": 0.83, "amp": 0.018, "freq": 2.5, "phase": 1.7,
+             "color": (235, 248, 250), "alpha": 90},
+            # 近岸碎浪: 幅最大, 最亮, 略有泡沫感。
+            {"base_y": 0.93, "amp": 0.024, "freq": 2.0, "phase": 3.4,
+             "color": (248, 253, 254), "alpha": 130},
+        ],
         "palette": {
             "base": (168, 221, 232),
             "accent": (12, 74, 110),
@@ -267,7 +324,7 @@ SCENES = [
         ],
         "glow": {"color": (210, 224, 235), "center": (0.32, 0.22), "radius": 0.5, "peak": 50},
         "veil": {"color": (10, 14, 18), "center": (0.5, 0.48), "radius": 0.55, "peak": 45},
-        "streaks": {"count": 220, "color": (200, 214, 226), "alpha": 14, "seed": 0x9A17},
+        "streaks": {"count": 320, "color": (215, 228, 238), "alpha": 52, "seed": 0x9A17},
         "palette": {
             "base": (82, 95, 107),
             "accent": (127, 179, 217),
@@ -313,6 +370,8 @@ def build_scene(cfg: dict) -> Image.Image:
     )
     if "ridges" in cfg:
         img = Image.alpha_composite(img, build_ridges(cfg["ridges"]))
+    if "waves" in cfg:
+        img = Image.alpha_composite(img, build_waves(cfg["waves"]))
     if "streaks" in cfg:
         s = cfg["streaks"]
         img = Image.alpha_composite(img, build_streaks(s["count"], s["color"], s["alpha"], s["seed"]))
@@ -368,8 +427,64 @@ def emit_scenes_rs(entries: list[dict]) -> None:
             "    },",
         ]
     lines.append("];")
+    # Rust 侧护栏测试随模板一起生成: 与 check_guards 同规则,
+    # 防止 scenes.rs 被手改后护栏静默失效 (spec: 大字 >=3:1, 控件 >=4:1)。
+    lines += GUARD_TESTS_RS.splitlines()
     lines.append("")
     SCENES_RS.write_text("\n".join(lines), encoding="utf-8")
+
+
+GUARD_TESTS_RS = '''
+#[cfg(test)]
+mod tests {
+    //! 对比度护栏: 与 tools/export-scenes.py 生成期护栏同规则,
+    //! 防止 scenes.rs 被手改后护栏静默失效 (spec: 大字 ≥3:1, 控件 ≥4:1)。
+    use super::*;
+    use danqing::{composite_over, contrast_ratio};
+
+    /// 大字 (倒计时) 对场景背景极值的最低对比度。
+    const DISPLAY_MIN: f32 = 3.0;
+    /// 控件文字对玻璃合成底的最低对比度。
+    const CONTROL_MIN: f32 = 4.0;
+
+    #[test]
+    fn all_scenes_pass_contrast_guards() {
+        assert_eq!(SCENES.len(), 4, "POC 应有 4 个场景");
+        for spec in &SCENES {
+            let p = &spec.palette;
+            for (label, backdrop) in [
+                ("backdrop_light", p.backdrop_light),
+                ("backdrop_dark", p.backdrop_dark),
+            ] {
+                let display = contrast_ratio(p.text_primary, backdrop);
+                assert!(
+                    display >= DISPLAY_MIN,
+                    "{}: 大字 vs {label} = {display:.2} < {DISPLAY_MIN}",
+                    spec.name
+                );
+                let glass = composite_over(p.surface, backdrop);
+                let control = contrast_ratio(p.text_primary, glass);
+                assert!(
+                    control >= CONTROL_MIN,
+                    "{}: 控件文字 vs 玻璃({label}) = {control:.2} < {CONTROL_MIN}",
+                    spec.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scene_images_are_unique_and_named() {
+        for (i, a) in SCENES.iter().enumerate() {
+            for b in &SCENES[i + 1..] {
+                assert_ne!(a.image, b.image, "场景图路径不应重复");
+                assert_ne!(a.name, b.name, "场景名不应重复");
+            }
+        }
+    }
+}
+'''
+
 
 
 def check_guards(name: str, palette: dict) -> list[str]:
