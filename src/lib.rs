@@ -25,6 +25,7 @@ pub use render::{
 };
 pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo, Line, break_lines};
 pub use theme::{
-    Easing, LightTheme, Shadow, Theme, composite_over, contrast_ratio, relative_luminance,
+    Easing, LightTheme, ScenePalette, SceneSpec, SceneTheme, Shadow, Theme, composite_over,
+    contrast_ratio, relative_luminance,
 };
 pub use window::{WindowConfig, WindowError, run, run_app};

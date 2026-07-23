@@ -320,6 +320,216 @@ impl Theme for LightTheme {
     }
 }
 
+/// 场景调色板。
+///
+/// 由场景生成管线随场景大图一并产出 (见 `tools/export-scenes.py`);
+/// 明暗随场景流动: 暗场景 (篝火) 与亮场景 (海) 各给一套,
+/// 玻璃表面、文字、控件态须在两套下都成立。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScenePalette {
+    /// 场景基调色 (清屏 / fallback, 通常取场景主色)。
+    pub base: Color,
+    /// 主强调色 (按钮、光标、选区)。
+    pub accent: Color,
+    /// 主要文字色 (倒计时、控件标签)。
+    pub text_primary: Color,
+    /// 次级文字色 (阶段 / 场景名标注)。
+    pub text_secondary: Color,
+    /// 玻璃表面色 (半透明, 控件条 / 卡片)。
+    pub surface: Color,
+    /// 输入区表面色 (比 surface 更实)。
+    pub surface_input: Color,
+    /// 场景最亮区域色 (文字可读性护栏用)。
+    pub backdrop_light: Color,
+    /// 场景最暗区域色 (文字可读性护栏用)。
+    pub backdrop_dark: Color,
+}
+
+impl ScenePalette {
+    /// 逐字段向另一调色板插值 (场景过渡动画用,`t` 夹到 0..1)。
+    pub fn lerp(self, other: ScenePalette, t: f32) -> ScenePalette {
+        ScenePalette {
+            base: self.base.lerp(other.base, t),
+            accent: self.accent.lerp(other.accent, t),
+            text_primary: self.text_primary.lerp(other.text_primary, t),
+            text_secondary: self.text_secondary.lerp(other.text_secondary, t),
+            surface: self.surface.lerp(other.surface, t),
+            surface_input: self.surface_input.lerp(other.surface_input, t),
+            backdrop_light: self.backdrop_light.lerp(other.backdrop_light, t),
+            backdrop_dark: self.backdrop_dark.lerp(other.backdrop_dark, t),
+        }
+    }
+}
+
+/// 场景规格: 生成管线产出的单个场景资产描述。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneSpec {
+    /// 场景名 (如 "篝火")。
+    pub name: &'static str,
+    /// 场景大图路径 (相对仓库根)。
+    pub image: &'static str,
+    /// 场景调色板。
+    pub palette: ScenePalette,
+}
+
+/// 场景主题: 由 [`ScenePalette`] 构造的跨明暗 [`Theme`] 实现。
+///
+/// 颜色 token 取自调色板; 选区 / 光标派生自 accent,
+/// 分割线 / 边框派生自文字色 (暗场景下自动变亮);
+/// 字号 / 间距 / 圆角 / 阴影 / 动效沿用 [`LightTheme`] 档位。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneTheme {
+    /// 调色板本体。
+    palette: ScenePalette,
+}
+
+impl SceneTheme {
+    /// 用给定调色板创建场景主题。
+    pub fn new(palette: ScenePalette) -> Self {
+        Self { palette }
+    }
+
+    /// 读取调色板 (过渡插值后可重建主题)。
+    pub fn palette(&self) -> ScenePalette {
+        self.palette
+    }
+}
+
+impl Theme for SceneTheme {
+    fn background(&self) -> Color {
+        self.palette.base
+    }
+
+    fn surface(&self) -> Color {
+        self.palette.surface
+    }
+
+    fn surface_input(&self) -> Color {
+        self.palette.surface_input
+    }
+
+    fn surface_variant(&self) -> Color {
+        // 悬停等次级表面: 玻璃合成到场景基调上的不透明色。
+        composite_over(self.palette.surface, self.palette.base)
+    }
+
+    fn accent(&self) -> Color {
+        self.palette.accent
+    }
+
+    fn text_primary(&self) -> Color {
+        self.palette.text_primary
+    }
+
+    fn text_secondary(&self) -> Color {
+        self.palette.text_secondary
+    }
+
+    fn divider(&self) -> Color {
+        // 跟随文字色: 暗场景分割线自动变亮。
+        let t = self.palette.text_primary;
+        Color::rgba(t.r, t.g, t.b, 0.15)
+    }
+
+    fn border(&self) -> Color {
+        let t = self.palette.text_primary;
+        Color::rgba(t.r, t.g, t.b, 0.28)
+    }
+
+    fn selection(&self) -> Color {
+        let a = self.palette.accent;
+        Color::rgba(a.r, a.g, a.b, 0.30)
+    }
+
+    fn caret(&self) -> Color {
+        self.palette.accent
+    }
+
+    fn danger(&self) -> Color {
+        LightTheme.danger()
+    }
+
+    fn traffic_close(&self) -> Color {
+        LightTheme.traffic_close()
+    }
+
+    fn traffic_minimize(&self) -> Color {
+        LightTheme.traffic_minimize()
+    }
+
+    fn traffic_maximize(&self) -> Color {
+        LightTheme.traffic_maximize()
+    }
+
+    fn font_size_small(&self) -> u16 {
+        LightTheme.font_size_small()
+    }
+
+    fn font_size_body(&self) -> u16 {
+        LightTheme.font_size_body()
+    }
+
+    fn font_size_heading(&self) -> u16 {
+        LightTheme.font_size_heading()
+    }
+
+    fn font_size_display(&self) -> u16 {
+        LightTheme.font_size_display()
+    }
+
+    fn spacing_xs(&self) -> f32 {
+        LightTheme.spacing_xs()
+    }
+
+    fn spacing_sm(&self) -> f32 {
+        LightTheme.spacing_sm()
+    }
+
+    fn spacing_md(&self) -> f32 {
+        LightTheme.spacing_md()
+    }
+
+    fn spacing_lg(&self) -> f32 {
+        LightTheme.spacing_lg()
+    }
+
+    fn spacing_xl(&self) -> f32 {
+        LightTheme.spacing_xl()
+    }
+
+    fn radius_sm(&self) -> f32 {
+        LightTheme.radius_sm()
+    }
+
+    fn radius_md(&self) -> f32 {
+        LightTheme.radius_md()
+    }
+
+    fn radius_lg(&self) -> f32 {
+        LightTheme.radius_lg()
+    }
+
+    fn shadow_sm(&self) -> Shadow {
+        LightTheme.shadow_sm()
+    }
+
+    fn shadow_md(&self) -> Shadow {
+        LightTheme.shadow_md()
+    }
+
+    fn shadow_lg(&self) -> Shadow {
+        LightTheme.shadow_lg()
+    }
+
+    fn easing_standard(&self) -> Easing {
+        LightTheme.easing_standard()
+    }
+
+    fn easing_accelerate(&self) -> Easing {
+        LightTheme.easing_accelerate()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,5 +709,137 @@ mod tests {
     fn display_font_size_is_largest_tier() {
         let theme = LightTheme;
         assert!(theme.font_size_display() > theme.font_size_heading());
+    }
+
+    /// 合成暗场景调色板 (参照篝火: 深底、近白文字、暗玻璃)。
+    fn sample_dark_palette() -> ScenePalette {
+        ScenePalette {
+            base: Color::from_srgb8(26, 16, 12),
+            accent: Color::from_srgb8(255, 159, 67),
+            text_primary: Color::from_srgb8(250, 244, 235),
+            text_secondary: Color::from_srgb8(190, 175, 160),
+            surface: Color::rgba(1.0, 1.0, 1.0, 0.14),
+            surface_input: Color::rgba(1.0, 1.0, 1.0, 0.22),
+            backdrop_light: Color::from_srgb8(120, 70, 40),
+            backdrop_dark: Color::from_srgb8(16, 10, 8),
+        }
+    }
+
+    /// 合成亮场景调色板 (参照海: 亮底、深色文字、白玻璃)。
+    fn sample_bright_palette() -> ScenePalette {
+        ScenePalette {
+            base: Color::from_srgb8(210, 235, 240),
+            accent: Color::from_srgb8(12, 74, 110),
+            text_primary: Color::from_srgb8(8, 32, 48),
+            text_secondary: Color::from_srgb8(60, 90, 105),
+            surface: Color::rgba(1.0, 1.0, 1.0, 0.55),
+            surface_input: Color::rgba(1.0, 1.0, 1.0, 0.85),
+            backdrop_light: Color::from_srgb8(235, 248, 250),
+            backdrop_dark: Color::from_srgb8(140, 190, 205),
+        }
+    }
+
+    #[test]
+    fn scene_theme_implements_theme() {
+        fn assert_theme<T: Theme>() {}
+        assert_theme::<SceneTheme>();
+    }
+
+    #[test]
+    fn scene_theme_maps_palette_colors_directly() {
+        let palette = sample_dark_palette();
+        let theme = SceneTheme::new(palette);
+        assert_eq!(theme.background(), palette.base);
+        assert_eq!(theme.surface(), palette.surface);
+        assert_eq!(theme.surface_input(), palette.surface_input);
+        assert_eq!(theme.accent(), palette.accent);
+        assert_eq!(theme.text_primary(), palette.text_primary);
+        assert_eq!(theme.text_secondary(), palette.text_secondary);
+    }
+
+    #[test]
+    fn scene_theme_derives_selection_and_caret_from_accent() {
+        let palette = sample_dark_palette();
+        let theme = SceneTheme::new(palette);
+        let selection = theme.selection();
+        assert!((selection.r - palette.accent.r).abs() < f32::EPSILON);
+        assert!((selection.g - palette.accent.g).abs() < f32::EPSILON);
+        assert!((selection.b - palette.accent.b).abs() < f32::EPSILON);
+        assert!((selection.a - 0.30).abs() < 0.01);
+        assert_eq!(theme.caret(), palette.accent);
+    }
+
+    #[test]
+    fn scene_theme_derives_divider_and_border_from_text_color() {
+        let palette = sample_dark_palette();
+        let theme = SceneTheme::new(palette);
+        let divider = theme.divider();
+        let border = theme.border();
+        // 暗场景下分割线应跟随文字色 (亮), 而非固定黑色。
+        assert!((divider.r - palette.text_primary.r).abs() < f32::EPSILON);
+        assert!(divider.a > 0.0 && divider.a < border.a);
+        assert!(border.a <= 0.5);
+    }
+
+    #[test]
+    fn scene_theme_surface_variant_is_opaque_composite() {
+        let palette = sample_bright_palette();
+        let theme = SceneTheme::new(palette);
+        let variant = theme.surface_variant();
+        assert!((variant.a - 1.0).abs() < f32::EPSILON);
+        assert_eq!(variant, composite_over(palette.surface, palette.base));
+    }
+
+    #[test]
+    fn scene_theme_non_color_tokens_match_light_theme() {
+        let theme = SceneTheme::new(sample_dark_palette());
+        let light = LightTheme;
+        assert_eq!(theme.font_size_small(), light.font_size_small());
+        assert_eq!(theme.font_size_body(), light.font_size_body());
+        assert_eq!(theme.font_size_heading(), light.font_size_heading());
+        assert_eq!(theme.font_size_display(), light.font_size_display());
+        assert_eq!(theme.spacing_md(), light.spacing_md());
+        assert_eq!(theme.radius_lg(), light.radius_lg());
+        assert_eq!(theme.easing_standard(), light.easing_standard());
+    }
+
+    #[test]
+    fn scene_palette_lerp_endpoints_and_midpoint() {
+        let a = sample_dark_palette();
+        let b = sample_bright_palette();
+        assert_eq!(a.lerp(b, 0.0), a);
+        assert_eq!(a.lerp(b, 1.0), b);
+        let mid = a.lerp(b, 0.5);
+        assert!((mid.base.r - (a.base.r + b.base.r) * 0.5).abs() < f32::EPSILON);
+        assert!((mid.accent.b - (a.accent.b + b.accent.b) * 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scene_guard_text_reads_on_both_backdrop_extremes() {
+        // 护栏方法学验证: 明暗两族合成调色板, 大字文字 vs 场景两极端 ≥ 3:1。
+        for palette in [sample_dark_palette(), sample_bright_palette()] {
+            for backdrop in [palette.backdrop_light, palette.backdrop_dark] {
+                let ratio = contrast_ratio(palette.text_primary, backdrop);
+                assert!(
+                    ratio >= 3.0,
+                    "大字文字 vs 场景极端色对比度应 ≥3:1, 实际 {ratio:.2}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scene_guard_control_text_reads_on_glass_surface() {
+        // 控件文字 vs 玻璃合成色 ≥ 4:1 (表面分别合成到场景两极端上取不利值)。
+        for palette in [sample_dark_palette(), sample_bright_palette()] {
+            for backdrop in [palette.backdrop_light, palette.backdrop_dark] {
+                let glass = composite_over(palette.surface, backdrop);
+                let ratio = contrast_ratio(palette.text_primary, glass);
+                assert!(
+                    ratio >= 4.0,
+                    "控件文字 vs 玻璃表面对比度应 ≥4:1, 实际 {ratio:.2}"
+                );
+            }
+        }
     }
 }

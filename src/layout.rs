@@ -46,9 +46,15 @@ impl Color {
     /// 向另一颜色线性插值 (分量独立,`t` 夹到 0..1)。
     ///
     /// 用于主题/场景过渡动画;在存储空间 (sRGB 编码) 内插值,
-    /// 与逐帧渲染的观感一致。
+    /// 与逐帧渲染的观感一致。端点处返回原值拷贝,
+    /// 保证过渡结束态与目标色逐位一致 (无浮点漂移)。
     pub fn lerp(self, other: Color, t: f32) -> Self {
-        let t = t.clamp(0.0, 1.0);
+        if t <= 0.0 {
+            return self;
+        }
+        if t >= 1.0 {
+            return other;
+        }
         Self::rgba(
             self.r + (other.r - self.r) * t,
             self.g + (other.g - self.g) * t,

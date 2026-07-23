@@ -4,7 +4,7 @@
 
 ## Phase 1: 框架纯逻辑
 - [x] **Task 1** 颜色插值、对比度与动效求值纯逻辑 — `cargo test --lib theme/layout` 绿 ✅ f73b373
-- [ ] **Task 2** ScenePalette + SceneTheme + SceneSpec(依赖 1)— token 护栏 + lerp + re-export
+- [x] **Task 2** ScenePalette + SceneTheme + SceneSpec(依赖 1)— token 护栏 + lerp + re-export
 
 ### ⏸ Checkpoint 1: 框架 token 就绪
 - [ ] `cargo test --lib --tests` 全绿;clippy 零警告
