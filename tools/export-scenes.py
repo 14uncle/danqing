@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Export danqing Phase 2 scene assets (pomodoro POC).
 
-Four procedural scenes spanning dark/bright families:
+Five procedural scenes spanning dark/bright families:
     bonfire  篝火 (dark, warm fire glow)
     sea      海   (bright, cyan)
     rain     雨   (gray-blue, streaks)
     mountain 山   (neutral dusk, ridgelines)
+    forest   森林 (misty conifer green, treelines + fog bands)
 
 Each scene PNG bakes: multi-stop vertical gradient + radial glow +
 center readability veil + scene-specific details.
 No external assets; fully deterministic.
 
 Outputs:
-    assets/scenes/{bonfire,sea,rain,mountain}.png
+    assets/scenes/{bonfire,sea,rain,mountain,forest}.png
     examples/pomodoro/scenes.rs   # SceneSpec consts incl. palettes (generated, do not edit)
 
 The script also enforces contrast guards at generation time:
@@ -195,6 +196,78 @@ def build_waves(layers: list[dict]) -> Image.Image:
     return overlay.filter(ImageFilter.GaussianBlur(radius=1.2))
 
 
+def build_trees(layers: list[dict]) -> Image.Image:
+    """Forest treelines: dense rows of conifer triangles (SS x for AA).
+
+    Each layer: base_y (baseline fraction), h_min/h_max (tree height
+    fractions), color, alpha, blur (native-res gaussian radius), seed;
+    optional und (baseline undulation amplitude) / freq (undulation
+    cycles). The baseline rolls like forested hills — a flat baseline
+    reads as a shelf, not terrain. Trees overlap heavily and sit on a
+    solid mass that follows the same curve, so each layer reads as
+    continuous canopy with a jagged horizon. Layers composite far-to-near;
+    far layers should be lighter, lower-alpha and blurrier (fog eats them).
+    """
+    w, h = WIDTH * SS, HEIGHT * SS
+    result = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+    for layer in layers:
+        state = layer["seed"]
+
+        def rnd() -> float:
+            nonlocal state
+            state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+            return (state >> 16) / 32768.0
+
+        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        base_y = layer["base_y"] * h
+        und = layer.get("und", 0.02) * h
+        freq = layer.get("freq", 2.0)
+        phase = (layer["seed"] % 628) / 100.0  # seed-derived, deterministic
+
+        def baseline(x: float) -> float:
+            return base_y + und * math.sin(2.0 * math.pi * freq * x / w + phase)
+
+        # Solid forest mass below the undulating treeline.
+        steps = 120
+        mass = [(w * i / steps, baseline(w * i / steps)) for i in range(steps + 1)]
+        draw.polygon(mass + [(w, h), (0, h)], fill=(*layer["color"], layer["alpha"]))
+        # Dense overlapping conifers; gaps show the same-color mass beneath.
+        x = -rnd() * 40 * SS
+        while x < w:
+            th = (layer["h_min"] + rnd() * (layer["h_max"] - layer["h_min"])) * h
+            half = th * (0.20 + rnd() * 0.10)
+            by = baseline(x)
+            draw.polygon(
+                [(x - half, by), (x, by - th), (x + half, by)],
+                fill=(*layer["color"], layer["alpha"]),
+            )
+            x += half * 2 * (0.35 + rnd() * 0.4)
+        overlay = overlay.resize(SIZE, Image.LANCZOS)
+        overlay = overlay.filter(ImageFilter.GaussianBlur(radius=layer.get("blur", 1.2)))
+        result = Image.alpha_composite(result, overlay)
+    return result
+
+
+def build_mist(bands: list[dict]) -> Image.Image:
+    """Horizontal fog bands (native res): sin-ramped alpha rows + big blur.
+
+    Each band: y/height (fractions), color, alpha (peak at band center).
+    Smooth by construction, so no SS needed; the blur melts it into the scene.
+    """
+    overlay = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    for band in bands:
+        y0 = int((band["y"] - band["height"] / 2) * HEIGHT)
+        y1 = int((band["y"] + band["height"] / 2) * HEIGHT)
+        for y in range(y0, y1):
+            t = (y - y0) / max(1, y1 - y0)
+            alpha = int(band["alpha"] * math.sin(math.pi * t))
+            if alpha > 0:
+                draw.line([(0, y), (WIDTH, y)], fill=(*band["color"], alpha))
+    return overlay.filter(ImageFilter.GaussianBlur(radius=18))
+
+
 def build_streaks(count: int, color: tuple, alpha: int, seed: int) -> Image.Image:
     """Rain streaks: faint short diagonal lines. SS x + downsample for AA."""
     w, h = WIDTH * SS, HEIGHT * SS
@@ -359,6 +432,46 @@ SCENES = [
             "surface_input": ((0, 0, 0), 0.38),
         },
     },
+    {
+        "key": "forest",
+        "name": "森林",
+        # 雾顶亮、中部压暗保倒计时对比度、底部深绿的纵向结构。
+        "stops": [
+            (0.00, (168, 185, 171)),
+            (0.30, (126, 146, 130)),
+            (0.55, (82, 104, 88)),
+            (0.80, (50, 72, 59)),
+            (1.00, (34, 52, 43)),
+        ],
+        # 顶部天光 (穿雾), 克制峰值避免中央采样区过亮。
+        "glow": {"color": (214, 228, 214), "center": (0.5, 0.10), "radius": 0.42, "peak": 45},
+        "veil": {"color": (13, 21, 16), "center": (0.5, 0.48), "radius": 0.55, "peak": 60},
+        "trees": [
+            # 远林: 雾中淡影, 最虚。
+            {"base_y": 0.52, "h_min": 0.05, "h_max": 0.10, "color": (118, 138, 122),
+             "alpha": 110, "blur": 2.5, "seed": 0xF01},
+            # 中林。
+            {"base_y": 0.68, "h_min": 0.08, "h_max": 0.15, "color": (72, 94, 78),
+             "alpha": 190, "blur": 1.5, "seed": 0xF02},
+            # 近林: 最深最实, 收住底边。
+            {"base_y": 0.88, "h_min": 0.12, "h_max": 0.22, "color": (36, 56, 45),
+             "alpha": 255, "blur": 1.0, "seed": 0xF03},
+        ],
+        "mist": [
+            # 上层雾: 天光与远林之间。
+            {"y": 0.30, "height": 0.18, "color": (206, 220, 206), "alpha": 55},
+            # 林间雾: 中林与近林之间。
+            {"y": 0.62, "height": 0.14, "color": (188, 205, 189), "alpha": 42},
+        ],
+        "palette": {
+            "base": (50, 72, 59),
+            "accent": (172, 198, 158),
+            "text_primary": (240, 246, 240),
+            "text_secondary": (186, 201, 187),
+            "surface": ((0, 0, 0), 0.25),
+            "surface_input": ((0, 0, 0), 0.38),
+        },
+    },
 ]
 
 
@@ -372,6 +485,10 @@ def build_scene(cfg: dict) -> Image.Image:
         img = Image.alpha_composite(img, build_ridges(cfg["ridges"]))
     if "waves" in cfg:
         img = Image.alpha_composite(img, build_waves(cfg["waves"]))
+    if "trees" in cfg:
+        img = Image.alpha_composite(img, build_trees(cfg["trees"]))
+    if "mist" in cfg:
+        img = Image.alpha_composite(img, build_mist(cfg["mist"]))
     if "streaks" in cfg:
         s = cfg["streaks"]
         img = Image.alpha_composite(img, build_streaks(s["count"], s["color"], s["alpha"], s["seed"]))
@@ -449,7 +566,7 @@ mod tests {
 
     #[test]
     fn all_scenes_pass_contrast_guards() {
-        assert_eq!(SCENES.len(), 4, "POC 应有 4 个场景");
+        assert_eq!(SCENES.len(), 5, "POC 应有 5 个场景");
         for spec in &SCENES {
             let p = &spec.palette;
             for (label, backdrop) in [

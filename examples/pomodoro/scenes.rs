@@ -6,7 +6,7 @@
 use danqing::{Color, ScenePalette, SceneSpec};
 
 /// POC 场景清单 (数组顺序即 ◀/▶ 切换顺序)。
-pub const SCENES: [SceneSpec; 4] = [
+pub const SCENES: [SceneSpec; 5] = [
     SceneSpec {
         name: "篝火",
         image: "assets/scenes/bonfire.png",
@@ -63,6 +63,20 @@ pub const SCENES: [SceneSpec; 4] = [
             backdrop_dark: Color::from_srgb8(85, 77, 104),
         },
     },
+    SceneSpec {
+        name: "森林",
+        image: "assets/scenes/forest.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(50, 72, 59),
+            accent: Color::from_srgb8(172, 198, 158),
+            text_primary: Color::from_srgb8(240, 246, 240),
+            text_secondary: Color::from_srgb8(186, 201, 187),
+            surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
+            surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
+            backdrop_light: Color::from_srgb8(113, 131, 117),
+            backdrop_dark: Color::from_srgb8(67, 84, 71),
+        },
+    },
 ];
 
 #[cfg(test)]
@@ -79,7 +93,7 @@ mod tests {
 
     #[test]
     fn all_scenes_pass_contrast_guards() {
-        assert_eq!(SCENES.len(), 4, "POC 应有 4 个场景");
+        assert_eq!(SCENES.len(), 5, "POC 应有 5 个场景");
         for spec in &SCENES {
             let p = &spec.palette;
             for (label, backdrop) in [
