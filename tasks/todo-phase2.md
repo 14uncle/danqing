@@ -17,7 +17,7 @@
 
 ### ⏸ Checkpoint 2: 状态机 / 资产 / 管线就绪
 - [x] `cargo test --lib --tests` + `cargo test --example pomodoro` 全绿;clippy 零警告
-- [ ] showcase 人工回归;4 张场景图人工 review
+- [x] showcase 人工回归;4 张场景图人工 review
 
 ## Phase 3: POC 组装与终验
 - [x] **Task 6** POC 界面组装(依赖 2/3/4/5)— 计时全功能 + 场景即时切换,wgpu 校验层无错误
@@ -25,5 +25,5 @@
 
 ### ✅ Checkpoint Complete: 阶段 2 POC 关闭
 - [x] spec Success Criteria 7/7 通过
-- [ ] 全部 Commands 绿;本 todo 全部勾选 (待人工终审)
-- [ ] 人工终审(重点:场景沉浸观感是否成立)
+- [x] 全部 Commands 绿;本 todo 全部勾选
+- [x] 人工终审(重点:场景沉浸观感是否成立)
