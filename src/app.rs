@@ -3,7 +3,7 @@
 
 //! 应用层:App trait —— 状态、消息、视图树。
 //!
-//! 数据流:组件事件(如按钮点击)产出消息 `Msg` → [`App::update`]
+//! 数据流：组件事件 (如按钮点击) 产出消息 `Msg` → [`App::update`]
 //! 修改状态 → 每帧 `sync` 把状态经绑定闭包同步进保留的组件树。
 
 use std::any::Any;
@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use crate::event::Event;
 use crate::widget::Node;
 
-/// 动画/时间上下文,由框架每帧传入 `Widget::animate`。
+/// 动画 / 时间上下文，由框架每帧传入 `Widget::animate`。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AnimationCtx {
     /// 当前绝对时间。
@@ -28,20 +28,20 @@ impl AnimationCtx {
     }
 }
 
-/// 应用:状态容器 + 消息更新 + 视图树构建。
+/// 应用：状态容器 + 消息更新 + 视图树构建。
 ///
-/// 实现者即为状态本体(组件绑定闭包经 `Any` 向下转型读取状态)。
+/// 实现者即为状态本体 (组件绑定闭包经 `Any` 向下转型读取状态)。
 pub trait App: Any {
-    /// 消息类型:组件事件产出,驱动状态变化。
+    /// 消息类型：组件事件产出，驱动状态变化。
     type Msg: 'static;
 
-    /// 消息处理:修改应用状态。
+    /// 消息处理：修改应用状态。
     fn update(&mut self, msg: Self::Msg);
 
-    /// 构建组件树(启动时调用一次;数据经绑定闭包每帧同步)。
+    /// 构建组件树 (启动时调用一次; 数据经绑定闭包每帧同步)。
     fn view(&self) -> Node;
 
-    /// 原始事件钩子:键盘事件直送应用层(M1 无焦点系统);
+    /// 原始事件钩子：键盘事件直送应用层 (M1 无焦点系统);
     /// 未被组件树消费的鼠标事件也会到达这里。
     fn event(&mut self, _event: &Event) {}
 }

@@ -16,6 +16,8 @@ pub type FocusPath = Vec<usize>;
 /// 焦点管理器。
 ///
 /// 每帧根据当前组件树重建焦点链,维护当前焦点路径。
+/// 首次重建时自动聚焦焦点链第一个节点(启动便利);
+/// 之后用户主动清焦(点击空白 / Escape)不会被每帧重建抢回。
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct FocusManager {
     /// 当前焦点路径。
@@ -24,6 +26,8 @@ pub struct FocusManager {
     previous: Option<FocusPath>,
     /// 按深度优先顺序收集的可聚焦节点路径。
     chain: Vec<FocusPath>,
+    /// 是否已完成首次自动聚焦。
+    did_initial_focus: bool,
 }
 
 impl FocusManager {
@@ -44,9 +48,11 @@ impl FocusManager {
             }
         }
 
-        // 焦点链非空且当前无焦点时,默认聚焦第一个
-        if self.current.is_none() && !self.chain.is_empty() {
+        // 仅在首次重建时自动聚焦焦点链第一个节点;
+        // 之后用户主动清焦(点击空白 / Escape)不再抢回。
+        if !self.did_initial_focus && self.current.is_none() && !self.chain.is_empty() {
             self.current = Some(self.chain[0].clone());
+            self.did_initial_focus = true;
         }
     }
 
@@ -102,11 +108,12 @@ impl FocusManager {
     }
 
     /// 设置焦点为点击位置最上层的可聚焦节点(后绘制者优先)。
+    ///
+    /// 点击未命中任何可聚焦节点时清除焦点(点击空白 = 取消聚焦),
+    /// 之后键盘事件由窗口层回退到应用层处理。
     pub fn set_by_click(&mut self, root: &Node, pos: Point) {
-        if let Some(path) = hit_focusable(root, pos) {
-            self.previous = self.current.clone();
-            self.current = Some(path);
-        }
+        self.previous = self.current.clone();
+        self.current = hit_focusable(root, pos);
     }
 
     /// 显式设置焦点路径。
@@ -255,6 +262,73 @@ mod tests {
     }
 
     #[test]
+    fn click_non_focusable_area_clears_focus() {
+        // 点击空白 / 不可聚焦区域 = 取消聚焦(标准失焦行为),
+        // 之后键盘事件才能回退到应用层(showcase 键盘方块回归)。
+        let mut texts = dummy_texts();
+        let mut tree = node(
+            Column::new()
+                .child(Button::new(Text::new("A")))
+                .child(UiBox::new(Color::BLACK).size(100.0, 100.0)),
+        );
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree);
+        assert_eq!(mgr.current(), Some(&vec![0]), "初始焦点应在 Button");
+
+        // 点击不可聚焦的 Box 区域(Button 下方)。
+        mgr.set_by_click(&tree, crate::Point::new(50.0, 500.0));
+        assert!(mgr.current().is_none(), "点击空白应清除焦点");
+    }
+
+    #[test]
+    fn rebuild_does_not_refocus_after_explicit_clear() {
+        // 用户主动清焦(点击空白 / Escape)后,每帧 rebuild 不应抢回焦点。
+        let mut texts = dummy_texts();
+        let mut tree = node(Column::new().child(Button::new(Text::new("A"))));
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree);
+        assert!(mgr.current().is_some(), "首次重建应自动聚焦");
+
+        mgr.clear_focus();
+        mgr.rebuild(&tree);
+        assert!(mgr.current().is_none(), "清焦后 rebuild 不应重新聚焦");
+    }
+
+    #[test]
+    fn first_rebuild_auto_focuses_first_focusable() {
+        // 启动便利保留:首次重建时自动聚焦焦点链第一个节点。
+        let mut texts = dummy_texts();
+        let mut tree = node(
+            Column::new()
+                .child(Button::new(Text::new("A")))
+                .child(Button::new(Text::new("B"))),
+        );
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree);
+        assert_eq!(mgr.current(), Some(&vec![0]));
+    }
+
+    #[test]
+    fn tab_from_none_focuses_first() {
+        // 无焦点时按 Tab 应聚焦第一个节点(Tab 遍历不依赖自动聚焦)。
+        let mut texts = dummy_texts();
+        let mut tree = node(
+            Column::new()
+                .child(Button::new(Text::new("A")))
+                .child(Button::new(Text::new("B"))),
+        );
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree);
+        mgr.clear_focus();
+        mgr.next();
+        assert_eq!(mgr.current(), Some(&vec![0]));
+    }
+
+    #[test]
     fn click_focuses_topmost_focusable() {
         let mut texts = dummy_texts();
         let mut tree = node(
@@ -294,7 +368,7 @@ mod tests {
         assert_eq!(mgr.current(), Some(&vec![0])); // 初始焦点在 Button
 
         // 点击 TextInput 内部但远离光标的位置,应聚焦到 TextInput([1])。
-        mgr.set_by_click(&tree, crate::Point::new(10.0, 80.0));
+        mgr.set_by_click(&tree, crate::Point::new(10.0, 60.0));
         assert_eq!(mgr.current(), Some(&vec![1]));
     }
 
@@ -360,13 +434,15 @@ mod tests {
         // Scrollable 自身不可聚焦,但内部的 TextInput 是焦点链唯一成员。
         assert_eq!(mgr.current(), Some(&vec![0]));
 
-        // 点击 Scrollable 视口内应聚焦到 TextInput([0])。
-        mgr.set_by_click(&tree, Point::new(50.0, 50.0));
+        // 点击 TextInput 内部(视口内)应聚焦到 TextInput([0])。
+        mgr.set_by_click(&tree, Point::new(50.0, 18.0));
         assert_eq!(mgr.current(), Some(&vec![0]));
 
-        // 点击视口外(但仍在 TextInput 内容矩形下方)不应聚焦。
-        mgr.clear_focus();
-        mgr.acknowledge();
+        // 点击视口内但在 TextInput 外:清除焦点(点击空白 = 取消聚焦)。
+        mgr.set_by_click(&tree, Point::new(50.0, 80.0));
+        assert!(mgr.current().is_none());
+
+        // 点击视口外不应聚焦。
         mgr.set_by_click(&tree, Point::new(50.0, 150.0));
         assert!(mgr.current().is_none());
     }

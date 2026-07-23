@@ -18,7 +18,7 @@ fn layout(box_: &mut UiBox) {
 
 #[test]
 fn hover_tracks_cursor_position() {
-    let mut b = UiBox::new(Color::BLACK).size(100.0, 50.0);
+    let mut b = UiBox::new(Color::BLACK).size(100.0, 50.0).hoverable(true);
     layout(&mut b);
     assert!(!b.is_hovered());
 
@@ -39,7 +39,7 @@ fn hover_tracks_cursor_position() {
 
 #[test]
 fn press_and_release() {
-    let mut b = UiBox::new(Color::BLACK).size(100.0, 50.0);
+    let mut b = UiBox::new(Color::BLACK).size(100.0, 50.0).hoverable(true);
     layout(&mut b);
 
     let inside = Point::new(10.0, 10.0);
@@ -70,7 +70,7 @@ fn press_and_release() {
 
 #[test]
 fn press_outside_ignored() {
-    let mut b = UiBox::new(Color::BLACK).size(100.0, 50.0);
+    let mut b = UiBox::new(Color::BLACK).size(100.0, 50.0).hoverable(true);
     layout(&mut b);
     let r = b.event(
         &Event::MouseInput {
@@ -89,7 +89,8 @@ fn press_outside_ignored() {
 fn nested_child_consumes_before_parent() {
     let mut parent = UiBox::new(Color::BLACK)
         .size(100.0, 100.0)
-        .child(UiBox::new(Color::WHITE).size(100.0, 100.0));
+        .hoverable(true)
+        .child(UiBox::new(Color::WHITE).size(100.0, 100.0).hoverable(true));
     let mut texts = danqing::TextBatch::new();
     parent.layout(Constraints::loose(Size::new(800.0, 600.0)), &mut texts);
     let parent_area = Rect::from_xywh(0.0, 0.0, 100.0, 100.0);
@@ -109,7 +110,7 @@ fn nested_child_consumes_before_parent() {
 
 #[test]
 fn cursor_left_clears_state() {
-    let mut b = UiBox::new(Color::BLACK).size(100.0, 50.0);
+    let mut b = UiBox::new(Color::BLACK).size(100.0, 50.0).hoverable(true);
     layout(&mut b);
     b.event(
         &Event::CursorMoved(Point::new(10.0, 10.0)),

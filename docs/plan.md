@@ -1,6 +1,6 @@
 # Plan: 丹青 M1 实现计划
 
-> 基于 `docs/spec.md`(已批准,2026-07-16)
+> 基于 `docs/specs/spec.md`(已批准,2026-07-16)
 > 目标: M1 最小闭环 —— 跨平台开窗 + 基础图元/文本绘制 + 键鼠事件 + showcase
 
 ## 架构分层
@@ -70,7 +70,7 @@ Step 5(布局)与 Step 3-4(渲染管线)相互独立,可并行;Step 7 依赖 5+6
 
 - Step 2/3/4 完成后:各跑一次确认 wgpu 校验层无错误
 - Step 5/6/7 完成后:`cargo test` 全绿
-- Step 9:对照 spec.md 验收标准 6 条逐项验证
+- Step 9:对照 `docs/specs/spec.md` 验收标准 6 条逐项验证
 - Step 10:`cargo fmt` / `cargo clippy -- -D warnings` / `cargo test` 全绿
 
 ## 前置条件(阻塞 Step 0)

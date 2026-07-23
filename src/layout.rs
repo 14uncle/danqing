@@ -1,13 +1,13 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! 布局:基础值类型、约束传递与尺寸计算。
+//! 布局：基础值类型、约束传递与尺寸计算。
 //!
-//! 本模块为纯逻辑,不依赖任何平台或图形 API。
-//! 值类型(`Color`/`Point`/`Size`/`Rect`/`Edges`)是渲染与布局两条车道的公共契约;
-//! 布局算法(`Constraints` 等)在后续任务中补充。
+//! 本模块为纯逻辑，不依赖任何平台或图形 API。
+//! 值类型 (`Color`/`Point`/`Size`/`Rect`/`Edges`) 是渲染与布局两条车道的公共契约;
+//! 布局算法 (`Constraints` 等) 在后续任务中补充。
 
-/// RGBA 颜色,各分量取值 0.0~1.0(线性空间,提交 GPU 前不做伽马转换)。
+/// RGBA 颜色，各分量取值 0.0~1.0(线性空间，提交 GPU 前不做伽马转换)。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Color {
     /// 红色分量。
@@ -16,7 +16,7 @@ pub struct Color {
     pub g: f32,
     /// 蓝色分量。
     pub b: f32,
-    /// 不透明度分量(0.0 全透明,1.0 不透明)。
+    /// 不透明度分量 (0.0 全透明，1.0 不透明)。
     pub a: f32,
 }
 
@@ -38,13 +38,13 @@ impl Color {
         Self { r, g, b, a }
     }
 
-    /// 由 sRGB 字节分量(0~255)构造不透明颜色。
+    /// 由 sRGB 字节分量 (0~255) 构造不透明颜色。
     pub const fn from_srgb8(r: u8, g: u8, b: u8) -> Self {
         Self::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
     }
 }
 
-/// 二维点,逻辑像素坐标(原点为窗口左上角,y 向下)。
+/// 二维点，逻辑像素坐标 (原点为窗口左上角，y 向下)。
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Point {
     /// 横坐标。
@@ -63,7 +63,7 @@ impl Point {
     }
 }
 
-/// 二维尺寸,逻辑像素。
+/// 二维尺寸，逻辑像素。
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Size {
     /// 宽度。
@@ -82,7 +82,7 @@ impl Size {
     }
 }
 
-/// 轴对齐矩形,由左上角原点与尺寸表示。
+/// 轴对齐矩形，由左上角原点与尺寸表示。
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Rect {
     /// 左上角坐标。
@@ -102,7 +102,7 @@ impl Rect {
         Self::new(Point::new(x, y), Size::new(width, height))
     }
 
-    /// 判断点是否落在矩形内(含左/上边界,不含右/下边界)。
+    /// 判断点是否落在矩形内 (含左/上边界，不含右/下边界)。
     pub fn contains(&self, point: Point) -> bool {
         point.x >= self.origin.x
             && point.x < self.origin.x + self.size.width
@@ -110,7 +110,7 @@ impl Rect {
             && point.y < self.origin.y + self.size.height
     }
 
-    /// 平移矩形(原点加偏移,尺寸不变)。
+    /// 平移矩形 (原点加偏移，尺寸不变)。
     pub fn translate(&self, dx: f32, dy: f32) -> Self {
         Self::new(
             Point::new(self.origin.x + dx, self.origin.y + dy),
@@ -118,14 +118,24 @@ impl Rect {
         )
     }
 
-    /// 判断矩形是否为空(宽或高非正)。
+    /// 判断矩形是否为空 (宽或高非正)。
     pub fn is_empty(&self) -> bool {
         self.size.width <= 0.0 || self.size.height <= 0.0
     }
 
+    /// 将矩形四边各内缩指定量。
+    pub fn inset(&self, amount: f32) -> Self {
+        Self::from_xywh(
+            self.origin.x + amount,
+            self.origin.y + amount,
+            (self.size.width - amount * 2.0).max(0.0),
+            (self.size.height - amount * 2.0).max(0.0),
+        )
+    }
+
     /// 求两个矩形的交集。
     ///
-    /// 若不相交或仅边界接触,返回 `None`。
+    /// 若不相交或仅边界接触，返回 `None`。
     pub fn intersect(&self, other: &Self) -> Option<Self> {
         let x0 = self.origin.x.max(other.origin.x);
         let y0 = self.origin.y.max(other.origin.y);
@@ -141,7 +151,7 @@ impl Rect {
     }
 }
 
-/// 四边间距(用于 Padding 等),逻辑像素。
+/// 四边间距 (用于 Padding 等),逻辑像素。
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Edges {
     /// 上边距。
@@ -178,18 +188,18 @@ impl Edges {
         }
     }
 
-    /// 水平方向总间距(left + right)。
+    /// 水平方向总间距 (left + right)。
     pub fn horizontal(&self) -> f32 {
         self.left + self.right
     }
 
-    /// 垂直方向总间距(top + bottom)。
+    /// 垂直方向总间距 (top + bottom)。
     pub fn vertical(&self) -> f32 {
         self.top + self.bottom
     }
 }
 
-/// 布局约束:父组件传给子组件的尺寸范围(逻辑像素)。
+/// 布局约束：父组件传给子组件的尺寸范围 (逻辑像素)。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Constraints {
     /// 最小宽度。
@@ -203,7 +213,7 @@ pub struct Constraints {
 }
 
 impl Constraints {
-    /// 固定约束:尺寸必须恰为给定值(如根节点取窗口尺寸)。
+    /// 固定约束：尺寸必须恰为给定值 (如根节点取窗口尺寸)。
     pub fn tight(size: Size) -> Self {
         Self {
             min_width: size.width,
@@ -213,7 +223,7 @@ impl Constraints {
         }
     }
 
-    /// 宽松约束:最小为零,只限上限。
+    /// 宽松约束：最小为零，只限上限。
     pub fn loose(max: Size) -> Self {
         Self {
             min_width: 0.0,
@@ -231,7 +241,7 @@ impl Constraints {
         )
     }
 
-    /// 扣除四边间距后的子约束(Padding 用)。
+    /// 扣除四边间距后的子约束 (Padding 用)。
     pub fn deflate(&self, edges: Edges) -> Self {
         Self {
             min_width: (self.min_width - edges.horizontal()).max(0.0),
@@ -241,32 +251,32 @@ impl Constraints {
         }
     }
 
-    /// 上限尺寸(max_width, max_height)。
+    /// 上限尺寸 (max_width, max_height)。
     pub fn max(&self) -> Size {
         Size::new(self.max_width, self.max_height)
     }
 }
 
-/// 流式子项:沿主轴排列的一个子组件的尺寸请求。
+/// 流式子项：沿主轴排列的一个子组件的尺寸请求。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlowChild {
-    /// 主轴固有尺寸(fill_weight 为 0 时使用)。
+    /// 主轴固有尺寸 (fill_weight 为 0 时使用)。
     pub main_fixed: f32,
     /// 填充权重:0 = 按固有尺寸;>0 = 按比例瓜分剩余主轴空间。
     pub fill_weight: u32,
 }
 
-/// 一维主轴分配结果:每项 (主轴偏移, 分得的主轴尺寸)。
+/// 一维主轴分配结果：每项 (主轴偏移，分得的主轴尺寸)。
 pub type FlowResult = Vec<(f32, f32)>;
 
 /// 沿主轴为一组子项分配空间。
 ///
-/// 规则:
-/// - 先为所有 Fit(weight=0)项分配固有尺寸;
-/// - 剩余空间(`main_max` 减去 Fit 占用与间距,不为负)按权重分给 Fill 项;
-/// - Fit 项溢出时不压缩(M1 不做收缩,溢出部分由调用方裁剪)。
+/// 规则：
+/// - 先为所有 Fit(weight=0) 项分配固有尺寸;
+/// - 剩余空间 (`main_max` 减去 Fit 占用与间距，不为负) 按权重分给 Fill 项;
+/// - Fit 项溢出时不压缩 (M1 不做收缩，溢出部分由调用方裁剪)。
 ///
-/// 返回每项的 (偏移, 主轴尺寸),顺序与输入一致。
+/// 返回每项的 (偏移，主轴尺寸),顺序与输入一致。
 pub fn distribute(main_max: f32, gap: f32, children: &[FlowChild]) -> FlowResult {
     let n = children.len();
     if n == 0 {
@@ -321,7 +331,7 @@ mod tests {
         let c = Rect::from_xywh(200.0, 200.0, 10.0, 10.0);
         assert!(a.intersect(&c).is_none());
 
-        // 边界接触(视为不相交)
+        // 边界接触 (视为不相交)
         let d = Rect::from_xywh(100.0, 0.0, 10.0, 10.0);
         assert!(a.intersect(&d).is_none());
     }
@@ -331,6 +341,17 @@ mod tests {
         assert!(Rect::from_xywh(0.0, 0.0, 0.0, 10.0).is_empty());
         assert!(Rect::from_xywh(0.0, 0.0, 10.0, 0.0).is_empty());
         assert!(!Rect::from_xywh(0.0, 0.0, 10.0, 10.0).is_empty());
+    }
+
+    #[test]
+    fn rect_inset() {
+        let rect = Rect::from_xywh(10.0, 20.0, 100.0, 80.0);
+        let inset = rect.inset(10.0);
+        assert_eq!(inset, Rect::from_xywh(20.0, 30.0, 80.0, 60.0));
+
+        // 内缩量过大时夹到零，避免负尺寸。
+        let clamped = rect.inset(60.0);
+        assert_eq!(clamped, Rect::from_xywh(70.0, 80.0, 0.0, 0.0));
     }
 
     #[test]
@@ -406,7 +427,7 @@ mod tests {
             },
         ];
         let r = distribute(120.0, 10.0, &children);
-        // 剩余 = 120 - 20 - 10 = 90,全给 fill
+        // 剩余 = 120 - 20 - 10 = 90，全给 fill
         assert_eq!(r, vec![(0.0, 20.0), (30.0, 90.0)]);
     }
 
@@ -423,7 +444,7 @@ mod tests {
             },
         ];
         let r = distribute(90.0, 10.0, &children);
-        // 剩余 80,按 1:3 分 → 20 / 60
+        // 剩余 80，按 1:3 分 → 20 / 60
         assert_eq!(r, vec![(0.0, 20.0), (30.0, 60.0)]);
     }
 

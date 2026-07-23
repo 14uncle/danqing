@@ -1,41 +1,29 @@
-// ! @author 十四叔
-// ! @date 2026/07/17
+//! @author 十四叔
+//! @date 2026/07/17
 
-// ! 组件: 保留模式 UI 树的节点抽象。
-// !
-// ! 本模块为纯逻辑: 组件只依赖布局类型与 CPU 收集器,
-// ! 不接触任何平台 / 图形 API。
-// !
-// ! 每帧流程:
-// ! 1. [`Widget::sync`] —— 从应用状态同步绑定属性;
-// ! 2. [`Widget::layout`] —— 约束向下传、尺寸向上算;
-// ! 3. [`Widget::paint`] —— 按缓存的几何收集绘制命令。
+//! 组件：保留模式 UI 树的节点抽象。
+//!
+//! 本模块为纯逻辑：组件只依赖布局类型与 CPU 收集器，
+//! 不接触任何平台 / 图形 API。
+//!
+//! 每帧流程：
+//! 1. [`Widget::sync`] —— 从应用状态同步绑定属性;
+//! 2. [`Widget::layout`] —— 约束向下传、尺寸向上算;
+//! 3. [`Widget::paint`] —— 按缓存的几何收集绘制命令。
 
-mod box_;
-mod button;
-mod center;
-mod column;
-mod flow;
+mod base;
 mod focus;
-mod padding;
-mod row;
-mod scrollable;
-mod text;
-mod text_area;
-mod text_editor;
-mod text_input;
+mod form;
+mod layout;
+mod title_bar;
+mod view;
 
-pub use box_::Box;
-pub use button::Button;
-pub use center::Center;
-pub use column::Column;
+pub use base::{Button, Text};
 pub use focus::FocusManager;
-pub use padding::Padding;
-pub use row::Row;
-pub use scrollable::{ScrollAxis, Scrollable};
-pub use text::Text;
-pub use text_area::TextArea;
-pub use text_input::TextInput;
+pub use form::{TextArea, TextInput};
+pub use layout::{Box, Center, Column, Padding, Row};
+pub use title_bar::{TitleBar, TitleBarStyle};
+pub use view::{ScrollAxis, Scrollable, Switcher};
 
 use std::any::Any;
 
@@ -47,33 +35,33 @@ use crate::{Constraints, Rect, Size};
 /// 事件处理结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventResult {
-    /// 事件被消费, 停止分发。
+    /// 事件被消费，停止分发。
     Consumed,
-    /// 未消费, 继续向父级冒泡。
+    /// 未消费，继续向父级冒泡。
     Ignored,
 }
 
-/// 应用消息队列: 组件事件 (如按钮点击) 产出的类型擦除消息。
+/// 应用消息队列：组件事件 (如按钮点击) 产出的类型擦除消息。
 pub type MsgQueue = Vec<std::boxed::Box<dyn Any>>;
 
-/// 组件: 保留模式 UI 树的一个节点。
+/// 组件：保留模式 UI 树的一个节点。
 pub trait Widget {
-    /// 状态同步: 从应用状态更新绑定属性 (每帧布局前调用)。
+    /// 状态同步：从应用状态更新绑定属性 (每帧布局前调用)。
     ///
     /// 默认实现无操作 (静态组件)。
     fn sync(&mut self, _state: &dyn Any) {}
 
-    /// 动画更新: 由框架每帧在 `sync` 之后、`layout` 之前调用。
+    /// 动画更新：由框架每帧在 `sync` 之后、`layout` 之前调用。
     ///
     /// 默认实现无操作。
     fn animate(&mut self, _ctx: &AnimationCtx) {}
 
-    /// 布局: 在约束下计算自身尺寸。
+    /// 布局：在约束下计算自身尺寸。
     ///
-    /// 容器组件在此递归子组件并缓存各自的几何, 供 paint 使用。
+    /// 容器组件在此递归子组件并缓存各自的几何，供 paint 使用。
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size;
 
-    /// 绘制: 按 layout 缓存的几何收集绘制命令。
+    /// 绘制：按 layout 缓存的几何收集绘制命令。
     ///
     /// `area` 为父组件摆放本组件的矩形 (布局结果)。
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch);
@@ -125,7 +113,7 @@ pub trait Widget {
     /// 鼠标命中测试使用的矩形 (相对于窗口逻辑坐标)。
     ///
     /// 默认可点击/可聚焦组件 (如 Button/TextInput) 返回自身完整区域;
-    /// 无命中需求返回 None。应与 `ime_area` 区分,后者可能只覆盖光标。
+    /// 无命中需求返回 None。应与 `ime_area` 区分，后者可能只覆盖光标。
     fn hit_area(&self) -> Option<Rect> {
         None
     }
@@ -138,7 +126,7 @@ pub trait Widget {
     }
 }
 
-/// 组件树节点: 盒装的组件对象。
+/// 组件树节点：盒装的组件对象。
 pub type Node = std::boxed::Box<dyn Widget>;
 
 /// 把组件装箱为节点。
@@ -161,7 +149,7 @@ pub fn event_at_path(
     }
     let (first, rest) = path.split_first().expect("path 非空");
     if let Some(child) = root.children_mut().get_mut(*first) {
-        // 容器未缓存子区域时, 使用父区域作为近似; 焦点路由通常到达叶子组件。
+        // 容器未缓存子区域时，使用父区域作为近似; 焦点路由通常到达叶子组件。
         event_at_path(child, rest, event, area, msgs)
     } else {
         EventResult::Ignored

@@ -489,6 +489,7 @@ dependencies = [
  "etagere",
  "font-kit",
  "fontdue",
+ "image",
  "log",
  "pollster",
  "thiserror 2.0.18",

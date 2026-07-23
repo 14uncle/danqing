@@ -1,16 +1,21 @@
-// ! @author 十四叔
-// ! @date 2026/07/17
+//! @author 十四叔
+//! @date 2026/07/19
 
-// ! 丹青 showcase —— M2 演示页。
-// !
-// ! 本示例是唯一且持续生长的演示程序: 框架每落地一项能力,
-// ! 就在这里展示一项 (以用代测)。
+//! 丹青 showcase —— 阶段 1 设计系统组件图鉴。
+//!
+//! 本示例是唯一且持续生长的演示程序：框架每落地一项能力，
+//! 就在这里展示一项 (以用代测)。左侧按 widget/ 目录分类导航
+//! (基础 / 布局 / 表单 / 视图), 右侧经 Switcher 切换分类面板;
+//! 所有面板常驻实例化，切换不重建组件树。
 
 use danqing::widget::{
-    self, Box as UiBox, Button, Center, Column, EventResult, MsgQueue, Node, Padding, Row,
-    Scrollable, Text, TextArea, TextInput, Widget,
+    self, Box as UiBox, Button, Column, EventResult, MsgQueue, Node, Padding, Row, Scrollable,
+    Switcher, Text, TextArea, TextInput, TitleBar, Widget,
 };
-use danqing::{App, Color, Event, Key, NamedKey, Point, Size};
+use danqing::{
+    App, BackgroundConfig, Color, Event, Key, LightTheme, NamedKey, Point, Rect, ScaleMode, Size,
+    Theme, WindowAction,
+};
 use std::io::Write;
 
 /// 键盘移动方块的区域尺寸。
@@ -20,6 +25,9 @@ const SQUARE_SIZE: f32 = 40.0;
 /// 每次按键移动步长 (逻辑像素)。
 const MOVE_STEP: f32 = 20.0;
 
+/// 分类导航：与 src/widget/ 子目录一一对应。
+const CATEGORIES: [&str; 4] = ["基础 base", "布局 layout", "表单 form", "视图 view"];
+
 /// showcase 应用 (状态容器 + 消息更新 + 视图树)。
 struct Showcase {
     count: u32,
@@ -27,6 +35,8 @@ struct Showcase {
     last_key: String,
     input_value: String,
     textarea_value: String,
+    /// 当前选中的分类索引 (驱动 Switcher)。
+    selected: usize,
 }
 
 /// 应用消息。
@@ -41,6 +51,8 @@ enum Msg {
     InputChanged(String),
     /// 多行文本域内容变化。
     TextareaChanged(String),
+    /// 切换分类面板。
+    Select(usize),
 }
 
 impl App for Showcase {
@@ -58,6 +70,7 @@ impl App for Showcase {
             Msg::KeyChar(c) => self.last_key = c,
             Msg::InputChanged(s) => self.input_value = s,
             Msg::TextareaChanged(s) => self.textarea_value = s,
+            Msg::Select(i) => self.selected = i,
         }
     }
 
@@ -96,144 +109,179 @@ impl App for Showcase {
     }
 }
 
-const PALETTE: [Color; 6] = [
-    Color::from_srgb8(0xE6, 0x4C, 0x4C),
-    Color::from_srgb8(0xE6, 0x9F, 0x4C),
-    Color::from_srgb8(0xE0, 0xD5, 0x4F),
-    Color::from_srgb8(0x5B, 0xB8, 0x5F),
-    Color::from_srgb8(0x4C, 0x9F, 0xE6),
-    Color::from_srgb8(0x8A, 0x6F, 0xD6),
-];
-
-/// 色板区:6×6 网格, 等分填充。
-fn palette_grid() -> Column {
-    let mut grid = Column::new().gap(8.0);
-    for color in PALETTE {
-        let mut row = Row::new().gap(8.0);
-        for _ in 0..6 {
-            row = row.fill(UiBox::new(color), 1);
-        }
-        grid = grid.fill(row, 1);
-    }
-    grid
+/// 阶段 1 浅色主题。
+fn theme() -> LightTheme {
+    LightTheme
 }
 
-/// 圆角区: 同一颜色、递增圆角半径。
-fn rounded_row() -> Row {
-    let teal = Color::from_srgb8(0x4C, 0xE6, 0xC3);
-    let mut row = Row::new().gap(8.0);
-    for radius in [0.0f32, 8.0, 16.0, 24.0, 36.0, 48.0] {
-        row = row.fill(UiBox::new(teal).radius(radius), 1);
+/// 卡片容器：带标题标签与主题化边框 / 圆角。
+fn card(t: &LightTheme, title: &str, content: impl Widget + 'static) -> impl Widget + 'static {
+    Column::new()
+        .gap(t.spacing_sm())
+        // 拉伸交叉轴：白底卡片与标题标签同宽，由外层内容列统一卡片宽度。
+        .cross_stretch()
+        .child(
+            Text::new(title)
+                .font_size(t.font_size_body())
+                .color(t.text_secondary()),
+        )
+        .child(
+            UiBox::themed(t)
+                .radius(t.radius_lg())
+                .child(Padding::all(t.spacing_lg(), content)),
+        )
+}
+
+/// 品牌色样例区:6 行 × 6 列固定色块。
+fn palette_grid(t: &LightTheme) -> impl Widget + 'static {
+    let colors = [
+        t.accent(),
+        t.danger(),
+        t.text_primary(),
+        t.text_secondary(),
+        t.divider(),
+        t.border(),
+    ];
+    let mut col = Column::new().gap(t.spacing_sm());
+    for color in colors {
+        let mut row = Row::new().gap(t.spacing_sm());
+        for _ in 0..6 {
+            row = row.child(UiBox::new(color).size(40.0, 40.0).radius(t.radius_sm()));
+        }
+        col = col.child(row);
+    }
+    col
+}
+
+/// 圆角区：同一颜色、递增圆角半径。
+fn rounded_row(t: &LightTheme) -> impl Widget + 'static {
+    let mut row = Row::new().gap(t.spacing_sm());
+    for radius in [
+        0.0f32,
+        t.radius_sm(),
+        t.radius_md(),
+        t.radius_lg(),
+        24.0,
+        36.0,
+    ] {
+        row = row.child(UiBox::themed(t).size(40.0, 40.0).radius(radius));
     }
     row
 }
 
-/// 交互区: 按钮 + 计数文本。
-fn counter_row() -> Row {
-    Row::new()
-        .gap(16.0)
-        .child(
-            Button::new(Text::new("点击 +1").font_size(20).color(Color::WHITE))
-                .on_click(|| Msg::Increment)
-                .radius(12.0),
-        )
-        .fill(
-            Center::new(
-                Text::bind(|s: &Showcase| format!("已点击 {} 次", s.count))
-                    .font_size(20)
-                    .color(Color::WHITE),
-            ),
-            1,
-        )
+/// 品牌色与圆角卡片。
+fn palette_and_rounded_card(t: &LightTheme) -> impl Widget + 'static {
+    Column::new()
+        .gap(t.spacing_md())
+        .child(palette_grid(t))
+        .child(rounded_row(t))
 }
 
-/// 键盘区: 方向键 /WASD 移动方块, 并回显最后按下的字符键。
-fn keyboard_row() -> Row {
+/// 交互区：按钮 + 计数文本。
+fn counter_row(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
-        .gap(16.0)
-        .fill(
-            UiBox::new(Color::from_srgb8(0x1A, 0x29, 0x3D))
-                .size(KEYBOARD_AREA.width, KEYBOARD_AREA.height)
-                .radius(12.0)
-                .child(
-                    Positioned::bind(
-                        |s: &Showcase| s.square_pos,
-                        UiBox::new(Color::from_srgb8(0xE6, 0x4C, 0x9F))
-                            .size(SQUARE_SIZE, SQUARE_SIZE)
-                            .radius(8.0),
-                    )
-                    .hoverable(false),
-                ),
-            2,
-        )
-        .fill(
-            Center::new(
-                Text::bind(|s: &Showcase| format!("最后按键: {}", s.last_key))
-                    .font_size(20)
+        .gap(t.spacing_lg())
+        .child(
+            Button::themed(
+                t,
+                Text::new("点击 +1")
+                    .font_size(t.font_size_body())
                     .color(Color::WHITE),
-            ),
-            1,
+            )
+            .on_click(|| Msg::Increment),
+        )
+        .child(
+            Text::bind(|s: &Showcase| format!("已点击 {} 次", s.count))
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
         )
 }
 
 /// 输入区:TextInput + 实时回显。
-fn input_row() -> Row {
+fn input_row(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
-        .gap(16.0)
-        .child(Text::new("输入:").font_size(20).color(Color::WHITE))
+        .gap(t.spacing_lg())
         .child(
-            TextInput::new()
+            Text::new("输入：")
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+        .child(
+            TextInput::themed(t)
                 .width(240.0)
-                .font_size(20)
                 .on_change(|s: &str| Msg::InputChanged(s.to_string())),
         )
-        .fill(
-            Center::new(
-                Text::bind(|s: &Showcase| format!("已输入: {}", s.input_value))
-                    .font_size(20)
-                    .color(Color::WHITE),
-            ),
-            1,
+        .child(
+            Text::bind(|s: &Showcase| format!("已输入：{}", s.input_value))
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
         )
 }
 
-/// 多行输入区:Scrollable + TextArea + 实时回显字数/行数。
-fn textarea_row() -> Row {
+/// 多行输入区:Scrollable + TextArea + 实时回显字数 / 行数。
+fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
-        .gap(16.0)
-        .child(Text::new("多行:").font_size(20).color(Color::WHITE))
+        .gap(t.spacing_lg())
         .child(
-            UiBox::new(Color::from_srgb8(0x2A, 0x2A, 0x2A))
+            Text::new("多行：")
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+        .child(
+            // 透明尺寸壳: 只为 Scrollable 提供 400×160 视口, 背景职责归 TextArea,
+            // 避免外层 UiBox 与 TextArea 双层 surface 叠出接缝。
+            UiBox::new(Color::TRANSPARENT)
                 .size(400.0, 160.0)
-                .radius(8.0)
-                .child(Scrollable::new(
-                    TextArea::new()
+                .child(Scrollable::themed(
+                    t,
+                    TextArea::themed(t)
                         .width(400.0)
-                        .font_size(18)
+                        .height(160.0)
                         .on_change(|s: &str| Msg::TextareaChanged(s.to_string())),
                 )),
         )
-        .fill(
-            Center::new(
-                Text::bind(|s: &Showcase| {
-                    let chars = s.textarea_value.chars().count();
-                    let lines = s.textarea_value.lines().count();
-                    format!("字数:{} 行数:{}", chars, lines)
-                })
-                .font_size(20)
-                .color(Color::WHITE),
-            ),
-            1,
+        .child(
+            Text::bind(|s: &Showcase| {
+                let chars = s.textarea_value.chars().count();
+                let lines = s.textarea_value.lines().count();
+                format!("字数：{} 行数：{}", chars, lines)
+            })
+            .font_size(t.font_size_body())
+            .color(t.text_primary()),
         )
 }
 
-/// 绝对 / 相对定位容器: 把子组件按状态绑定的偏移量平移。
+/// 键盘区：方向键 /WASD 移动方块，并回显最后按下的字符键。
+fn keyboard_card(t: &LightTheme) -> impl Widget + 'static {
+    Row::new()
+        .gap(t.spacing_lg())
+        .child(
+            UiBox::themed(t)
+                .size(KEYBOARD_AREA.width, KEYBOARD_AREA.height)
+                .child(Positioned::bind(
+                    |s: &Showcase| s.square_pos,
+                    UiBox::new(t.accent())
+                        .size(SQUARE_SIZE, SQUARE_SIZE)
+                        .radius(t.radius_md()),
+                )),
+        )
+        .child(
+            Text::bind(|s: &Showcase| format!("最后按键：{}", s.last_key))
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+}
+
+/// 绝对 / 相对定位容器：把子组件按状态绑定的偏移量平移。
 ///
-/// 本组件为 showcase 键盘演示专用, 放在示例文件中以保持框架核心精简。
+/// 本组件为 showcase 键盘演示专用，放在示例文件中以保持框架核心精简。
+///
+/// 注意：本组件的绘制与事件区域随偏移量平移，可能超出自身布局矩形;
+/// 父容器不得按布局矩形对其裁剪。
 struct Positioned {
     child: Node,
     offset: Point,
-    binding: Option<Box<dyn Fn(&Showcase) -> Point>>,
+    binding: Box<dyn Fn(&Showcase) -> Point>,
     child_size: Size,
 }
 
@@ -243,28 +291,19 @@ impl Positioned {
         Self {
             child: Box::new(child),
             offset: Point::ZERO,
-            binding: Some(Box::new(f)),
+            binding: Box::new(f),
             child_size: Size::ZERO,
         }
-    }
-
-    /// 关闭 hover/pressed 交互效果 (键盘区方块不需要)。
-    fn hoverable(self, hoverable: bool) -> Self {
-        // 当前实现本身无交互效果, 保留接口以兼容调用链。
-        let _ = hoverable;
-        self
     }
 }
 
 impl Widget for Positioned {
     fn sync(&mut self, state: &dyn std::any::Any) {
         self.child.sync(state);
-        if let Some(binding) = &self.binding {
-            let state = state
-                .downcast_ref::<Showcase>()
-                .expect("Positioned 绑定状态类型不匹配");
-            self.offset = binding(state);
-        }
+        let state = state
+            .downcast_ref::<Showcase>()
+            .expect("Positioned 绑定状态类型不匹配");
+        self.offset = (self.binding)(state);
     }
 
     fn layout(
@@ -292,46 +331,240 @@ impl Widget for Positioned {
         self.child
             .event(event, danqing::Rect::new(origin, self.child_size), msgs)
     }
+
+    fn children(&self) -> &[Node] {
+        std::slice::from_ref(&self.child)
+    }
+
+    fn children_mut(&mut self) -> &mut [Node] {
+        std::slice::from_mut(&mut self.child)
+    }
 }
 
-/// 构建组件树 (保留模式: 树只建一次, 数据每帧同步)。
-fn build_tree() -> Node {
-    widget::node(Padding::all(
-        24.0,
+/// 页面包装：Scrollable + Padding + 页标题 + 内容。
+fn page(t: &LightTheme, heading: &str, content: impl Widget + 'static) -> impl Widget + 'static {
+    Scrollable::themed(
+        t,
+        Padding::all(
+            t.spacing_lg(),
+            Column::new()
+                .gap(t.spacing_lg())
+                // 卡片统一为内容列宽，右边缘对齐。
+                .cross_stretch()
+                .child(
+                    Text::new(heading)
+                        .font_size(t.font_size_heading())
+                        .color(t.text_primary()),
+                )
+                .child(content),
+        ),
+    )
+}
+
+/// 基础页：按钮与文本。
+fn page_base(t: &LightTheme) -> impl Widget + 'static {
+    page(
+        t,
+        "基础 base — 按钮与文本",
+        card(t, "按钮与计数", counter_row(t)),
+    )
+}
+
+/// 布局页：盒模型与流式排布。
+fn page_layout(t: &LightTheme) -> impl Widget + 'static {
+    page(
+        t,
+        "布局 layout — 盒模型与流式排布",
+        card(t, "品牌色与圆角", palette_and_rounded_card(t)),
+    )
+}
+
+/// 表单页：单行与多行文本输入。
+fn page_form(t: &LightTheme) -> impl Widget + 'static {
+    page(
+        t,
+        "表单 form — 文本输入",
         Column::new()
-            .gap(16.0)
-            .fill(
-                Center::new(
-                    Text::new("danqing 丹青 — 跨平台自绘 UI 框架")
-                        .font_size(20)
-                        .color(Color::WHITE),
-                ),
-                1,
+            .gap(t.spacing_lg())
+            .cross_stretch()
+            .child(card(t, "单行输入", input_row(t)))
+            .child(card(t, "多行输入", textarea_card(t))),
+    )
+}
+
+/// 视图页：视口与可见性; 自定义组件演示。
+fn page_view(t: &LightTheme) -> impl Widget + 'static {
+    page(
+        t,
+        "视图 view — 每个面板都是 Scrollable, 分类切换由 Switcher 驱动",
+        card(t, "键盘响应 (自定义 Positioned 组件)", keyboard_card(t)),
+    )
+}
+
+/// 侧边栏导航项：选中时实心 accent (Button::bind_color 等状态绑定) 并在左缘绘制竖条。
+///
+/// 本组件为 showcase 导航专用，放在示例文件中以保持框架核心精简。
+struct NavItem {
+    button: Node,
+    index: usize,
+    selected: bool,
+    marker_color: Color,
+}
+
+impl NavItem {
+    /// 包装导航按钮,index 对应 Showcase.selected 的分类序号。
+    fn new(index: usize, marker_color: Color, button: impl Widget + 'static) -> Self {
+        Self {
+            button: Box::new(button),
+            index,
+            selected: false,
+            marker_color,
+        }
+    }
+}
+
+impl Widget for NavItem {
+    fn sync(&mut self, state: &dyn std::any::Any) {
+        let state = state
+            .downcast_ref::<Showcase>()
+            .expect("NavItem 绑定状态类型不匹配");
+        self.selected = state.selected == self.index;
+        self.button.sync(state);
+    }
+
+    fn layout(
+        &mut self,
+        constraints: danqing::Constraints,
+        texts: &mut danqing::TextBatch,
+    ) -> Size {
+        self.button.layout(constraints, texts)
+    }
+
+    fn paint(&self, area: Rect, rects: &mut danqing::RectBatch, texts: &mut danqing::TextBatch) {
+        self.button.paint(area, rects, texts);
+        if self.selected {
+            // 选中竖条：左缘内缩 4px,宽 3px,高为按钮的一半,圆角拉满成胶囊。
+            let bar_w = 3.0;
+            let bar_h = area.size.height * 0.5;
+            let bar = Rect::from_xywh(
+                area.origin.x + 4.0,
+                area.origin.y + (area.size.height - bar_h) / 2.0,
+                bar_w,
+                bar_h,
+            );
+            rects.push_rect(bar, self.marker_color, bar_w / 2.0);
+        }
+    }
+
+    fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
+        self.button.event(event, area, msgs)
+    }
+
+    fn children(&self) -> &[Node] {
+        std::slice::from_ref(&self.button)
+    }
+
+    fn children_mut(&mut self) -> &mut [Node] {
+        std::slice::from_mut(&mut self.button)
+    }
+}
+
+/// 比 accent 深一档的品牌色 (派生而非魔法值:RGB 缩 0.8)。
+fn accent_strong(t: &LightTheme) -> Color {
+    let a = t.accent();
+    Color::rgba(a.r * 0.8, a.g * 0.8, a.b * 0.8, a.a)
+}
+
+/// accent 的低透明淡染 (派生而非魔法值): ghost 导航项的 hover 底色。
+///
+/// 白玻璃侧栏上 `surface_variant` 与合成底色几乎同值, 亮度型 hover 不可辨;
+/// 带色相偏移的 accent wash 才能在玻璃上读出悬停态。
+fn accent_wash(t: &LightTheme, alpha: f32) -> Color {
+    let a = t.accent();
+    Color::rgba(a.r, a.g, a.b, alpha)
+}
+
+/// 侧边栏：分类导航;未选中项 ghost (透明底 + 深色字),选中项实心 accent + 白字 + 左缘竖条。
+fn sidebar(t: &LightTheme) -> impl Widget + 'static {
+    let mut col = Column::new().gap(t.spacing_sm()).cross_stretch();
+    for (i, name) in CATEGORIES.iter().enumerate() {
+        let name = *name;
+        let accent = t.accent();
+        let strong = accent_strong(t);
+        let hover_bg = accent_wash(t, 0.12);
+        let idle_text = t.text_primary();
+        let marker = t.surface();
+        col = col.child(NavItem::new(
+            i,
+            marker,
+            Button::themed(
+                t,
+                Text::new(name)
+                    .font_size(t.font_size_body())
+                    .bind_color(move |s: &Showcase| {
+                        if s.selected == i {
+                            Color::WHITE
+                        } else {
+                            idle_text
+                        }
+                    }),
             )
-            .fill(palette_grid(), 6)
-            .fill(rounded_row(), 2)
-            .child(counter_row())
-            .child(input_row())
-            .child(textarea_row())
-            .child(keyboard_row())
+            .bind_color(move |s: &Showcase| {
+                if s.selected == i {
+                    accent
+                } else {
+                    Color::TRANSPARENT
+                }
+            })
+            .bind_hover_color(
+                move |s: &Showcase| {
+                    if s.selected == i { strong } else { hover_bg }
+                },
+            )
+            .bind_focus_color(move |s: &Showcase| {
+                if s.selected == i {
+                    Color::WHITE
+                } else {
+                    accent
+                }
+            })
+            .on_click(move || Msg::Select(i)),
+        ));
+    }
+    UiBox::themed(t)
+        .radius(t.radius_lg())
+        .width(160.0)
+        .child(Padding::all(t.spacing_md(), col))
+}
+
+/// 构建组件树 (保留模式：树只建一次，数据每帧同步)。
+fn build_tree() -> Node {
+    let t = theme();
+    widget::node(
+        Column::new()
             .child(
+                TitleBar::themed(&t, "danqing 丹青")
+                    .on_close(|| WindowAction::Close)
+                    .on_minimize(|| WindowAction::Minimize)
+                    .on_maximize(|| WindowAction::MaximizeOrRestore)
+                    .on_drag(|| WindowAction::Drag),
+            )
+            .fill(
                 Row::new()
-                    .gap(12.0)
+                    .child(Padding::all(t.spacing_lg(), sidebar(&t)))
+                    // 分类面板：四个页面常驻实例化，Switcher 只切换可见性。
                     .fill(
-                        UiBox::new(Color::from_srgb8(0xE6, 0x4C, 0x9F))
-                            .height(90.0)
-                            .radius(20.0),
-                        2,
-                    )
-                    .fill(
-                        UiBox::new(Color::from_srgb8(0x9F, 0x4C, 0xE6))
-                            .height(90.0)
-                            .radius(40.0),
+                        Switcher::new()
+                            .child(page_base(&t))
+                            .child(page_layout(&t))
+                            .child(page_form(&t))
+                            .child(page_view(&t))
+                            .bind(|s: &Showcase| s.selected),
                         1,
-                    )
-                    .fill(UiBox::new(Color::WHITE).height(90.0).radius(20.0), 1),
+                    ),
+                1,
             ),
-    ))
+    )
 }
 
 fn main() -> anyhow::Result<()> {
@@ -344,8 +577,20 @@ fn main() -> anyhow::Result<()> {
         last_key: String::from("-"),
         input_value: String::new(),
         textarea_value: String::new(),
+        selected: 0,
     };
-    danqing::run_app(danqing::WindowConfig::default(), &mut app)?;
+
+    let t = theme();
+    let background = BackgroundConfig::with_image("assets/background/gradient.png")
+        .scale(ScaleMode::Cover)
+        .with_glow("assets/background/glow.png", 0.25)
+        .with_noise("assets/background/noise.png", 0.06);
+    let config = danqing::WindowConfig {
+        clear_color: t.background(),
+        background,
+        ..danqing::WindowConfig::default()
+    };
+    danqing::run_app(config, &mut app)?;
     Ok(())
 }
 
