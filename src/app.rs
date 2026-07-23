@@ -46,6 +46,11 @@ pub trait App: Any {
     /// 未被组件树消费的鼠标事件也会到达这里。
     fn event(&mut self, _event: &Event) {}
 
+    /// 每帧心跳: 在 `sync` 之前调用, 驱动计时 / 过渡动画等时间相关状态。
+    ///
+    /// 默认空实现;需要逐帧推进状态的应用 (如番茄钟) 覆盖之。
+    fn tick(&mut self, _ctx: &AnimationCtx) {}
+
     /// 每帧背景状态: 场景选择 / 淡化进度 / 清屏色。
     ///
     /// 默认 `None` —— 保持 `BackgroundConfig` 初始化时的静态背景

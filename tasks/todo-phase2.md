@@ -20,7 +20,7 @@
 - [ ] showcase 人工回归;4 张场景图人工 review
 
 ## Phase 3: POC 组装与终验
-- [ ] **Task 6** POC 界面组装(依赖 2/3/4/5)— 计时全功能 + 场景即时切换,wgpu 校验层无错误
+- [x] **Task 6** POC 界面组装(依赖 2/3/4/5)— 计时全功能 + 场景即时切换,wgpu 校验层无错误
 - [ ] **Task 7** 过渡动画 + 色调流动 + 4 场景对比度护栏 + spec 终验(依赖 6)
 
 ### ✅ Checkpoint Complete: 阶段 2 POC 关闭

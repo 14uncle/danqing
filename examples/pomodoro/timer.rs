@@ -9,10 +9,6 @@
 //! - `toggle` 在开始 / 暂停间切换 (开始即恢复);
 //! - `reset` 回到专注 25:00 停止态;
 //! - tick 越过终点时余量带入下一阶段 (晚到的帧不吃时间)。
-//!
-//! NOTE: Task 3 骨架只消费 `new`/`display`, 完整 API 由 Task 6 界面组装接入;
-//! 届时移除本模块的 `allow(dead_code)`。
-#![allow(dead_code)]
 
 use std::time::Duration;
 

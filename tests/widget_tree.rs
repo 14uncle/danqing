@@ -306,6 +306,47 @@ fn fit_box_with_child_wraps_content_height() {
 }
 
 #[test]
+fn fill_center_with_fill_max_centers_child_across_full_cross() {
+    // Fill 子项的交叉轴约束是宽松的 (0..容器交叉尺寸), 默认 Center 在
+    // 宽松轴上包裹内容, 导致内容贴边而非居中。`fill_max` 让 Center 占满
+    // 父组件提供的全部空间, 子组件在其中居中 (番茄钟倒计时块用法)。
+    let mut texts = danqing::TextBatch::new();
+    let screen = Size::new(960.0, 640.0);
+    let green = Color::from_srgb8(0x4C, 0xE6, 0xC3);
+    let mut tree = widget::node(Column::new().fill(
+        Center::new(UiBox::new(green).size(200.0, 100.0)).fill_max(),
+        1,
+    ));
+
+    let size = tree.layout(Constraints::tight(screen), &mut texts);
+    let mut rects = danqing::RectBatch::new();
+    tree.paint(Rect::new(Point::ZERO, size), &mut rects, &mut texts);
+
+    let card = rects
+        .instance_rects()
+        .into_iter()
+        .zip(rects.instance_colors())
+        .find(|(_, c)| {
+            (c[0] - green.r).abs() < 0.001
+                && (c[1] - green.g).abs() < 0.001
+                && (c[2] - green.b).abs() < 0.001
+        })
+        .map(|(r, _)| r)
+        .expect("应找到绿色卡片");
+
+    assert!(
+        (card.origin.x - (screen.width - 200.0) / 2.0).abs() < 0.001,
+        "卡片应水平居中, 实际 x={}",
+        card.origin.x
+    );
+    assert!(
+        (card.origin.y - (screen.height - 100.0) / 2.0).abs() < 0.001,
+        "卡片应垂直居中, 实际 y={}",
+        card.origin.y
+    );
+}
+
+#[test]
 fn fit_center_in_column_does_not_push_later_children_off_screen() {
     // Center 在 Flow 中作为 Fit 子项时会占满父约束上限;
     // 若把它当作普通 child 放在 Column 里,会独占全部剩余高度,

@@ -611,8 +611,10 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     Size::new(size.width as f32, size.height as f32)
                 });
                 if let Some(screen) = screen {
-                    self.tree.sync(self.app);
                     let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
+                    // 每帧心跳先行: 计时 / 过渡动画推进后, 绑定闭包在 sync 中读到新状态。
+                    self.app.tick(&ctx);
+                    self.tree.sync(self.app);
                     self.tree.animate(&ctx);
                     self.focus.rebuild(&self.tree);
                     let prev = self.focus.previous().map(|p| p.to_vec());

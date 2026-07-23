@@ -15,8 +15,12 @@ use crate::{Color, Constraints, Rect, Size, Theme};
 ///
 /// 无子组件时默认占满父组件给的最大尺寸; 有子组件时未显式指定的维度
 /// 随子组件内容收缩 (卡片语义); 也可指定显式宽高强制固定尺寸。
+/// 颜色绑定闭包: 每帧从类型擦除的应用状态产出背景色 (与 `Button::bind_color` 同构)。
+type ColorBinding = std::boxed::Box<dyn Fn(&dyn std::any::Any) -> Color>;
+
 pub struct Box {
     color: Color,
+    color_binding: Option<ColorBinding>,
     radius: f32,
     width: Option<f32>,
     height: Option<f32>,
@@ -35,6 +39,7 @@ impl Box {
     pub fn new(color: Color) -> Self {
         Self {
             color,
+            color_binding: None,
             radius: 0.0,
             width: None,
             height: None,
@@ -57,6 +62,17 @@ impl Box {
     /// 设置边框颜色。
     pub fn border_color(mut self, color: Color) -> Self {
         self.border_color = Some(color);
+        self
+    }
+
+    /// 绑定背景色: 每帧从应用状态读取 (场景色调流动等);设置后覆盖静态值。
+    pub fn bind_color<S: 'static>(mut self, f: impl Fn(&S) -> Color + 'static) -> Self {
+        self.color_binding = Some(std::boxed::Box::new(move |state: &dyn std::any::Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("Box 颜色绑定的状态类型不匹配");
+            f(state)
+        }));
         self
     }
 
@@ -136,6 +152,9 @@ impl Box {
 
 impl Widget for Box {
     fn sync(&mut self, state: &dyn std::any::Any) {
+        if let Some(binding) = &self.color_binding {
+            self.color = binding(state);
+        }
         if let Some(child) = &mut self.child {
             child.sync(state);
         }
