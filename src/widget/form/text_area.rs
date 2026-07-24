@@ -190,6 +190,12 @@ impl TextArea {
         self.color
     }
 
+    /// 当前光标所在行索引(测试用)。
+    #[cfg(test)]
+    pub(crate) fn cursor_line_index(&self) -> usize {
+        self.cursor_line()
+    }
+
     /// 当前圆角半径(测试用)。
     #[cfg(test)]
     pub(crate) fn radius_value(&self) -> f32 {
@@ -695,6 +701,40 @@ mod tests {
         t.insert("c");
         assert_eq!(t.value(), "ab\nc");
         assert_eq!(t.cursor(), 4);
+    }
+
+    #[test]
+    fn enter_after_first_line_advances_caret_to_second_line() {
+        // 回归测试:第一行输入字符后按 Enter,
+        // 光标必须落在第二行首列(而非 fallback 回第一行行首)。
+        // 根因:`break_lines` 未为末尾 '\n' 产生占位空行。
+        let mut t = TextArea::new();
+        let mut texts = crate::TextBatch::new();
+        t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
+
+        t.insert("ab");
+        assert_eq!(t.cursor(), 2);
+
+        t.event(
+            &Event::Key {
+                key: Key::Named(NamedKey::Enter),
+                pressed: true,
+                shift: false,
+                ctrl: false,
+            },
+            area(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "ab\n");
+        assert_eq!(t.cursor(), 3);
+
+        // 下一帧 layout 才会重建行;测试中显式触发。
+        t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
+
+        // 光标应在新行(索引 1)而非第一行(索引 0)。
+        // paint() 通过同一个 cursor_line() 推 caret_y,
+        // 因此本断言同时覆盖布局与渲染两个面。
+        assert_eq!(t.cursor_line_index(), 1);
     }
 
     #[test]
