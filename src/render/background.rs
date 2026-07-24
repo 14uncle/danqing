@@ -5,9 +5,11 @@
 //! 绘制在组件树之下。
 //!
 //! 当前支持一张主背景图与可选的光晕、噪声叠加图, 并提供 Stretch/Fit/Cover
-//! 三种缩放模式。图片在 `Context` 初始化时解码并上传为 wgpu 纹理,
-//! 每帧按窗口尺寸重新计算顶点坐标与 UV。
+//! 三种缩放模式。多场景模式下, 场景图按 2 槽 LRU 懒加载:
+//! `new` 阶段只预读 PNG 字节 (~1MB), 真正上传为 wgpu 纹理推迟到 `set_frame`
+//! 调用时, 同时常驻最多 2 张 (`from` + `to` 跨淡化的两端)。
 
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use crate::render::DrawTarget;
@@ -135,6 +137,8 @@ struct BackgroundTexture {
 const LAYER_COUNT: usize = 3;
 /// 每层 quad 的顶点数。
 const VERTS_PER_LAYER: usize = 6;
+/// 场景纹理 LRU 容量: `from` + `to` 跨淡化的两端, 2 槽即够。
+const SCENE_CACHE_CAPACITY: usize = 2;
 
 /// 背景渲染管线。
 ///
@@ -144,6 +148,10 @@ const VERTS_PER_LAYER: usize = 6;
 ///
 /// 场景层 (层 0) 绑定 from/to 两张场景图按 fade 交叉淡化;
 /// 单图与叠加层把同一张图绑到两个纹理槽, fade 恒 0。
+///
+/// 场景纹理走 2 槽 LRU: `scene_bytes` 在 `new` 阶段全量预读 (~1MB),
+/// `device` / `queue` / `texture_layout` clone 持有用于按需创建纹理,
+/// `scene_cache` + `lru_order` 实现按访问顺序的纹理驻留。
 pub struct BackgroundPipeline {
     pipeline: wgpu::RenderPipeline,
     /// 每层一个 uniform buffer (不透明度 + 淡化进度)。
@@ -151,9 +159,23 @@ pub struct BackgroundPipeline {
     uniform_binds: [wgpu::BindGroup; LAYER_COUNT],
     /// 三层 quad 共用的顶点缓冲 (每层 [`VERTS_PER_LAYER`] 个顶点)。
     vertex_buf: wgpu::Buffer,
-    /// 场景纹理列表 (单图路径视为只有一个场景的列表)。
-    scenes: Vec<BackgroundTexture>,
+    /// 场景图原始 PNG 字节 (按场景索引;`new` 阶段预读, 总量约 1MB)。
+    scene_bytes: Vec<Vec<u8>>,
+    /// 场景图原始尺寸 (供纹理创建时 `Extent3d` 使用, 与 `scene_bytes` 平行)。
+    scene_dims: Vec<(u32, u32)>,
+    /// 场景纹理 LRU: 命中 [`SCENE_CACHE_CAPACITY`] 槽。
+    scene_cache: HashMap<usize, BackgroundTexture>,
+    /// 场景访问顺序 (front = 最近, back = 最久未用, 淘汰时弹出 back)。
+    lru_order: VecDeque<usize>,
+    /// 设备句柄 (clone 持有, 用于按需创建纹理; wgpu 30 内部 Arc, clone 廉价)。
+    device: wgpu::Device,
+    /// 队列句柄 (clone 持有, 用于按需上传纹理)。
+    queue: wgpu::Queue,
+    /// 纹理 bind group layout (clone 持有, 用于按需创建 bind group)。
+    texture_layout: wgpu::BindGroupLayout,
+    /// 光晕叠加纹理 (单一资源, 启动时即用, 不进 LRU)。
     glow: Option<BackgroundTexture>,
+    /// 噪声叠加纹理 (单一资源, 启动时即用, 不进 LRU)。
     noise: Option<BackgroundTexture>,
     scale: ScaleMode,
     glow_opacity: f32,
@@ -292,10 +314,25 @@ impl BackgroundPipeline {
         } else {
             config.image.as_deref().into_iter().collect()
         };
-        let scenes: Vec<BackgroundTexture> = scene_paths
-            .into_iter()
-            .filter_map(|p| load_texture(device, queue, &texture_layout, p, "scene"))
-            .collect();
+        // 预读所有场景的 PNG 字节与尺寸; 真正的 GPU 纹理推迟到
+        // `set_frame` 调用时按需创建 (见 `ensure_loaded`)。
+        let mut scene_bytes = Vec::with_capacity(scene_paths.len());
+        let mut scene_dims = Vec::with_capacity(scene_paths.len());
+        for path in &scene_paths {
+            match read_scene_bytes(path) {
+                Some((bytes, dims)) => {
+                    scene_bytes.push(bytes);
+                    scene_dims.push(dims);
+                }
+                None => {
+                    // 预读失败: 占位空字节, 后续 ensure_loaded 会再次失败
+                    // 并按 log+panic 路径暴露, 不静默跳过避免索引错位。
+                    log::warn!("场景图预读失败, 将在按需加载时再次尝试: {}", path.display());
+                    scene_bytes.push(Vec::new());
+                    scene_dims.push((0, 0));
+                }
+            }
+        }
         let glow = config
             .glow
             .as_deref()
@@ -310,7 +347,13 @@ impl BackgroundPipeline {
             uniform_bufs,
             uniform_binds,
             vertex_buf,
-            scenes,
+            scene_bytes,
+            scene_dims,
+            scene_cache: HashMap::new(),
+            lru_order: VecDeque::new(),
+            device: device.clone(),
+            queue: queue.clone(),
+            texture_layout: texture_layout.clone(),
             glow,
             noise,
             scale: config.scale,
@@ -321,13 +364,124 @@ impl BackgroundPipeline {
     }
 
     /// 是否存在可绘制的背景。
+    ///
+    /// 基于"已配置的 scene_bytes 项", 而非"已加载的 GPU 纹理" ——
+    /// 框架应用层关心"是否有背景要画", 不关心此刻是否 decode 完毕。
     pub fn has_background(&self) -> bool {
-        !self.scenes.is_empty()
+        !self.scene_bytes.is_empty()
     }
 
     /// 写入应用层产出的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
+    ///
+    /// 同时确保 `from` 和 `to` 两个场景的 GPU 纹理在 LRU 中 (按需创建,
+    /// 必要时淘汰最久未用项); 这样 `draw` 可以假设两端纹理就绪。
     pub fn set_frame(&mut self, frame: BackgroundFrame) {
         self.frame = Some(frame);
+        self.ensure_loaded(frame.from);
+        self.ensure_loaded(frame.to);
+    }
+
+    /// 确保指定场景索引的 GPU 纹理在 LRU 中。
+    ///
+    /// 命中: 刷新 LRU 顺序 (移到 front) 后返回。
+    /// 未命中: 从 `scene_bytes` decode 并创建 wgpu 纹理, 插入缓存;
+    /// 若缓存已满, 弹出 `lru_order` 尾部索引并丢弃其 `BackgroundTexture`
+    /// (wgpu 通过 `Drop` 自动释放对应 GPU 资源)。
+    fn ensure_loaded(&mut self, idx: usize) {
+        // 越界或预读失败的空字节: 静默跳过, draw 端处理缺失分支。
+        if idx >= self.scene_bytes.len() || self.scene_bytes[idx].is_empty() {
+            return;
+        }
+        // LRU 命中: 移到 front, 立即返回。
+        if self.scene_cache.contains_key(&idx) {
+            if let Some(pos) = self.lru_order.iter().position(|&i| i == idx) {
+                self.lru_order.remove(pos);
+            }
+            self.lru_order.push_front(idx);
+            return;
+        }
+        // 未命中: decode + 创建纹理。
+        let bytes = self.scene_bytes[idx].clone();
+        let dims = self.scene_dims[idx];
+        let tex = self.create_scene_texture(&bytes, dims, idx);
+        // 缓存已满时淘汰 LRU 尾。
+        while self.scene_cache.len() >= SCENE_CACHE_CAPACITY {
+            if let Some(evicted) = self.lru_order.pop_back() {
+                self.scene_cache.remove(&evicted);
+            } else {
+                break;
+            }
+        }
+        self.scene_cache.insert(idx, tex);
+        self.lru_order.push_front(idx);
+    }
+
+    /// 从已预读的字节创建 wgpu 纹理 (懒加载的实际解码上传)。
+    fn create_scene_texture(
+        &self,
+        bytes: &[u8],
+        dims: (u32, u32),
+        idx: usize,
+    ) -> BackgroundTexture {
+        let (width, height) = dims;
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(&format!("scene[{idx}] texture")),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some(&format!("scene[{idx}] sampler")),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("scene[{idx}] bind group")),
+            layout: &self.texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            size,
+        );
+        BackgroundTexture {
+            texture,
+            view,
+            bind_group,
+            width,
+            height,
+        }
     }
 
     /// 绘制背景层 (在 RectBatch 之前调用)。
@@ -343,7 +497,7 @@ impl BackgroundPipeline {
             fade: 0.0,
             clear_color: target.clear_color,
         });
-        let Some((from, to, fade)) = resolve_frame(frame, self.scenes.len()) else {
+        let Some((from, to, fade)) = resolve_frame(frame, self.scene_bytes.len()) else {
             return;
         };
 
@@ -373,17 +527,20 @@ impl BackgroundPipeline {
         pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
 
         // 层 0 场景 (from/to 交叉淡化) / 层 1 光晕 / 层 2 噪声
-        self.draw_layer(
-            &mut pass,
-            queue,
-            target,
-            0,
-            &self.scenes[from],
-            &self.scenes[to],
-            self.scale,
-            1.0,
-            fade,
-        );
+        // LRU 缺失分支: set_frame 已尝试 ensure_loaded, 但越界或预读
+        // 失败仍可能留下空槽, 这里做优雅降级 — 单图无淡化, 缺则跳过。
+        let tex_from = self.scene_cache.get(&from);
+        let tex_to = self.scene_cache.get(&to);
+        if let (Some(tex_from), Some(tex_to)) = (tex_from, tex_to) {
+            self.draw_layer(
+                &mut pass, queue, target, 0, tex_from, tex_to, self.scale, 1.0, fade,
+            );
+        } else if let Some(only) = tex_from.or(tex_to) {
+            // 仅一端就绪: 单图绘制, fade=0 (无淡化)
+            self.draw_layer(
+                &mut pass, queue, target, 0, only, only, self.scale, 1.0, 0.0,
+            );
+        } // 两端都缺失: 不画场景层, 让 clear_color 透出
         if let Some(glow) = &self.glow {
             self.draw_layer(
                 &mut pass,
@@ -533,6 +690,18 @@ impl BackgroundPipeline {
             bytemuck::cast_slice(&[opacity, fade, 0.0, 0.0f32]),
         );
     }
+}
+
+/// 读取 PNG 文件, 解析为 RGBA8 字节与 (宽, 高); 失败时返回 None 并记录警告。
+///
+/// 与 `load_texture` 不同: 本函数只 decode PNG, 不接触 wgpu 设备, 是
+/// `BackgroundPipeline::new` 阶段预读场景字节的纯 CPU 操作。
+/// `BackgroundTexture` 的真正创建推迟到 `ensure_loaded` 懒加载路径。
+fn read_scene_bytes(path: &Path) -> Option<(Vec<u8>, (u32, u32))> {
+    let data = std::fs::read(path).ok()?;
+    let img = image::load_from_memory(&data).ok()?.into_rgba8();
+    let (width, height) = img.dimensions();
+    Some((img.into_raw(), (width, height)))
 }
 
 /// 加载 PNG 并创建纹理与 bind group; 失败时返回 None 并记录警告。
