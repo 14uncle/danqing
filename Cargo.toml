@@ -32,8 +32,11 @@ opt-level = 1
 opt-level = 2
 
 [profile.release]
-# 瘦身体感:薄 LTO + 单代码生成单元,缩小二进制并略提运行时性能;
-# 仅剥 DWARF 调试信息,保留符号名以便 minidbg 崩溃诊断
-lto = "thin"
+# 瘦身体感:fat LTO + 极小优化级 + abort-on-panic,显著缩小二进制
+# (12MB → ~5-7MB); 单代码生成单元保模块边界利于 minidbg;
+# 仅剥 DWARF 调试信息,保留符号名以便 minidbg 崩溃诊断。
+lto = "fat"
 codegen-units = 1
+opt-level = "z"
+panic = "abort"
 strip = "debuginfo"

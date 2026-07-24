@@ -4,7 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-丹青 (danqing) 是一个 Rust 跨平台自绘 UI 框架,使用 `winit` 0.30 处理窗口与事件,`wgpu` 30 自绘,保留模式组件树。基础里程碑 M1~M3(渲染与组件树、焦点与输入、滚动与多行文本)已关闭,文档归档在 `tasks/archive/`;**阶段 1 —— 设计系统 + 品牌视觉**已关闭(玉色 accent、破框朱砂 LOGO、毛玻璃主题落地)。**阶段 2 将落地首个 POC——专注陪伴工具(番茄钟)**,采用潮汐式场景沉浸美学(场景大图为主角、色调随场景流动、UI 退后);产品分专注陪伴/效率工具两族,美学剂量不同,剪贴板历史管理器为第二 POC。转向决策见 `docs/ideas/danqing-scene-immersion-pivot.md`。
+丹青 (danqing) 是一个 Rust 跨平台自绘 UI 框架,使用 `winit` 0.30 处理窗口与事件,`wgpu` 30 自绘,保留模式组件树。基础里程碑 M1~M3(渲染与组件树、焦点与输入、滚动与多行文本)与阶段 1(设计系统 + 品牌视觉)、阶段 2(专注陪伴 POC:番茄钟 × 场景沉浸美学)均已关闭。下一步候选:第二 POC 剪贴板历史管理器(效率工具族,美学剂量低于专注陪伴族),或用户另行指定。转向决策见 `docs/ideas/danqing-scene-immersion-pivot.md`。
+
+## Current State
+
+- **里程碑状态**: M1~M3(渲染/焦点/滚动)+ 阶段 1(设计系统与品牌视觉)+ 阶段 2(番茄钟 POC,场景沉浸美学)均已关闭并归档到 `tasks/archive/`。最新提交集中在阶段 2 收尾后的小修补(格式化、共享 `init_log`、性能基准、内嵌黑体瘦身、第 5 场景森林)。
+- **当前分支**: `dev`(主分支 `master`);便携包诊断日志已落地,规格见 `docs/specs/portable-diagnostics-logging.md`。
+- **下一步**: 未定。候选为第二 POC 剪贴板历史管理器(效率工具族,美学剂量低于专注陪伴族),或用户另行指定。**未获用户指示时不要启动新 POC**。
+- **性能门槛**: 启动 ≤1s、常驻内存 WS ≤360MB(核显记账);测量用 `tools/benchmark.ps1`。
+- **已观察、决定不修的项目**: 见 `## Decided NOT to Change`。
 
 ## Common commands
 
@@ -65,6 +73,26 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 - `src/theme.rs`(阶段 1 新增): 设计 token(颜色、字体、间距、圆角、阴影、动效曲线)与 `Theme` trait。
 
 依赖方向只允许向下: `widget/`、`layout.rs`、`event.rs`、`text/` 不得依赖 `winit`/`wgpu`。
+
+## Project Map
+
+按职责分块的文件清单(处理某块时按文件名 recall):
+
+- **平台适配层**(只允许接触 OS/GPU):
+  - `src/window.rs` — winit 事件循环、IME/剪贴板、焦点路由、每帧 `request_redraw`
+  - `src/render/{rect,text,background}.rs` + 同名 `.wgsl` — 渲染管线(矩形 SDF + 文本图集 + 多场景背景)
+- **纯逻辑核心**(不得依赖 winit/wgpu):
+  - `src/app.rs` — `App` trait + `tick()`/`background_frame()` 默认方法
+  - `src/event.rs` — 平台无关事件
+  - `src/layout.rs` — 值类型 + `Color::lerp`/`contrast_ratio`/`composite_over`
+  - `src/theme.rs` — `Theme` trait + `ScenePalette`/`SceneTheme`/`SceneSpec` + `LightTheme` + `Easing`
+  - `src/text/line_layout.rs` — 多行排版(显式换行 + soft-wrap)
+  - `src/text/{atlas,font}.rs` — 图集分配 + 字体加载(运行时读取 `assets/`)
+- **组件库**: `src/widget/base/`(Button/Text)、`src/widget/layout/`(Box/Column/Row/Padding/Center,共享 `flow.rs`)、`src/widget/form/`(TextInput/TextArea,共享 `text_editor.rs`)、`src/widget/view/`(Scrollable/Switcher)、`src/widget/focus.rs`、`src/widget/title_bar.rs`
+- **集成测试**: `tests/{event_dispatch,focus_input,widget_tree,switcher,title_bar_window,assets,design_system,hover_debug}.rs`
+- **示例**: `examples/showcase.rs`(持续生长,以用代测);`examples/pomodoro/`(`timer.rs`/`scenes.rs`/`fader.rs`/`main.rs`,阶段 2 POC);`examples/common/log.rs`(共享 `init_log`);`examples/minimal.rs`(最小骨架);`examples/mem_probe.rs`(内存探针)
+- **资产**: `assets/fonts/`(内嵌 OFL 黑体优先);`assets/logo/`;`assets/background/`(渐变 + 噪声);`assets/scenes/`(5 场景 PNG:篝火/海/雨/山/森林)
+- **文档**: `docs/specs/`(规格);`docs/ideas/`(灵感/one-pager);`tasks/`(计划/进度);`tasks/archive/`(已关闭里程碑)
 
 ## Build notes
 
