@@ -3,8 +3,8 @@
 
 //! 番茄钟状态机 (纯逻辑)。
 //!
-//! 时间由外部注入 (`Duration` 累计值, 通常来自 `AnimationCtx::elapsed`),
-//! 不读 wall-clock, 可完整单元测试。语义:
+//! 时间由外部注入 (`Duration` 累计值，通常来自 `AnimationCtx::elapsed`),
+//! 不读 wall-clock, 可完整单元测试。语义：
 //! - 固定专注 25:00 / 休息 5:00, 阶段结束自动流转并自动开始下一阶段;
 //! - `toggle` 在开始 / 暂停间切换 (开始即恢复);
 //! - `reset` 回到专注 25:00 停止态;
@@ -70,7 +70,7 @@ pub struct Pomodoro {
 }
 
 impl Pomodoro {
-    /// 创建番茄钟: 专注 25:00 停止态。
+    /// 创建番茄钟：专注 25:00 停止态。
     pub fn new() -> Self {
         Self {
             phase: Phase::Focus,
@@ -90,7 +90,7 @@ impl Pomodoro {
         self.run == Run::Running
     }
 
-    /// 开始 / 暂停切换: Idle 或 Paused 进入计时, Running 快照剩余并暂停。
+    /// 开始 / 暂停切换：Idle 或 Paused 进入计时，Running 快照剩余并暂停。
     pub fn toggle(&mut self, now: Duration) {
         match self.run {
             Run::Idle | Run::Paused => {
@@ -105,7 +105,7 @@ impl Pomodoro {
         }
     }
 
-    /// 重置: 回到专注 25:00 停止态。
+    /// 重置：回到专注 25:00 停止态。
     pub fn reset(&mut self) {
         *self = Self::new();
     }
@@ -222,7 +222,7 @@ mod tests {
     fn overshoot_carries_into_next_phase() {
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
-        // 帧晚到 3 秒: 下一阶段从原终点顺延, 余量不亏。
+        // 帧晚到 3 秒：下一阶段从原终点顺延，余量不亏。
         assert!(p.tick(secs(25 * 60 + 3)));
         assert_eq!(p.remaining(secs(25 * 60 + 3)), secs(5 * 60 - 3));
     }
@@ -242,8 +242,8 @@ mod tests {
     fn huge_overshoot_rolls_multiple_phases() {
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
-        // 58 分钟后回来: 专注(0-25) → 休息(25-30) → 专注(30-55) → 休息(55-60),
-        // 当前处于第二段休息, 剩 2 分钟。
+        // 58 分钟后回来：专注 (0-25) → 休息 (25-30) → 专注 (30-55) → 休息 (55-60),
+        // 当前处于第二段休息，剩 2 分钟。
         assert!(p.tick(secs(58 * 60)));
         assert_eq!(p.phase(), Phase::Break);
         assert_eq!(p.remaining(secs(58 * 60)), secs(2 * 60));
