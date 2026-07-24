@@ -16,7 +16,8 @@ use danqing::{
     App, BackgroundConfig, Color, Event, Key, LightTheme, NamedKey, Point, Rect, ScaleMode, Size,
     Theme, WindowAction,
 };
-use std::io::Write;
+#[path = "common/log.rs"]
+mod example_log;
 
 /// 键盘移动方块的区域尺寸。
 const KEYBOARD_AREA: Size = Size::new(300.0, 180.0);
@@ -563,7 +564,7 @@ fn build_tree() -> Node {
 }
 
 fn main() -> anyhow::Result<()> {
-    init_log();
+    example_log::init_log();
 
     let mut app = Showcase {
         count: 0,
@@ -586,20 +587,4 @@ fn main() -> anyhow::Result<()> {
     };
     danqing::run_app(config, &mut app)?;
     Ok(())
-}
-
-fn init_log() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format(|buf, record| {
-            let now = chrono::Local::now();
-            writeln!(
-                buf,
-                "{} {} [{}] {}",
-                now.format("%H:%M:%S%.3f"),
-                record.level(),
-                record.target(),
-                record.args()
-            )
-        })
-        .init();
 }
