@@ -4,7 +4,7 @@
 //! 丹青设计系统 token。
 //!
 //! 本模块定义 `Theme` trait、`LightTheme` 实现及颜色、字体、间距、圆角、阴影、动效曲线等 token。
-//! 所有值为纯逻辑, 不依赖平台或图形 API。
+//! 所有值为纯逻辑，不依赖平台或图形 API。
 
 use crate::{Color, Point};
 
@@ -33,7 +33,7 @@ pub enum Easing {
 impl Easing {
     /// 对进度 `t` 求值 (输入输出均夹到 0..1)。
     ///
-    /// `EaseInOut` 采用三次缓入缓出: 两端平缓、中段陡峭。
+    /// `EaseInOut` 采用三次缓入缓出：两端平缓、中段陡峭。
     pub fn eval(self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);
         match self {
@@ -49,10 +49,10 @@ impl Easing {
     }
 }
 
-/// 计算颜色的相对亮度 (WCAG 定义, 0.0 黑 ~ 1.0 白)。
+/// 计算颜色的相对亮度 (WCAG 定义，0.0 黑 ~ 1.0 白)。
 ///
 /// 输入视为 sRGB 编码 (与 [`Color::from_srgb8`] 的存储语义一致),
-/// 先逐通道解码为线性, 再按 Rec.709 权重加权。
+/// 先逐通道解码为线性，再按 Rec.709 权重加权。
 pub fn relative_luminance(color: Color) -> f32 {
     fn decode(c: f32) -> f32 {
         if c <= 0.04045 {
@@ -94,8 +94,8 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     fn surface(&self) -> Color;
     /// 输入区表面色 (TextInput/TextArea 背景)。
     ///
-    /// 比 `surface` 更实: 输入区以可读性优先,
-    /// 卡片可以透出背景营造玻璃感, 文字输入处不行。
+    /// 比 `surface` 更实：输入区以可读性优先，
+    /// 卡片可以透出背景营造玻璃感，文字输入处不行。
     fn surface_input(&self) -> Color;
     /// 次级表面色 (悬停、禁用背景)。
     fn surface_variant(&self) -> Color;
@@ -166,7 +166,7 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
 
 /// 浅色主题。
 ///
-/// 采用毛玻璃风格: 低饱和度背景 + 半透明白色表面 + 青绿(玉色)强调。
+/// 采用毛玻璃风格：低饱和度背景 + 半透明白色表面 + 青绿 (玉色) 强调。
 ///
 /// accent 取丹青矿物色中的深青绿/玉色 (#0F766E), 朱砂仅作品牌点睛 (logo), 不进 token。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -174,17 +174,17 @@ pub struct LightTheme;
 
 impl Theme for LightTheme {
     fn background(&self) -> Color {
-        // 与背景渐变 top 色一致的 fallback 清屏色 (微带青头, 与玉色 accent 同温)。
+        // 与背景渐变 top 色一致的 fallback 清屏色 (微带青头，与玉色 accent 同温)。
         Color::from_srgb8(240, 248, 246)
     }
 
     fn surface(&self) -> Color {
-        // 半透明白: 卡片浮在渐变背景上透出玻璃感。
+        // 半透明白：卡片浮在渐变背景上透出玻璃感。
         Color::rgba(1.0, 1.0, 1.0, 0.72)
     }
 
     fn surface_input(&self) -> Color {
-        // 接近纯白: 输入区文字可读性优先, 只允许一丝氛围透出。
+        // 接近纯白：输入区文字可读性优先，只允许一丝氛围透出。
         Color::rgba(1.0, 1.0, 1.0, 0.95)
     }
 
@@ -194,7 +194,7 @@ impl Theme for LightTheme {
     }
 
     fn accent(&self) -> Color {
-        // 深青绿/玉色 #0F766E: 丹青矿物色, 白底对比度 ~5:1。
+        // 深青绿/玉色 #0F766E: 丹青矿物色，白底对比度 ~5:1。
         Color::from_srgb8(15, 118, 110)
     }
 
@@ -248,7 +248,7 @@ impl Theme for LightTheme {
     }
 
     fn font_size_body(&self) -> u16 {
-        15
+        16
     }
 
     fn font_size_heading(&self) -> u16 {
@@ -323,7 +323,7 @@ impl Theme for LightTheme {
 /// 场景调色板。
 ///
 /// 由场景生成管线随场景大图一并产出 (见 `tools/export-scenes.py`);
-/// 明暗随场景流动: 暗场景 (篝火) 与亮场景 (海) 各给一套,
+/// 明暗随场景流动：暗场景 (篝火) 与亮场景 (海) 各给一套，
 /// 玻璃表面、文字、控件态须在两套下都成立。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScenePalette {
@@ -335,7 +335,7 @@ pub struct ScenePalette {
     pub text_primary: Color,
     /// 次级文字色 (阶段 / 场景名标注)。
     pub text_secondary: Color,
-    /// 玻璃表面色 (半透明, 控件条 / 卡片)。
+    /// 玻璃表面色 (半透明，控件条 / 卡片)。
     pub surface: Color,
     /// 输入区表面色 (比 surface 更实)。
     pub surface_input: Color,
@@ -346,7 +346,7 @@ pub struct ScenePalette {
 }
 
 impl ScenePalette {
-    /// 逐字段向另一调色板插值 (场景过渡动画用,`t` 夹到 0..1)。
+    /// 逐字段向另一调色板插值 (场景过渡动画用，`t` 夹到 0..1)。
     pub fn lerp(self, other: ScenePalette, t: f32) -> ScenePalette {
         ScenePalette {
             base: self.base.lerp(other.base, t),
@@ -361,7 +361,7 @@ impl ScenePalette {
     }
 }
 
-/// 场景规格: 生成管线产出的单个场景资产描述。
+/// 场景规格：生成管线产出的单个场景资产描述。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SceneSpec {
     /// 场景名 (如 "篝火")。
@@ -372,7 +372,7 @@ pub struct SceneSpec {
     pub palette: ScenePalette,
 }
 
-/// 场景主题: 由 [`ScenePalette`] 构造的跨明暗 [`Theme`] 实现。
+/// 场景主题：由 [`ScenePalette`] 构造的跨明暗 [`Theme`] 实现。
 ///
 /// 颜色 token 取自调色板; 选区 / 光标派生自 accent,
 /// 分割线 / 边框派生自文字色 (暗场景下自动变亮);
@@ -409,7 +409,7 @@ impl Theme for SceneTheme {
     }
 
     fn surface_variant(&self) -> Color {
-        // 悬停等次级表面: 玻璃合成到场景基调上的不透明色。
+        // 悬停等次级表面：玻璃合成到场景基调上的不透明色。
         composite_over(self.palette.surface, self.palette.base)
     }
 
@@ -426,7 +426,7 @@ impl Theme for SceneTheme {
     }
 
     fn divider(&self) -> Color {
-        // 跟随文字色: 暗场景分割线自动变亮。
+        // 跟随文字色：暗场景分割线自动变亮。
         let t = self.palette.text_primary;
         Color::rgba(t.r, t.g, t.b, 0.15)
     }
@@ -565,17 +565,17 @@ mod tests {
 
     #[test]
     fn light_theme_surface_is_translucent_glass() {
-        // 玻璃感护栏: surface 必须半透明, 让背景渐变透出; 又不能透明到丢失层次。
+        // 玻璃感护栏：surface 必须半透明，让背景渐变透出; 又不能透明到丢失层次。
         let a = LightTheme.surface().a;
         assert!(
             (0.6..=0.8).contains(&a),
-            "surface alpha 应在 0.6~0.8 玻璃区间, 实际 {a}"
+            "surface alpha 应在 0.6~0.8 玻璃区间，实际 {a}"
         );
     }
 
     #[test]
     fn light_theme_surface_input_is_more_solid_than_surface() {
-        // 输入区可读性优先: 输入框背景要比卡片更实。
+        // 输入区可读性优先：输入框背景要比卡片更实。
         let theme = LightTheme;
         assert!(theme.surface_input().a >= 0.9);
         assert!(theme.surface_input().a > theme.surface().a);
@@ -711,7 +711,7 @@ mod tests {
         assert!(theme.font_size_display() > theme.font_size_heading());
     }
 
-    /// 合成暗场景调色板 (参照篝火: 深底、近白文字、暗玻璃)。
+    /// 合成暗场景调色板 (参照篝火：深底、近白文字、暗玻璃)。
     fn sample_dark_palette() -> ScenePalette {
         ScenePalette {
             base: Color::from_srgb8(26, 16, 12),
@@ -725,7 +725,7 @@ mod tests {
         }
     }
 
-    /// 合成亮场景调色板 (参照海: 亮底、深色文字、白玻璃)。
+    /// 合成亮场景调色板 (参照海：亮底、深色文字、白玻璃)。
     fn sample_bright_palette() -> ScenePalette {
         ScenePalette {
             base: Color::from_srgb8(210, 235, 240),
@@ -816,7 +816,7 @@ mod tests {
 
     #[test]
     fn scene_guard_text_reads_on_both_backdrop_extremes() {
-        // 护栏方法学验证: 明暗两族合成调色板, 大字文字 vs 场景两极端 ≥ 3:1。
+        // 护栏方法学验证：明暗两族合成调色板，大字文字 vs 场景两极端 ≥ 3:1。
         for palette in [sample_dark_palette(), sample_bright_palette()] {
             for backdrop in [palette.backdrop_light, palette.backdrop_dark] {
                 let ratio = contrast_ratio(palette.text_primary, backdrop);
