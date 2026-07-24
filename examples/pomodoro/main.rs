@@ -7,6 +7,11 @@
 //! 场景大图为主角，中央大字倒计时，底部玻璃胶囊控件条，
 //! 场景 前/后 切换带 800ms 交叉淡化，色调随场景调色板流动。
 
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 mod fader;
 mod scenes;
 mod timer;
@@ -14,6 +19,7 @@ mod timer;
 #[path = "../common/log.rs"]
 mod example_log;
 
+use std::process::ExitCode;
 use std::time::Duration;
 
 use danqing::widget::{
@@ -187,9 +193,19 @@ fn control_pill(t: SceneTheme) -> impl widget::Widget {
         ))
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> ExitCode {
     example_log::init_log();
 
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            log::error!("应用启动失败：{err:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> anyhow::Result<()> {
     let mut app = PomodoroApp {
         timer: Pomodoro::new(),
         now: Duration::ZERO,

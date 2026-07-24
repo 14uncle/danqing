@@ -38,6 +38,24 @@ pub enum WindowError {
     Os(#[from] winit::error::OsError),
 }
 
+fn error_chain_messages(label: &str, error: &(dyn std::error::Error + 'static)) -> Vec<String> {
+    let mut messages = vec![format!("{label}：{error}")];
+    let mut source = error.source();
+    let mut depth = 1;
+    while let Some(error) = source {
+        messages.push(format!("  原因 {depth}：{error}"));
+        source = error.source();
+        depth += 1;
+    }
+    messages
+}
+
+fn log_error_chain(label: &str, error: &(dyn std::error::Error + 'static)) {
+    for message in error_chain_messages(label, error) {
+        log::error!("{message}");
+    }
+}
+
 /// 窗口初始配置。
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
@@ -495,7 +513,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         let window = match event_loop.create_window(attrs) {
             Ok(window) => Arc::new(window),
             Err(err) => {
-                log::error!("创建窗口失败：{err}");
+                log_error_chain("创建窗口失败", &err);
                 event_loop.exit();
                 return;
             }
@@ -516,7 +534,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 log::info!("渲染上下文初始化耗时：{:?}", ctx_start.elapsed());
             }
             Err(err) => {
-                log::error!("初始化渲染上下文失败：{err}");
+                log_error_chain("初始化渲染上下文失败", &err);
                 event_loop.exit();
                 return;
             }
@@ -738,5 +756,48 @@ mod tests {
         let path = PathBuf::from("assets").join("logo").join("nonexistent.png");
         let icon = load_icon_from_png(&path);
         assert!(icon.is_err());
+    }
+
+    #[test]
+    fn error_chain_messages_include_all_sources() {
+        #[derive(Debug)]
+        struct TestError {
+            message: &'static str,
+            source: Option<Box<TestError>>,
+        }
+
+        impl std::fmt::Display for TestError {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str(self.message)
+            }
+        }
+
+        impl std::error::Error for TestError {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                self.source
+                    .as_deref()
+                    .map(|source| source as &(dyn std::error::Error + 'static))
+            }
+        }
+
+        let error = TestError {
+            message: "outer",
+            source: Some(Box::new(TestError {
+                message: "middle",
+                source: Some(Box::new(TestError {
+                    message: "leaf",
+                    source: None,
+                })),
+            })),
+        };
+
+        assert_eq!(
+            error_chain_messages("初始化渲染上下文失败", &error),
+            vec![
+                String::from("初始化渲染上下文失败：outer"),
+                String::from("  原因 1：middle"),
+                String::from("  原因 2：leaf"),
+            ]
+        );
     }
 }

@@ -22,8 +22,12 @@ use winit::window::Window as WinitWindow;
 use crate::Color;
 
 /// 根据平台选择单一主 backend，避免实例创建时扫描多个后端。
+///
+/// Windows 固定走 DX12：`Backends::PRIMARY` 会同时拉起 Vulkan 与 DX12
+/// 两套后端加载器（各自的驱动 DLL 与分配），常驻内存更高；DX12 在
+/// Win10+ 全平台可用、核显驱动最省，单后端与本注释意图一致。
 #[cfg(target_os = "windows")]
-const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::PRIMARY;
+const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::DX12;
 #[cfg(target_os = "macos")]
 const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::METAL;
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -100,9 +104,11 @@ impl Context {
         background: &BackgroundConfig,
     ) -> Result<Self, RenderError> {
         let size = window.inner_size();
+        let flags = instance_flags();
+        log::info!("创建 wgpu instance：backends={DEFAULT_BACKENDS:?}, flags={flags:?}");
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: DEFAULT_BACKENDS,
-            flags: instance_flags(),
+            flags,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let surface = instance.create_surface(window)?;
@@ -115,13 +121,28 @@ impl Context {
                 ..Default::default()
             })
             .await?;
-        log::info!("GPU 适配器：{}", adapter.get_info().name);
+        let adapter_info = adapter.get_info();
+        log::info!(
+            "GPU 适配器：name={}, type={:?}, backend={:?}, vendor=0x{:04x}, device=0x{:04x}, driver={}, driver_info={}",
+            adapter_info.name,
+            adapter_info.device_type,
+            adapter_info.backend,
+            adapter_info.vendor,
+            adapter_info.device,
+            adapter_info.driver,
+            adapter_info.driver_info
+        );
+        log::info!("开始请求 GPU device");
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("danqing device"),
+                // 常驻内存优先: 让分配器减少预留 slack, 换取更低占用;
+                // 本框架渲染负载轻, 性能损失可忽略 (核显场景尤甚)。
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
                 ..Default::default()
             })
             .await?;
+        log::info!("GPU device 创建成功");
 
         let caps = surface.get_capabilities(&adapter);
         let format = caps
