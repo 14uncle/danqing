@@ -11,6 +11,9 @@ mod fader;
 mod scenes;
 mod timer;
 
+#[path = "../common/log.rs"]
+mod example_log;
+
 use std::time::Duration;
 
 use danqing::widget::{
@@ -185,7 +188,7 @@ fn control_pill(t: SceneTheme) -> impl widget::Widget {
 }
 
 fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    example_log::init_log();
 
     let mut app = PomodoroApp {
         timer: Pomodoro::new(),
