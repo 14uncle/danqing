@@ -82,6 +82,35 @@ New-Item -ItemType Directory -Path $Stage -Force | Out-Null
 # Main exe.
 Copy-Item $BinaryPath $Stage
 
+# Inject the danqing logo (assets/logo/logo.ico) into the staged exe via
+# tools/patch_icon.py (Win32 kernel32!UpdateResource, no windres required).
+# Idempotent: re-running on a patched exe just rewrites the same RT_ICON entries.
+$PatchIconScript = Join-Path $RepoRoot "tools/patch_icon.py"
+if (Test-Path $PatchIconScript) {
+    $Py = $null
+    foreach ($c in @('python', 'python3', 'py')) {
+        $w = Get-Command $c -ErrorAction SilentlyContinue
+        if ($w) { $Py = $c; break }
+    }
+    if ($Py) {
+        $StageExe = Join-Path $Stage (Split-Path $BinaryPath -Leaf)
+        Write-Host "Injecting danqing logo into $StageExe ..."
+        Push-Location $RepoRoot
+        try {
+            & $Py tools/patch_icon.py --exe $StageExe
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "patch_icon.py exited $LASTEXITCODE -- packaged exe will keep the default icon."
+            }
+        } finally {
+            Pop-Location
+        }
+    } else {
+        Write-Warning "Python not on PATH; skipping danqing logo injection. Install Python 3.x if you want the exe to carry the danqing logo."
+    }
+} else {
+    Write-Warning "tools/patch_icon.py not found; skipping danqing logo injection."
+}
+
 # Runtime DLLs in release root (if any).
 $Dlls = @(Get-ChildItem -Path $ReleaseDir -Filter "*.dll" -File -ErrorAction SilentlyContinue)
 if ($Dlls.Count -gt 0) {
