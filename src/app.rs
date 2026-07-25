@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use crate::event::Event;
 use crate::render::BackgroundFrame;
 use crate::widget::Node;
+use crate::window::WindowEventSender;
 
 /// 动画 / 时间上下文，由框架每帧传入 `Widget::animate`。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,6 +57,26 @@ pub trait App: Any {
     /// 默认 `None` —— 保持 `BackgroundConfig` 初始化时的静态背景
     /// (showcase 等单背景应用无需实现)。窗口在每帧渲染前查询并写入渲染上下文。
     fn background_frame(&self) -> Option<BackgroundFrame> {
+        None
+    }
+
+    /// 启动时 elapsed 偏移: 默认 0 (全新会话), 持久化恢复场景下返回
+    /// `effective_now` (= saved_elapsed + 跨重启 wall-clock 漂移)。
+    /// 窗口在 `resumed` 时用 `Instant::now() - offset` 重置 `start`,
+    /// 使得 `AnimationCtx::elapsed` 从恢复点继续, 而不是 0 开始。
+    fn boot_elapsed_offset(&self) -> Duration {
+        Duration::ZERO
+    }
+
+    /// 注入窗口事件发送器 (App 主动控制窗口: 显隐 / 全局热键退出等)。
+    /// 默认空实现: 不需要窗口控制的应用无需关心。
+    /// `run_app` 启动时调用一次, 在 `resumed` 之前。
+    fn attach_window_sender(&mut self, _sender: WindowEventSender) {}
+
+    /// 全局热键 ID -> 应用消息映射。返回 `None` 表示忽略该 ID。
+    /// 默认空实现: 应用不响应全局热键。
+    /// 常量见 [`crate::window::hotkey_ids`]。
+    fn hotkey(&mut self, _id: u8) -> Option<Self::Msg> {
         None
     }
 }

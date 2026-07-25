@@ -62,6 +62,26 @@ impl Color {
             self.a + (other.a - self.a) * t,
         )
     }
+
+    /// 降低饱和度: 向 mid-gray (0.5) 线性插值, 同时收敛到中性亮度。
+    /// `factor=0` 保留原色, `factor=1` 全 mid-gray。
+    /// 双向移动: 暗色被提亮, 亮色被压暗, 中性色不变 — 视觉对比在暗/亮场景都明显。
+    /// `factor` 夹到 `0..1`。Alpha 保持不变 (玻璃等需要保留透明度)。
+    pub fn desaturate(self, factor: f32) -> Self {
+        let factor = factor.clamp(0.0, 1.0);
+        if factor <= 0.0 {
+            return self;
+        }
+        if factor >= 1.0 {
+            return Self::rgba(0.5, 0.5, 0.5, self.a);
+        }
+        Self::rgba(
+            self.r + (0.5 - self.r) * factor,
+            self.g + (0.5 - self.g) * factor,
+            self.b + (0.5 - self.b) * factor,
+            self.a,
+        )
+    }
 }
 
 /// 二维点，逻辑像素坐标 (原点为窗口左上角，y 向下)。
@@ -346,6 +366,58 @@ pub fn distribute(main_max: f32, gap: f32, children: &[FlowChild]) -> FlowResult
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desaturate_factor_zero_is_identity() {
+        let c = Color::rgb(0.8, 0.2, 0.4);
+        assert_eq!(c.desaturate(0.0), c);
+        assert_eq!(c.desaturate(-1.0), c);
+    }
+
+    #[test]
+    fn desaturate_factor_one_is_mid_gray() {
+        let c = Color::rgb(0.6, 0.3, 0.9);
+        let gray = c.desaturate(1.0);
+        assert!((gray.r - 0.5).abs() < 1e-6);
+        assert!((gray.g - 0.5).abs() < 1e-6);
+        assert!((gray.b - 0.5).abs() < 1e-6);
+        assert_eq!(gray.a, c.a);
+    }
+
+    #[test]
+    fn desaturate_factor_half_converges_to_mid_gray() {
+        let c = Color::rgb(1.0, 0.0, 0.0); // 纯红
+        let mid = c.desaturate(0.5);
+        // r: 1.0 + (0.5 - 1.0) * 0.5 = 0.75
+        // g: 0.0 + (0.5 - 0.0) * 0.5 = 0.25
+        // b: 0.0 + (0.5 - 0.0) * 0.5 = 0.25
+        assert!((mid.r - 0.75).abs() < 1e-6);
+        assert!((mid.g - 0.25).abs() < 1e-6);
+        assert!((mid.b - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn desaturate_dark_color_lifts_toward_mid_gray() {
+        // 暗色 (R<0.5) 应该被提亮, 这是修复"暗场景暂停不明显"的关键
+        let c = Color::rgb(0.10, 0.06, 0.04); // 篝火 base
+        let dimmed = c.desaturate(0.7);
+        // r: 0.10 + (0.5 - 0.10) * 0.7 = 0.10 + 0.28 = 0.38
+        // 比原色更亮, 视觉上明显
+        assert!(dimmed.r > 0.30, "dark color should lift, got {}", dimmed.r);
+        assert!(dimmed.g > 0.25, "dark color should lift, got {}", dimmed.g);
+    }
+
+    #[test]
+    fn desaturate_clamps_factor_above_one() {
+        let c = Color::rgb(0.6, 0.3, 0.9);
+        assert_eq!(c.desaturate(1.0), c.desaturate(2.0));
+    }
+
+    #[test]
+    fn desaturate_preserves_alpha() {
+        let c = Color::rgba(0.6, 0.3, 0.9, 0.42);
+        assert_eq!(c.desaturate(0.5).a, 0.42);
+    }
 
     #[test]
     fn rect_contains_edges() {

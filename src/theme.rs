@@ -359,6 +359,21 @@ impl ScenePalette {
             backdrop_dark: self.backdrop_dark.lerp(other.backdrop_dark, t),
         }
     }
+
+    /// 降低全调色板饱和度 (暂停态视觉反馈用)。`factor=0` 保留, `factor=1` 全灰。
+    /// 透明色 (surface / surface_input) 也去饱和 RGB, alpha 保持。
+    pub fn desaturate(self, factor: f32) -> ScenePalette {
+        ScenePalette {
+            base: self.base.desaturate(factor),
+            accent: self.accent.desaturate(factor),
+            text_primary: self.text_primary.desaturate(factor),
+            text_secondary: self.text_secondary.desaturate(factor),
+            surface: self.surface.desaturate(factor),
+            surface_input: self.surface_input.desaturate(factor),
+            backdrop_light: self.backdrop_light.desaturate(factor),
+            backdrop_dark: self.backdrop_dark.desaturate(factor),
+        }
+    }
 }
 
 /// 场景规格：生成管线产出的单个场景资产描述。

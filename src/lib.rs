@@ -29,4 +29,6 @@ pub use theme::{
     Easing, LightTheme, ScenePalette, SceneSpec, SceneTheme, Shadow, Theme, composite_over,
     contrast_ratio, relative_luminance,
 };
-pub use window::{WindowConfig, WindowError, run, run_app};
+pub use window::{
+    WindowAppEvent, WindowConfig, WindowError, WindowEventSender, hotkey_ids, run, run_app,
+};

@@ -7,13 +7,14 @@
 //! 事件循环驱动，并把 winit 事件转换为平台无关的内部事件。
 
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
     event::{ElementState, Ime as WinitIme, MouseButton as WinitMouseButton, WindowEvent},
-    event_loop::{ActiveEventLoop, EventLoop},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key as WinitKey, ModifiersState, NamedKey as WinitNamedKey},
     window::{Icon, Window as WinitWindow, WindowAttributes, WindowId},
 };
@@ -215,6 +216,177 @@ fn load_window_icon() -> Option<Icon> {
     }
 }
 
+/// 应用主动发给窗口的事件 (用于全局热键配套: 显隐 / 退出等)。
+#[derive(Debug, Clone, Copy)]
+pub enum WindowAppEvent {
+    /// 切换窗口可见性 (Handler 翻转内部状态后应用到 winit)。
+    /// 单一事实源在 Handler, App 不持有副本以避免失同步。
+    ToggleVisible,
+    /// 退出应用 (事件循环收到后 `event_loop.exit()`)。
+    Quit,
+    /// 阶段流转通知: 隐藏态时 Handler 自动呼出窗口 + 抢焦点。
+    PhaseAdvanced,
+}
+
+/// 应用持有的窗口事件发送器 (轻量 clone, 内部是 mpsc Sender)。
+#[derive(Clone)]
+pub struct WindowEventSender {
+    sender: Sender<WindowAppEvent>,
+}
+
+impl WindowEventSender {
+    /// 请求 Handler 翻转窗口可见性。
+    pub fn toggle_visible(&self) {
+        let _ = self.sender.send(WindowAppEvent::ToggleVisible);
+    }
+
+    /// 退出应用。
+    pub fn quit(&self) {
+        let _ = self.sender.send(WindowAppEvent::Quit);
+    }
+
+    /// 通知 Handler 阶段已流转 (隐藏态时 Handler 决定是否自动呼出)。
+    pub fn phase_advanced(&self) {
+        let _ = self.sender.send(WindowAppEvent::PhaseAdvanced);
+    }
+}
+
+/// 全局热键 ID 常量 (PomodoroApp 消费时按 ID 映射到 `Msg`)。
+pub mod hotkey_ids {
+    /// 显隐窗口 (Ctrl+Shift+P)。
+    pub const TOGGLE_VISIBLE: u8 = 1;
+    /// 开始/暂停番茄钟 (Ctrl+Shift+S)。
+    pub const START_PAUSE: u8 = 2;
+    /// 退出应用 (Ctrl+Shift+Q)。
+    pub const QUIT: u8 = 3;
+}
+
+#[cfg(target_os = "windows")]
+mod hotkeys {
+    use std::sync::mpsc::{Receiver, Sender};
+    use std::thread::{self, JoinHandle};
+
+    /// Windows 启动全局热键监听线程:
+    /// 1. `RegisterHotKey(NULL, ...)` 关联到当前线程消息队列
+    /// 2. 标准 `GetMessage/DispatchMessage` 循环
+    /// 3. `WM_HOTKEY` 时通过 `tx` 把热键 ID 发送给主线程
+    /// 4. 主线程 `about_to_wait` 轮询, 转 `Msg`
+    pub fn spawn() -> Option<(Receiver<u8>, JoinHandle<()>)> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = thread::Builder::new()
+            .name("danqing-hotkey".into())
+            .spawn(move || unsafe {
+                run(tx);
+            });
+        match handle {
+            Ok(h) => Some((rx, h)),
+            Err(err) => {
+                log::warn!("hotkey 线程启动失败: {err}");
+                None
+            }
+        }
+    }
+
+    unsafe fn run(tx: Sender<u8>) {
+        use crate::window::hotkey_ids;
+        use windows_sys::Win32::Foundation::HWND;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+            MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
+        };
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            DispatchMessageW, GetMessageW, MSG, PM_NOREMOVE, PeekMessageW, TranslateMessage,
+            WM_HOTKEY,
+        };
+
+        // 虚拟键码: P=0x50, S=0x53, Q=0x51
+        const VK_P: u32 = 0x50;
+        const VK_S: u32 = 0x53;
+        const VK_Q: u32 = 0x51;
+        const MODS: u32 = MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT;
+
+        let toggle_id = hotkey_ids::TOGGLE_VISIBLE as i32;
+        let start_pause_id = hotkey_ids::START_PAUSE as i32;
+        let quit_id = hotkey_ids::QUIT as i32;
+
+        let hwnd: HWND = std::ptr::null_mut();
+
+        // 关键: 线程必须有消息队列 `RegisterHotKey` 才会把 WM_HOTKEY 派进来。
+        // std::thread::spawn 出来的线程默认**没有**消息队列, 必须先用 PeekMessageW
+        // 触发一次队列创建 (PM_NOREMOVE 不取走消息, 安全)。
+        let mut peek_msg: MSG = unsafe { std::mem::zeroed() };
+        unsafe {
+            PeekMessageW(&mut peek_msg, hwnd, 0, 0, PM_NOREMOVE);
+        }
+        log::info!("[hotkey thread] 消息队列已创建");
+
+        let mut ok = true;
+        if unsafe { RegisterHotKey(hwnd, toggle_id, MODS, VK_P) } == 0 {
+            log::warn!("RegisterHotKey Ctrl+Shift+P 失败");
+            ok = false;
+        }
+        if ok && unsafe { RegisterHotKey(hwnd, start_pause_id, MODS, VK_S) } == 0 {
+            log::warn!("RegisterHotKey Ctrl+Shift+S 失败");
+            unsafe {
+                UnregisterHotKey(hwnd, toggle_id);
+            }
+            ok = false;
+        }
+        if ok && unsafe { RegisterHotKey(hwnd, quit_id, MODS, VK_Q) } == 0 {
+            log::warn!("RegisterHotKey Ctrl+Shift+Q 失败");
+            unsafe {
+                UnregisterHotKey(hwnd, toggle_id);
+                UnregisterHotKey(hwnd, start_pause_id);
+            }
+            ok = false;
+        }
+        if !ok {
+            return;
+        }
+        log::info!("全局热键已注册: Ctrl+Shift+P/S/Q");
+
+        let mut msg: MSG = unsafe { std::mem::zeroed() };
+        loop {
+            // GetMessage 阻塞直到有消息; 返回 0 表示收到 WM_QUIT (退出)
+            if unsafe { GetMessageW(&mut msg, hwnd, 0, 0) } <= 0 {
+                break;
+            }
+            if msg.message == WM_HOTKEY {
+                let id = (msg.wParam as u32) & 0xFF;
+                log::debug!("[hotkey thread] WM_HOTKEY id={id}");
+                let _ = tx.send(id as u8);
+            }
+            log::debug!(
+                "[hotkey thread] msg=0x{:x} wparam={}",
+                msg.message,
+                msg.wParam
+            );
+            unsafe {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+
+        unsafe {
+            UnregisterHotKey(hwnd, toggle_id);
+            UnregisterHotKey(hwnd, start_pause_id);
+            UnregisterHotKey(hwnd, quit_id);
+        }
+        log::info!("全局热键已注销");
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+mod hotkeys {
+    use std::sync::mpsc::Receiver;
+    use std::thread::JoinHandle;
+
+    /// 非 Windows 平台: 全局热键 unavailable, 返回 None。
+    pub fn spawn() -> Option<(Receiver<u8>, JoinHandle<()>)> {
+        log::info!("global hotkeys unsupported on this platform");
+        None
+    }
+}
+
 /// winit 应用处理器，驱动窗口生命周期与事件分发。
 struct Handler<'a, A: App> {
     config: WindowConfig,
@@ -244,6 +416,12 @@ struct Handler<'a, A: App> {
     first_frame_done: bool,
     /// 进程入口时间 (run_app 起点, 用于启动总耗时基准)。
     boot: Instant,
+    /// 全局热键接收器 (来自热键线程, `None` 表示未启用或平台不支持)。
+    hotkey_rx: Option<Receiver<u8>>,
+    /// 窗口事件接收器 (App 主动发出: 显隐 / 退出)。
+    window_event_rx: Receiver<WindowAppEvent>,
+    /// 当前窗口可见性 (热键 ToggleVisible 状态记录, 与 Handler 同步)。
+    is_visible: bool,
 }
 
 impl<A: App> Handler<'_, A> {
@@ -442,15 +620,19 @@ impl<A: App> Handler<'_, A> {
     }
 
     /// 处理自绘标题栏等组件产出的窗口控制动作。
-    fn handle_window_action(&mut self, action: WindowAction, event_loop: &ActiveEventLoop) {
+    fn handle_window_action(&mut self, action: WindowAction, _event_loop: &ActiveEventLoop) {
         let Some(window) = self.window.as_ref() else {
             return;
         };
         match action {
             WindowAction::Close => {
-                log::info!("标题栏关闭窗口");
-                window.set_visible(false);
-                event_loop.exit();
+                // 标题栏关闭按钮 = 隐藏 (与 Alt+F4 一致); 进程由 Ctrl+Shift+Q 退出
+                log::info!("标题栏关闭窗口 → 隐藏");
+                // set_visible(false) 由 self.hide_window 负责; 这里只改 self.is_visible
+                if let Some(window) = self.window.as_ref() {
+                    window.set_visible(false);
+                }
+                self.is_visible = false;
             }
             WindowAction::Minimize => {
                 log::info!("标题栏最小化窗口");
@@ -499,6 +681,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         if self.window.is_some() {
             return;
         }
+        // 持久化恢复: 用 app 的 boot_elapsed_offset 重置 start, 使得
+        // AnimationCtx::elapsed 从 effective_now 起算, 而不是 0。
+        self.start = Instant::now() - self.app.boot_elapsed_offset();
         let attrs = WindowAttributes::default()
             .with_title(&self.config.title)
             .with_visible(false)
@@ -611,12 +796,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
 
         match event {
             WindowEvent::CloseRequested => {
-                log::info!("收到关闭请求，退出事件循环");
-                // 立即隐藏窗口，让关闭感觉更快 (资源释放仍在后台完成)。
-                if let Some(window) = &self.window {
-                    window.set_visible(false);
-                }
-                event_loop.exit();
+                // 关闭按钮 = 隐藏 (不退出进程); 进程由 Quit 显式退出。
+                log::info!("收到关闭请求，隐藏");
+                self.hide_window();
             }
             WindowEvent::Resized(size) => {
                 log::info!("窗口尺寸变化：{}x{}", size.width, size.height);
@@ -680,6 +862,80 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             _ => {}
         }
     }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        log::debug!("[about_to_wait] tick");
+        // 隐藏态时主动 tick: RedrawRequested 不会发火 (窗口隐藏), 必须自己驱动
+        // app.tick, 否则计时器冻结, 阶段流转 / 持久化 / flash / beep 全停。
+        // ControlFlow::Poll 已保证循环持续转, 此处 tick 每帧推进。
+        if !self.is_visible {
+            let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
+            self.app.tick(&ctx);
+        }
+        // 全局热键通道轮询
+        if let Some(rx) = &self.hotkey_rx {
+            while let Ok(id) = rx.try_recv() {
+                if let Some(msg) = self.app.hotkey(id) {
+                    self.app.update(msg);
+                }
+            }
+        }
+        // 窗口事件通道轮询
+        while let Ok(event) = self.window_event_rx.try_recv() {
+            self.apply_window_event(event, event_loop);
+        }
+        // 控制流: 隐藏时 Poll (循环持续转), 显示时 Wait (节能, 等事件)
+        if self.is_visible {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        } else {
+            event_loop.set_control_flow(ControlFlow::Poll);
+        }
+    }
+}
+
+impl<A: App> Handler<'_, A> {
+    /// 隐藏窗口: 应用层 `is_visible` 与 OS 状态同步翻转。
+    /// 状态切换的"动作"统一收口在此, 减少 toggle / close / min 等路径的复制。
+    fn hide_window(&mut self) {
+        if let Some(window) = &self.window {
+            window.set_visible(false);
+        }
+        self.is_visible = false;
+    }
+
+    /// 显示窗口 + 抢焦点 + 重绘。winit 的 SW_SHOW 默认不抢焦点,
+    /// 显式 focus_window 防止"已显示但被遮" (尤其在另一 app 后台时)。
+    fn show_window(&self) {
+        if let Some(window) = &self.window {
+            window.set_visible(true);
+            window.request_redraw();
+            window.focus_window();
+        }
+    }
+
+    /// 处理 App 经 WindowEventSender 主动发来的事件。
+    fn apply_window_event(&mut self, event: WindowAppEvent, event_loop: &ActiveEventLoop) {
+        match event {
+            WindowAppEvent::ToggleVisible => {
+                // Handler 是 is_visible 唯一事实源: 翻转后立即应用到 winit 窗口。
+                self.is_visible = !self.is_visible;
+                if self.is_visible {
+                    self.show_window();
+                } else {
+                    self.hide_window();
+                }
+            }
+            WindowAppEvent::Quit => event_loop.exit(),
+            WindowAppEvent::PhaseAdvanced => {
+                // 隐藏态时阶段流转 → 自动呼出 (用户可能没在电脑前, 或在另一 app)
+                if !self.is_visible {
+                    self.is_visible = true;
+                    log::info!("阶段流转, 自动呼出窗口");
+                    self.show_window();
+                }
+            }
+        }
+    }
 }
 
 /// 打开窗口并运行应用：事件分发、消息驱动、每帧重绘，直到窗口关闭。
@@ -692,6 +948,13 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
         "文本批次初始化 (含字体加载) 耗时：{:?}",
         texts_start.elapsed()
     );
+    // 注入窗口事件发送器 (App 主动控制窗口: 显隐 / 退出)
+    let (window_event_tx, window_event_rx) = channel();
+    app.attach_window_sender(WindowEventSender {
+        sender: window_event_tx,
+    });
+    // 启动全局热键监听线程 (None 表示平台不支持)
+    let hotkey_rx = hotkeys::spawn().map(|(rx, _handle)| rx);
     let mut handler = Handler {
         tree: app.view(),
         config,
@@ -708,6 +971,9 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
         clipboard: None,
         first_frame_done: false,
         boot,
+        hotkey_rx,
+        window_event_rx,
+        is_visible: true,
     };
     let run_start = Instant::now();
     event_loop.run_app(&mut handler)?;

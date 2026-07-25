@@ -12,26 +12,34 @@
     windows_subsystem = "windows"
 )]
 
+mod audio;
 mod fader;
+mod flash;
 mod scenes;
+mod state;
 mod timer;
 
 #[path = "../common/log.rs"]
 mod example_log;
 
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use danqing::widget::{
-    self, Box as UiBox, Button, Center, Column, Node, Padding, Row, Text, TitleBar,
+    self, Box as UiBox, Button, Center, Column, Node, Padding, Row, Stack, Text, TitleBar,
 };
 use danqing::{
     AnimationCtx, App, BackgroundConfig, BackgroundFrame, Color, Easing, ScaleMode, ScenePalette,
-    SceneTheme, Size, Theme, WindowAction, WindowConfig,
+    SceneTheme, Size, Theme, WindowAction, WindowConfig, WindowEventSender, hotkey_ids,
 };
 use fader::SceneFader;
+use flash::FlashOverlay;
 use scenes::SCENES;
-use timer::Pomodoro;
+use state::{PomodoroState, RunState, load_state, save_state};
+use timer::{Pomodoro, Run};
+
+/// 完成反馈视觉脉冲时长 (头部满 → 尾部透明)。
+const FLASH_DURATION: Duration = Duration::from_millis(600);
 
 /// 全局噪声叠加 (防抖带颗粒，复用阶段 1 资产)。
 const NOISE: &str = "assets/background/noise.png";
@@ -39,6 +47,8 @@ const NOISE: &str = "assets/background/noise.png";
 const NOISE_OPACITY: f32 = 0.06;
 /// 场景交叉淡化时长 (spec: 600~1000ms)。
 const FADE_DURATION: Duration = Duration::from_millis(800);
+/// 持久化节流间隔: state_dirty 为 true 时, 距上次保存超过此间隔才落盘。
+const SAVE_THROTTLE: Duration = Duration::from_secs(1);
 
 /// 淡化缓动曲线 (淡入淡出两端柔和)。
 const FADE_EASING: Easing = Easing::EaseInOut;
@@ -51,6 +61,16 @@ struct PomodoroApp {
     now: Duration,
     /// 场景交叉淡化器 (含当前场景索引)。
     fader: SceneFader,
+    /// 启动时 elapsed 偏移 (持久化恢复); 0 表示全新会话。
+    now_offset: Duration,
+    /// 状态脏旗标: update 触发, tick 节流落盘后清零。
+    state_dirty: bool,
+    /// 最近一次成功落盘的 now 值 (节流基准)。
+    last_save_at: Duration,
+    /// 完成反馈视觉脉冲 (阶段流转触发)。
+    flash: FlashOverlay,
+    /// 窗口事件发送器 (run_app 启动时注入, App 借此控制窗口显隐 / 退出)。
+    window_sender: Option<WindowEventSender>,
 }
 
 /// 应用消息。
@@ -58,19 +78,98 @@ struct PomodoroApp {
 enum Msg {
     /// 开始 / 暂停切换。
     StartPause,
+    /// 跳过当前阶段, 进入下一阶段。
+    Skip,
     /// 重置回专注 25:00 停止态。
     Reset,
     /// 上一个场景。
     PrevScene,
     /// 下一个场景。
     NextScene,
+    /// 切换窗口可见性 (全局热键 Ctrl+Shift+P)。
+    ToggleVisible,
+    /// 退出应用 (全局热键 Ctrl+Shift+Q)。
+    Quit,
 }
 
 impl PomodoroApp {
-    /// 当前视觉调色板：淡化中为两端调色板的插值 (色调随画面同步流动)。
+    /// 默认会话构造: 25:00 Focus Idle, 场景 0, 全部偏移为 0。
+    fn new_default() -> Self {
+        Self {
+            timer: Pomodoro::new(),
+            now: Duration::ZERO,
+            fader: SceneFader::new(0, FADE_DURATION),
+            now_offset: Duration::ZERO,
+            state_dirty: true,
+            last_save_at: Duration::ZERO,
+            flash: FlashOverlay::new(FLASH_DURATION),
+            window_sender: None,
+        }
+    }
+
+    /// 从持久化状态恢复: 设置 timer / 场景 / now_offset,
+    /// 状态保持 dirty 以确保一次重写。
+    fn from_state(state: PomodoroState) -> Self {
+        let now_offset = state.effective_now_offset();
+        let run: Run = state.run.into();
+        let remaining = Duration::from_secs(state.remaining_secs);
+        let deadline = if matches!(run, Run::Running) {
+            Some(now_offset + remaining)
+        } else {
+            None
+        };
+        let timer = Pomodoro::restore(state.phase, run, remaining, deadline);
+        let fader = if state.current_scene < SCENES.len() {
+            SceneFader::new(state.current_scene, FADE_DURATION)
+        } else {
+            SceneFader::new(0, FADE_DURATION)
+        };
+        Self {
+            timer,
+            now: now_offset,
+            fader,
+            now_offset,
+            state_dirty: true,
+            last_save_at: now_offset,
+            flash: FlashOverlay::new(FLASH_DURATION),
+            window_sender: None,
+        }
+    }
+
+    /// 立即落盘 (退出/异常时调用, 不走节流)。
+    /// 失败不 panic: 进程即将退出, 错误仅供日志, 重试窗口已无。
+    fn flush(&mut self) {
+        match save_state(&self.snapshot_state()) {
+            Ok(()) => {
+                self.state_dirty = false;
+                self.last_save_at = self.now;
+            }
+            Err(err) => log::warn!("flush 状态失败: {err}"),
+        }
+    }
+
+    /// 应用当前状态为快照 (供 save_state 调用)。
+    fn snapshot_state(&self) -> PomodoroState {
+        PomodoroState {
+            phase: self.timer.phase(),
+            run: RunState::from(self.timer.run()),
+            remaining_secs: self.timer.remaining(self.now).as_secs(),
+            current_scene: self.fader.current(),
+            saved_elapsed_secs: self.now.as_secs(),
+            saved_wall_secs: current_wall_secs(),
+        }
+    }
+
+    /// 当前视觉调色板：淡化中为两端调色板的插值 (色调随画面同步流动);
+    /// 暂停时整体降饱和 70% (含控件底色与文字色), 视觉上明显区分。
     fn palette(&self) -> ScenePalette {
         let (from, to, t) = self.fader.frame(self.now, |t| FADE_EASING.eval(t));
-        SCENES[from].palette.lerp(SCENES[to].palette, t)
+        let base = SCENES[from].palette.lerp(SCENES[to].palette, t);
+        if self.timer.is_running() {
+            base
+        } else {
+            base.desaturate(0.7)
+        }
     }
 
     /// 当前场景主题 (颜色 token 随调色板流动)。
@@ -79,12 +178,24 @@ impl PomodoroApp {
     }
 }
 
+/// 当前 wall-clock Unix 秒 (失败时回落到 0, 不影响持久化逻辑)。
+fn current_wall_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 impl App for PomodoroApp {
     type Msg = Msg;
 
     fn update(&mut self, msg: Msg) {
+        self.state_dirty = true;
         match msg {
             Msg::StartPause => self.timer.toggle(self.now),
+            Msg::Skip => {
+                self.timer.skip(self.now);
+            }
             Msg::Reset => self.timer.reset(),
             Msg::PrevScene => {
                 let target = (self.fader.current() + SCENES.len() - 1) % SCENES.len();
@@ -94,54 +205,129 @@ impl App for PomodoroApp {
                 let target = (self.fader.current() + 1) % SCENES.len();
                 self.fader.switch_to(target, self.now);
             }
+            Msg::ToggleVisible => {
+                if let Some(sender) = &self.window_sender {
+                    sender.toggle_visible();
+                }
+            }
+            Msg::Quit => {
+                if let Some(sender) = &self.window_sender {
+                    sender.quit();
+                }
+            }
         }
     }
 
     fn view(&self) -> Node {
         let t = self.theme();
         widget::node(
-            Column::new()
-                .cross_stretch()
-                .child(
-                    TitleBar::themed(&t, "丹青 · 番茄钟")
-                        .bind_theme(|s: &PomodoroApp| s.theme())
-                        .on_close(|| WindowAction::Close)
-                        .on_minimize(|| WindowAction::Minimize)
-                        .on_maximize(|| WindowAction::MaximizeOrRestore)
-                        .on_drag(|| WindowAction::Drag),
-                )
-                .fill(Center::new(countdown_block(t)).fill_max(), 1)
-                .child(Padding::all(t.spacing_xl(), Center::new(control_pill(t)))),
+            Stack::new()
+                .child(content_column(t))
+                .child(flash_overlay_widget()),
         )
     }
 
     fn tick(&mut self, ctx: &AnimationCtx) {
         self.now = ctx.elapsed;
-        self.timer.tick(ctx.elapsed);
+        let advanced = self.timer.tick(ctx.elapsed);
+        if advanced {
+            // 阶段流转触发视觉脉冲 + 系统提示音
+            self.flash.trigger(self.now);
+            audio::beep();
+            // 通知 Handler: 阶段流转 (用于隐藏态时自动呼出窗口)
+            if let Some(sender) = &self.window_sender {
+                sender.phase_advanced();
+            }
+        }
+        // 1Hz 节流落盘: 状态变更后, 距上次保存 ≥ 1s 才写。
+        if self.state_dirty && self.now.saturating_sub(self.last_save_at) >= SAVE_THROTTLE {
+            match save_state(&self.snapshot_state()) {
+                Ok(()) => {
+                    self.last_save_at = self.now;
+                    self.state_dirty = false;
+                }
+                Err(err) => {
+                    log::warn!("保存状态失败: {err}");
+                    self.last_save_at = self.now; // 节流, 避免 60fps 重复刷写
+                }
+            }
+        }
     }
 
     fn background_frame(&self) -> Option<BackgroundFrame> {
         let (from, to, fade) = self.fader.frame(self.now, |t| FADE_EASING.eval(t));
         Some(BackgroundFrame::new(from, to, fade, self.palette().base))
     }
+
+    fn boot_elapsed_offset(&self) -> Duration {
+        self.now_offset
+    }
+
+    fn attach_window_sender(&mut self, sender: WindowEventSender) {
+        self.window_sender = Some(sender);
+    }
+
+    fn hotkey(&mut self, id: u8) -> Option<Msg> {
+        match id {
+            hotkey_ids::TOGGLE_VISIBLE => Some(Msg::ToggleVisible),
+            hotkey_ids::START_PAUSE => Some(Msg::StartPause),
+            hotkey_ids::QUIT => Some(Msg::Quit),
+            _ => None,
+        }
+    }
+}
+
+/// 内容列: 标题栏 + 中央倒计时 + 底部控件条 (无 flash 叠加, flash 由 Stack 在根上盖)。
+fn content_column(t: SceneTheme) -> impl widget::Widget {
+    Column::new()
+        .cross_stretch()
+        .child(
+            TitleBar::themed(&t, "丹青 · 番茄钟")
+                .bind_theme(|s: &PomodoroApp| s.theme())
+                .on_close(|| WindowAction::Close)
+                .on_minimize(|| WindowAction::Minimize)
+                .on_maximize(|| WindowAction::MaximizeOrRestore)
+                .on_drag(|| WindowAction::Drag),
+        )
+        .fill(Center::new(countdown_block(t)).fill_max(), 1)
+        .child(Padding::all(t.spacing_xl(), Center::new(control_pill(t))))
+}
+
+/// 全屏 flash 叠加层: 阶段流转时 accent 色脉冲衰减。
+/// 未激活时 alpha = 0, 完全透明 (无视觉影响); 激活时由 `progress()` 驱动 alpha。
+fn flash_overlay_widget() -> impl widget::Widget {
+    UiBox::new(Color::TRANSPARENT).bind_color(|s: &PomodoroApp| {
+        let alpha = s.flash.progress(s.now).unwrap_or(0.0);
+        let c = s.palette().accent;
+        Color::rgba(c.r, c.g, c.b, alpha)
+    })
 }
 
 /// 中央倒计时块：大字倒计时 + 阶段/场景标注。
+/// 暂停时: 倒计时切 `text_secondary` + 整体降饱和 + 副标加 "已暂停" 文字。
+/// 三重信号确保暂停态视觉明显, 用户无需猜测。
 fn countdown_block(t: SceneTheme) -> impl widget::Widget {
     Column::new()
         .cross_stretch()
         .child(Center::new(
             Text::bind(|s: &PomodoroApp| s.timer.display(s.now))
                 .font_size(t.font_size_display())
-                .bind_color(|s: &PomodoroApp| s.palette().text_primary),
+                .bind_color(|s: &PomodoroApp| {
+                    if s.timer.is_running() {
+                        s.palette().text_primary
+                    } else {
+                        s.palette().text_secondary
+                    }
+                }),
         ))
         .child(Center::new(
             Text::bind(|s: &PomodoroApp| {
-                format!(
-                    "{} · {}",
-                    s.timer.phase().label(),
-                    SCENES[s.fader.current()].name
-                )
+                let scene_name = SCENES[s.fader.current()].name;
+                if s.timer.is_running() {
+                    format!("{} · {}", s.timer.phase().label(), scene_name)
+                } else {
+                    format!("⏸ 已暂停 · {}", scene_name)
+                }
             })
             .font_size(t.font_size_body())
             .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
@@ -188,6 +374,7 @@ fn control_pill(t: SceneTheme) -> impl widget::Widget {
                 .gap(t.spacing_xs())
                 .child(ghost_button(t, "前", Msg::PrevScene))
                 .child(primary_button(t))
+                .child(ghost_button(t, "跳", Msg::Skip))
                 .child(ghost_button(t, "重置", Msg::Reset))
                 .child(ghost_button(t, "后", Msg::NextScene)),
         ))
@@ -206,10 +393,20 @@ fn main() -> ExitCode {
 }
 
 fn run() -> anyhow::Result<()> {
-    let mut app = PomodoroApp {
-        timer: Pomodoro::new(),
-        now: Duration::ZERO,
-        fader: SceneFader::new(0, FADE_DURATION),
+    // 优先加载持久化状态; 失败/不存在则新建默认会话。
+    let mut app = match load_state() {
+        Some(state) => {
+            log::info!(
+                "从持久化恢复: phase={:?} run={:?} remaining={}s scene={} now_offset={}s",
+                state.phase,
+                state.run,
+                state.remaining_secs,
+                state.current_scene,
+                state.effective_now_offset().as_secs(),
+            );
+            PomodoroApp::from_state(state)
+        }
+        None => PomodoroApp::new_default(),
     };
 
     let background = BackgroundConfig::with_scenes(SCENES.iter().map(|s| s.image))
@@ -223,5 +420,7 @@ fn run() -> anyhow::Result<()> {
         ..WindowConfig::default()
     };
     danqing::run_app(config, &mut app)?;
+    // 退出 flush: 立即落盘一次, 不走节流。
+    app.flush();
     Ok(())
 }
