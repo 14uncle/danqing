@@ -79,4 +79,11 @@ pub trait App: Any {
     fn hotkey(&mut self, _id: u8) -> Option<Self::Msg> {
         None
     }
+
+    /// 系统托盘菜单项 ID -> 应用消息映射。返回 `None` 表示忽略该 ID。
+    /// 默认空实现: 应用不响应托盘菜单。
+    /// 常量见 [`crate::window::tray_action_ids`], 与 `hotkey_ids` 编号独立但语义对齐。
+    fn tray_action(&mut self, _id: u8) -> Option<Self::Msg> {
+        None
+    }
 }

@@ -29,6 +29,8 @@ pub use theme::{
     Easing, LightTheme, ScenePalette, SceneSpec, SceneTheme, Shadow, Theme, composite_over,
     contrast_ratio, relative_luminance,
 };
+pub use window::tray::TrayHandle;
 pub use window::{
-    WindowAppEvent, WindowConfig, WindowError, WindowEventSender, hotkey_ids, run, run_app,
+    WindowAppEvent, WindowConfig, WindowError, WindowEventSender, hotkey_ids, run, run_app, tray,
+    tray_action_ids,
 };

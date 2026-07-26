@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::thread::JoinHandle;
 use std::time::Instant;
 
 use winit::{
@@ -21,7 +22,7 @@ use winit::{
 
 use crate::app::{AnimationCtx, App};
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey, WindowAction};
-use crate::render::{BackgroundConfig, Context, RectBatch, TextBatch};
+use crate::render::{BackgroundConfig, Context, GpuDevice, RectBatch, RenderError, TextBatch};
 use crate::widget::{
     FocusManager, MsgQueue, Node, event_at_path, ime_area_at_path, selected_text_at_path,
     wants_ime_at_path,
@@ -216,6 +217,34 @@ fn load_window_icon() -> Option<Icon> {
     }
 }
 
+/// 加载托盘图标 (16x16, Windows 任务栏首选尺寸)。
+///
+/// 读取 `assets/logo/logo_16.png`; 失败时记录警告并返回 `None`。
+/// 返回 tray-icon 自身的 `Icon` 类型 (与 winit Icon 不通用)。
+#[cfg(target_os = "windows")]
+fn load_tray_icon() -> Option<tray_icon::Icon> {
+    let path = std::path::Path::new("assets")
+        .join("logo")
+        .join("logo_16.png");
+    match image::open(&path) {
+        Ok(img) => {
+            let rgba = img.into_rgba8();
+            let (width, height) = rgba.dimensions();
+            match tray_icon::Icon::from_rgba(rgba.into_raw(), width, height) {
+                Ok(icon) => Some(icon),
+                Err(err) => {
+                    log::warn!("构建托盘 Icon 失败: {err}");
+                    None
+                }
+            }
+        }
+        Err(err) => {
+            log::warn!("加载托盘图标失败: {err}");
+            None
+        }
+    }
+}
+
 /// 应用主动发给窗口的事件 (用于全局热键配套: 显隐 / 退出等)。
 #[derive(Debug, Clone, Copy)]
 pub enum WindowAppEvent {
@@ -259,6 +288,66 @@ pub mod hotkey_ids {
     pub const START_PAUSE: u8 = 2;
     /// 退出应用 (Ctrl+Shift+Q)。
     pub const QUIT: u8 = 3;
+}
+
+/// 系统托盘菜单项 ID 常量 (语义与 `hotkey_ids` 一一对应, 独立编号便于
+/// 菜单项与热键解耦后调整)。
+pub mod tray_action_ids {
+    /// 显隐窗口 (托盘菜单项)。
+    pub const TOGGLE_VISIBLE: u8 = 1;
+    /// 开始/暂停番茄钟 (托盘菜单项)。
+    pub const START_PAUSE: u8 = 2;
+    /// 退出应用 (托盘菜单项)。
+    pub const QUIT: u8 = 3;
+}
+
+/// 托盘支持 (Windows / macOS 走 `tray-icon`; 其他平台 stub)。
+///
+/// `TrayHandle` 持有底层 `tray-icon::TrayIcon`, drop 时 tray-icon 内部清理并
+/// 移除系统托盘图标。Handler 在 `run_app` 期间持有 Handle, 退出时随 Handler
+/// 一起 drop, 保证托盘与进程生命周期严格同步。
+#[cfg(target_os = "windows")]
+pub mod tray {
+    use tray_icon::Icon;
+    use tray_icon::TrayIcon;
+    use tray_icon::TrayIconBuilder;
+
+    /// 托盘生命周期句柄。持有 `TrayIcon` 以阻止其 drop (drop 会移除托盘图标)。
+    pub struct TrayHandle {
+        // TrayIcon 不实现 Send/Sync (内部持有平台特定句柄), 但 Handler 不跨线程,
+        // 存为字段即可。
+        _tray: TrayIcon,
+    }
+
+    /// 安装系统托盘图标 (空菜单, 仅图标)。`icon` 通常来自 `load_window_icon`。
+    ///
+    /// 返回 `None` 表示安装失败 (日志已记录)。Slice 3 将在此基础上加菜单结构。
+    pub fn install_tray(icon: Icon) -> Option<TrayHandle> {
+        match TrayIconBuilder::new().with_icon(icon).build() {
+            Ok(tray) => {
+                log::info!("托盘图标已安装 (Windows)");
+                Some(TrayHandle { _tray: tray })
+            }
+            Err(err) => {
+                log::warn!("托盘图标安装失败: {err}");
+                None
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub mod tray {
+    use tray_icon::Icon;
+
+    /// 非 Windows 占位句柄 (持有即「不安装」)。
+    pub struct TrayHandle;
+
+    /// 非 Windows 平台: 暂不支持, 返回 `None`。
+    pub fn install_tray(_icon: Icon) -> Option<TrayHandle> {
+        log::info!("托盘在当前平台未启用");
+        None
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -418,10 +507,18 @@ struct Handler<'a, A: App> {
     boot: Instant,
     /// 全局热键接收器 (来自热键线程, `None` 表示未启用或平台不支持)。
     hotkey_rx: Option<Receiver<u8>>,
+    /// 托盘生命周期句柄 (持有期间托盘图标可见; Drop 时移除)。
+    /// 仅靠 Drop 副作用保活, 字段本身不读; `dead_code` 抑制。
+    #[allow(dead_code)]
+    tray: Option<tray::TrayHandle>,
     /// 窗口事件接收器 (App 主动发出: 显隐 / 退出)。
     window_event_rx: Receiver<WindowAppEvent>,
     /// 当前窗口可见性 (热键 ToggleVisible 状态记录, 与 Handler 同步)。
     is_visible: bool,
+    /// 后台预建 GPU 设备的线程句柄 (与字体加载/建窗重叠, `resumed` 时 join)。
+    ///
+    /// `None` 表示未启用后台预建 (join 后置空, 或平台回退同步创建)。
+    gpu_handle: Option<JoinHandle<Result<GpuDevice, RenderError>>>,
 }
 
 impl<A: App> Handler<'_, A> {
@@ -708,8 +805,39 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         #[cfg(target_os = "windows")]
         apply_windows_undecorated_style(&window);
 
+        // 取回后台预建的 GPU 设备; 若无 (再次 resumed / 平台回退) 则同步创建。
         let ctx_start = Instant::now();
-        match Context::new(
+        let gpu = match self.gpu_handle.take() {
+            Some(handle) => match handle.join() {
+                Ok(Ok(gpu)) => gpu,
+                Ok(Err(err)) => {
+                    log_error_chain("初始化 GPU 设备失败", &err);
+                    event_loop.exit();
+                    return;
+                }
+                Err(_) => {
+                    log::error!("GPU 设备预建线程 panic，回退同步创建");
+                    match GpuDevice::new() {
+                        Ok(gpu) => gpu,
+                        Err(err) => {
+                            log_error_chain("初始化 GPU 设备失败", &err);
+                            event_loop.exit();
+                            return;
+                        }
+                    }
+                }
+            },
+            None => match GpuDevice::new() {
+                Ok(gpu) => gpu,
+                Err(err) => {
+                    log_error_chain("初始化 GPU 设备失败", &err);
+                    event_loop.exit();
+                    return;
+                }
+            },
+        };
+        match Context::with_device(
+            gpu,
             Arc::clone(&window),
             self.config.clear_color,
             &self.config.background,
@@ -880,6 +1008,12 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 }
             }
         }
+        // 托盘菜单事件轮询 (tray-icon 内部维护通道, 静态 receiver)。
+        // Slice 2 暂不消费 (空菜单无事件); Slice 3 起按 MenuId 派发到 `app.tray_action`。
+        let tray_rx = tray_icon::menu::MenuEvent::receiver();
+        while tray_rx.try_recv().is_ok() {
+            // 暂丢弃: 菜单结构尚未挂上, 无可派发的 action。
+        }
         // 窗口事件通道轮询
         while let Ok(event) = self.window_event_rx.try_recv() {
             self.apply_window_event(event, event_loop);
@@ -942,6 +1076,9 @@ impl<A: App> Handler<'_, A> {
 pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowError> {
     let boot = Instant::now();
     let event_loop = EventLoop::new()?;
+    // 提前在后台线程创建 GPU 设备 (实例 + 适配器 + 逻辑设备): 该过程不依赖
+    // 窗口，与随后的字体加载 / 建窗串行工作重叠，缩短启动到可见的耗时。
+    let gpu_handle = std::thread::spawn(GpuDevice::new);
     let texts_start = Instant::now();
     let texts = TextBatch::new();
     log::info!(
@@ -955,6 +1092,8 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
     });
     // 启动全局热键监听线程 (None 表示平台不支持)
     let hotkey_rx = hotkeys::spawn().map(|(rx, _handle)| rx);
+    // 安装系统托盘 (复用 16x16 托盘尺寸图标; None 表示平台不支持或加载失败)。
+    let tray = load_tray_icon().and_then(tray::install_tray);
     let mut handler = Handler {
         tree: app.view(),
         config,
@@ -972,8 +1111,10 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
         first_frame_done: false,
         boot,
         hotkey_rx,
+        tray,
         window_event_rx,
         is_visible: true,
+        gpu_handle: Some(gpu_handle),
     };
     let run_start = Instant::now();
     event_loop.run_app(&mut handler)?;
