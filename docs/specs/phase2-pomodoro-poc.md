@@ -136,7 +136,10 @@ docs/
   - 新增外部依赖(如音频库、serde/图像新格式)。
   - 新增字体文件或改变字体回退策略。
   - 用摄影资产替换程序化场景。
-  - 窗口行为变化:置顶、全局快捷键、托盘、自启动。
+  - 窗口行为变化:置顶、自启动。
+  - ~~全局快捷键~~(已在阶段 2 补完中落地,见 `tasks/archive/.../pomodoro-completion.md`)
+  - ~~托盘~~(已在 2026-07 tray-and-hint 迭代中落地,见 `tasks/todo-pomodoro-tray-and-hint.md`):
+    菜单点击 + 首次启动 hint, Windows 平台菜单打开期间 winit 事件循环冻结(TrackPopupMenu 阻塞主线程), 关闭后恢复; 这是 Windows 平台限制, 接受。
   - 改动 `examples/showcase.rs` 的结构(本阶段不动 showcase)。
 
 - **Never:**
