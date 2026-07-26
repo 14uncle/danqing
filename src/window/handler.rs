@@ -13,7 +13,6 @@
 
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use winit::{
@@ -27,7 +26,7 @@ use winit::{
 
 use crate::app::{AnimationCtx, App};
 use crate::event::{Event, ImeEvent, Key, NamedKey, WindowAction};
-use crate::render::{Context, GpuDevice, RectBatch, RenderError, TextBatch};
+use crate::render::{Context, RectBatch, TextBatch};
 use crate::widget::{
     FocusManager, MsgQueue, Node, event_at_path, ime_area_at_path, selected_text_at_path,
     wants_ime_at_path,
@@ -78,10 +77,6 @@ pub(super) struct Handler<'a, A: App> {
     window_event_rx: Receiver<WindowAppEvent>,
     /// 当前窗口可见性 (热键 ToggleVisible 状态记录, 与 Handler 同步)。
     is_visible: bool,
-    /// 后台预建 GPU 设备的线程句柄 (与字体加载/建窗重叠, `resumed` 时 join)。
-    ///
-    /// `None` 表示未启用后台预建 (join 后置空, 或平台回退同步创建)。
-    gpu_handle: Option<JoinHandle<Result<GpuDevice, RenderError>>>,
 }
 
 impl<'a, A: App> Handler<'a, A> {
@@ -102,7 +97,6 @@ impl<'a, A: App> Handler<'a, A> {
         tray: Option<super::tray::TrayHandle>,
         window_event_rx: Receiver<WindowAppEvent>,
         boot: Instant,
-        gpu_handle: Option<JoinHandle<Result<GpuDevice, RenderError>>>,
     ) -> Self {
         Self {
             config,
@@ -124,7 +118,6 @@ impl<'a, A: App> Handler<'a, A> {
             tray,
             window_event_rx,
             is_visible: true,
-            gpu_handle,
         }
     }
 }
@@ -415,39 +408,12 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         #[cfg(target_os = "windows")]
         apply_windows_undecorated_style(&window);
 
-        // 取回后台预建的 GPU 设备; 若无 (再次 resumed / 平台回退) 则同步创建。
+        // 同步 inline 初始化 GPU 上下文 (实例 + surface + 适配器 + 设备 + 管线)。
+        // request_adapter 传 `compatible_surface: Some(&surface)` 让 DX12 后端
+        // 一步优化 device / presentation engine 创建,比传 None 省 ~200ms。
+        // 这里没有用后台线程预建 GpuDevice:实测 DX12 上 inline 比 join 快。
         let ctx_start = Instant::now();
-        let gpu = match self.gpu_handle.take() {
-            Some(handle) => match handle.join() {
-                Ok(Ok(gpu)) => gpu,
-                Ok(Err(err)) => {
-                    super::log_error_chain("初始化 GPU 设备失败", &err);
-                    event_loop.exit();
-                    return;
-                }
-                Err(_) => {
-                    log::error!("GPU 设备预建线程 panic, 回退同步创建");
-                    match GpuDevice::new() {
-                        Ok(gpu) => gpu,
-                        Err(err) => {
-                            super::log_error_chain("初始化 GPU 设备失败", &err);
-                            event_loop.exit();
-                            return;
-                        }
-                    }
-                }
-            },
-            None => match GpuDevice::new() {
-                Ok(gpu) => gpu,
-                Err(err) => {
-                    super::log_error_chain("初始化 GPU 设备失败", &err);
-                    event_loop.exit();
-                    return;
-                }
-            },
-        };
-        match Context::with_device(
-            gpu,
+        match Context::new(
             Arc::clone(&window),
             self.config.clear_color,
             &self.config.background,

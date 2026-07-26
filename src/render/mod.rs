@@ -88,29 +88,26 @@ pub struct Context {
     text_pipeline: TextPipeline,
 }
 
-/// 与窗口无关的 GPU 设备（实例 / 适配器 / 逻辑设备 / 队列）。
-///
-/// 创建过程（尤其 Vulkan 加载器初始化与适配器枚举）在核显上耗时约
-/// 数百毫秒，且**不依赖窗口**；因此可在后台线程提前创建，与字体加载、
-/// 建窗等主线程串行工作重叠，随后交给 [`Context::with_device`] 绑定 surface。
-pub struct GpuDevice {
-    /// wgpu 实例（后续 [`Context::with_device`] 创建 surface 时需要）。
-    instance: wgpu::Instance,
-    /// 物理适配器（仅初始化期用于查询 surface 能力与打印信息）。
-    adapter: wgpu::Adapter,
-    /// 逻辑设备。
-    device: wgpu::Device,
-    /// 命令队列。
-    queue: wgpu::Queue,
-}
-
-impl GpuDevice {
-    /// 创建实例 + 适配器 + 逻辑设备，不需要窗口，可在后台线程调用。
-    pub fn new() -> Result<Self, RenderError> {
-        pollster::block_on(Self::new_async())
+impl Context {
+    /// 在指定窗口上初始化 wgpu,surface 尺寸取窗口当前物理尺寸。
+    ///
+    /// 同步入口:内部 `pollster::block_on` 跑 async 初始化。请求适配器时
+    /// 传 `compatible_surface: Some(&surface)` —— DX12 后端据此优化 device
+    /// 创建(presentation engine 初始化与 format 选择一步到位),省 ~200ms 启动。
+    pub fn new(
+        window: Arc<WinitWindow>,
+        clear_color: Color,
+        background: &BackgroundConfig,
+    ) -> Result<Self, RenderError> {
+        pollster::block_on(Self::new_async(window, clear_color, background))
     }
 
-    async fn new_async() -> Result<Self, RenderError> {
+    async fn new_async(
+        window: Arc<WinitWindow>,
+        clear_color: Color,
+        background: &BackgroundConfig,
+    ) -> Result<Self, RenderError> {
+        let size = window.inner_size();
         let flags = instance_flags();
         log::info!("创建 wgpu instance：backends={DEFAULT_BACKENDS:?}, flags={flags:?}");
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -118,10 +115,10 @@ impl GpuDevice {
             flags,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
-        // 不传 compatible_surface：设备创建脱离窗口，方可在后台线程与建窗
-        // 并行；本框架目标场景为核显单适配器，无需按 surface 过滤适配器。
+        let surface = instance.create_surface(window)?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
+                compatible_surface: Some(&surface),
                 // 低功耗优先: 避免混合显卡机器唤醒独显的 1~2s 抖动,
                 // 且对常驻陪伴类工具更省电; 本框架渲染负载对核显无压力。
                 power_preference: wgpu::PowerPreference::LowPower,
@@ -150,43 +147,6 @@ impl GpuDevice {
             })
             .await?;
         log::info!("GPU device 创建成功");
-        Ok(Self {
-            instance,
-            adapter,
-            device,
-            queue,
-        })
-    }
-}
-
-impl Context {
-    /// 在指定窗口上初始化 wgpu,surface 尺寸取窗口当前物理尺寸。
-    ///
-    /// 便捷入口：内部先同步创建 [`GpuDevice`] 再绑定窗口；需要与主线程
-    /// 工作重叠时，改为后台线程 [`GpuDevice::new`] + [`Context::with_device`]。
-    pub fn new(
-        window: Arc<WinitWindow>,
-        clear_color: Color,
-        background: &BackgroundConfig,
-    ) -> Result<Self, RenderError> {
-        Self::with_device(GpuDevice::new()?, window, clear_color, background)
-    }
-
-    /// 用预创建的 [`GpuDevice`] 绑定窗口 surface 并构建各渲染管线。
-    pub fn with_device(
-        gpu: GpuDevice,
-        window: Arc<WinitWindow>,
-        clear_color: Color,
-        background: &BackgroundConfig,
-    ) -> Result<Self, RenderError> {
-        let GpuDevice {
-            instance,
-            adapter,
-            device,
-            queue,
-        } = gpu;
-        let size = window.inner_size();
-        let surface = instance.create_surface(window)?;
 
         let caps = surface.get_capabilities(&adapter);
         let format = caps

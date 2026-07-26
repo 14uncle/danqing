@@ -25,7 +25,7 @@ use std::time::Instant;
 use winit::event_loop::EventLoop;
 
 use crate::app::App;
-use crate::render::{BackgroundConfig, GpuDevice, TextBatch};
+use crate::render::{BackgroundConfig, TextBatch};
 use crate::widget::Node;
 use crate::{Color, Size};
 
@@ -107,9 +107,6 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
 
     let boot = Instant::now();
     let event_loop = EventLoop::new()?;
-    // 提前在后台线程创建 GPU 设备 (实例 + 适配器 + 逻辑设备):该过程不依赖
-    // 窗口,与随后的字体加载 / 建窗串行工作重叠,缩短启动到可见的耗时。
-    let gpu_handle = std::thread::spawn(GpuDevice::new);
     let texts_start = Instant::now();
     let texts = TextBatch::new();
     log::info!(
@@ -138,7 +135,6 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
         tray,
         window_event_rx,
         boot,
-        Some(gpu_handle),
     );
     let run_start = Instant::now();
     event_loop.run_app(&mut handler)?;
