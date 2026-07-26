@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use winit::{
     application::ApplicationHandler,
@@ -306,7 +306,20 @@ pub mod tray_action_ids {
 /// 单一来源: 注册用了 P/S/Q, 展示也用 P/S/Q, 杜绝字符串漂移。
 /// 与 [`hotkey_ids`] / [`tray_action_ids`] 同居本模块, 框架保证三者同步。
 /// 即使两组 ID 当前数值一致, 仍显式双检以防未来解耦时漏改。
+///
+/// debug build 下未知 id 触发 `debug_assert!`, release 下静默返 `""`。
+/// 加新 ID 时必须同时更新本表 + hotkey/tray id 两侧常量 + 本表断言条件,
+/// 否则测试会立刻爆。
 pub fn shortcut_for_id(id: u8) -> &'static str {
+    debug_assert!(
+        id == hotkey_ids::TOGGLE_VISIBLE
+            || id == tray_action_ids::TOGGLE_VISIBLE
+            || id == hotkey_ids::START_PAUSE
+            || id == tray_action_ids::START_PAUSE
+            || id == hotkey_ids::QUIT
+            || id == tray_action_ids::QUIT,
+        "shortcut_for_id: id {id} 未在映射表中 (新加 ID 必须同时更新此函数)"
+    );
     if id == hotkey_ids::TOGGLE_VISIBLE || id == tray_action_ids::TOGGLE_VISIBLE {
         "Ctrl+Shift+P"
     } else if id == hotkey_ids::START_PAUSE || id == tray_action_ids::START_PAUSE {
@@ -1052,8 +1065,11 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             self.apply_window_event(event, event_loop);
         }
         // 控制流:
-        // 可见时: Poll + 主动 request_redraw, 等效 ~60fps 持续重绘。
-        //   原因: muda 托盘菜单的 TrackPopupMenu 是 Windows 阻塞 API, 会在主线程
+        // 可见时: 主动 request_redraw + WaitUntil(16ms), 等效 60fps 重绘。
+        //   WaitUntil 比 Poll 显著省 CPU (空载时 Poll 一秒跑几千次, WaitUntil 仅
+        //   ~60 次), 同时 OS 调度超时 / 外部事件 / 模态菜单 close 仍能及时唤醒
+        //   winit, 行为等价。
+        //   关键: muda 托盘菜单的 TrackPopupMenu 是 Windows 阻塞 API, 会在主线程
         //         跑模态消息循环, 期间 winit 事件循环被冻结; 菜单关闭后必须主动
         //         重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
         //         过滤/丢弃, UI 卡在旧值不更新(读秒停止、按钮 label 不切)。
@@ -1062,8 +1078,12 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Poll);
         }
-        event_loop.set_control_flow(ControlFlow::Poll);
     }
 }
 
@@ -1212,7 +1232,10 @@ mod tests {
         assert_eq!(shortcut_for_id(tray_action_ids::QUIT), "Ctrl+Shift+Q");
     }
 
+    /// Release build 下未知 id 静默返空 (供调用方容错);
+    /// debug build 下 `shortcut_for_id` 内的 `debug_assert!` 会先 panic, 提示加新 ID 时漏改。
     #[test]
+    #[cfg(not(debug_assertions))]
     fn shortcut_for_id_unknown_id_returns_empty() {
         assert_eq!(shortcut_for_id(0), "");
         assert_eq!(shortcut_for_id(99), "");
