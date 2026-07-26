@@ -1194,6 +1194,30 @@ mod tests {
         drop(event_loop.expect("创建事件循环失败"));
     }
 
+    /// 单一来源契约: 三个共享 ID 在 hotkey_ids / tray_action_ids 两套下
+    /// 都必须返回同一个 label, 任何一组漏改都会立刻被这条测试发现。
+    #[test]
+    fn shortcut_for_id_returns_consistent_label_across_id_sets() {
+        assert_eq!(shortcut_for_id(hotkey_ids::TOGGLE_VISIBLE), "Ctrl+Shift+P");
+        assert_eq!(
+            shortcut_for_id(tray_action_ids::TOGGLE_VISIBLE),
+            "Ctrl+Shift+P"
+        );
+        assert_eq!(shortcut_for_id(hotkey_ids::START_PAUSE), "Ctrl+Shift+S");
+        assert_eq!(
+            shortcut_for_id(tray_action_ids::START_PAUSE),
+            "Ctrl+Shift+S"
+        );
+        assert_eq!(shortcut_for_id(hotkey_ids::QUIT), "Ctrl+Shift+Q");
+        assert_eq!(shortcut_for_id(tray_action_ids::QUIT), "Ctrl+Shift+Q");
+    }
+
+    #[test]
+    fn shortcut_for_id_unknown_id_returns_empty() {
+        assert_eq!(shortcut_for_id(0), "");
+        assert_eq!(shortcut_for_id(99), "");
+    }
+
     #[test]
     fn load_icon_from_valid_png_succeeds() {
         let path = PathBuf::from("assets").join("logo").join("logo_256.png");

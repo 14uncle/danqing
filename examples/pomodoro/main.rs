@@ -33,7 +33,7 @@ use danqing::widget::{
 use danqing::{
     AnimationCtx, App, BackgroundConfig, BackgroundFrame, Color, Easing, Edges, LightTheme,
     ScaleMode, ScenePalette, SceneTheme, Size, Theme, WindowAction, WindowConfig,
-    WindowEventSender, hotkey_ids, tray_action_ids,
+    WindowEventSender, hotkey_ids, shortcut_for_id, tray_action_ids,
 };
 use fader::SceneFader;
 use flash::FlashOverlay;
@@ -349,13 +349,19 @@ fn shortcut_hint_overlay_widget() -> impl widget::Widget {
         Color::rgba(c.r, c.g, c.b, c.a * alpha)
     };
     let t = LightTheme;
-    let line_a = Text::new("Ctrl+Shift+P  显示/隐藏")
-        .font_size(t.font_size_small())
-        .bind_color(line_painter);
-    let line_b = Text::new("Ctrl+Shift+S  暂停/开始")
-        .font_size(t.font_size_small())
-        .bind_color(line_painter);
-    let line_c = Text::new("Ctrl+Shift+Q  退出")
+    let line_a = Text::new(format!(
+        "显示/隐藏  {}",
+        shortcut_for_id(hotkey_ids::TOGGLE_VISIBLE)
+    ))
+    .font_size(t.font_size_small())
+    .bind_color(line_painter);
+    let line_b = Text::new(format!(
+        "暂停/开始  {}",
+        shortcut_for_id(hotkey_ids::START_PAUSE)
+    ))
+    .font_size(t.font_size_small())
+    .bind_color(line_painter);
+    let line_c = Text::new(format!("退出  {}", shortcut_for_id(hotkey_ids::QUIT)))
         .font_size(t.font_size_small())
         .bind_color(line_painter);
     let text_column = Column::new().child(line_a).child(line_b).child(line_c);
