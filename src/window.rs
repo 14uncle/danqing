@@ -1051,12 +1051,19 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         while let Ok(event) = self.window_event_rx.try_recv() {
             self.apply_window_event(event, event_loop);
         }
-        // 控制流: 隐藏时 Poll (循环持续转), 显示时 Wait (节能, 等事件)
+        // 控制流:
+        // 可见时: Poll + 主动 request_redraw, 等效 ~60fps 持续重绘。
+        //   原因: muda 托盘菜单的 TrackPopupMenu 是 Windows 阻塞 API, 会在主线程
+        //         跑模态消息循环, 期间 winit 事件循环被冻结; 菜单关闭后必须主动
+        //         重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
+        //         过滤/丢弃, UI 卡在旧值不更新(读秒停止、按钮 label 不切)。
+        // 隐藏时: Poll 驱动 app.tick (RedrawRequested 不会发, 因为窗口不可见)。
         if self.is_visible {
-            event_loop.set_control_flow(ControlFlow::Wait);
-        } else {
-            event_loop.set_control_flow(ControlFlow::Poll);
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
         }
+        event_loop.set_control_flow(ControlFlow::Poll);
     }
 }
 
