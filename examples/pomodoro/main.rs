@@ -15,6 +15,7 @@
 mod audio;
 mod fader;
 mod flash;
+mod hint;
 mod scenes;
 mod state;
 mod timer;
@@ -29,11 +30,13 @@ use danqing::widget::{
     self, Box as UiBox, Button, Center, Column, Node, Padding, Row, Stack, Text, TitleBar,
 };
 use danqing::{
-    AnimationCtx, App, BackgroundConfig, BackgroundFrame, Color, Easing, ScaleMode, ScenePalette,
-    SceneTheme, Size, Theme, WindowAction, WindowConfig, WindowEventSender, hotkey_ids,
+    AnimationCtx, App, BackgroundConfig, BackgroundFrame, Color, Easing, Edges, LightTheme,
+    ScaleMode, ScenePalette, SceneTheme, Size, Theme, WindowAction, WindowConfig,
+    WindowEventSender, hotkey_ids,
 };
 use fader::SceneFader;
 use flash::FlashOverlay;
+use hint::ShortcutHintOverlay;
 use scenes::SCENES;
 use state::{PomodoroState, RunState, load_state, save_state};
 use timer::{Pomodoro, Run};
@@ -69,6 +72,10 @@ struct PomodoroApp {
     last_save_at: Duration,
     /// 完成反馈视觉脉冲 (阶段流转触发)。
     flash: FlashOverlay,
+    /// 首次启动快捷键提示 (一过性 fade-in/hold/fade-out 状态机)。
+    hint: ShortcutHintOverlay,
+    /// 当前持久化的「已见过快捷键提示」旗标 (snapshot_state 直接读)。
+    has_seen_shortcut_hint: bool,
     /// 窗口事件发送器 (run_app 启动时注入, App 借此控制窗口显隐 / 退出)。
     window_sender: Option<WindowEventSender>,
 }
@@ -103,6 +110,9 @@ impl PomodoroApp {
             state_dirty: true,
             last_save_at: Duration::ZERO,
             flash: FlashOverlay::new(FLASH_DURATION),
+            // 全新会话: 触发一次性快捷键提示, 同时标记为已见 (节流落盘后 JSON 持久化)。
+            hint: ShortcutHintOverlay::triggered_at(Duration::ZERO),
+            has_seen_shortcut_hint: true,
             window_sender: None,
         }
     }
@@ -124,6 +134,8 @@ impl PomodoroApp {
         } else {
             SceneFader::new(0, FADE_DURATION)
         };
+        // 一次性快捷键提示: 没看过就触发一次, 触发即标记为已见。
+        let should_show_hint = !state.has_seen_shortcut_hint;
         Self {
             timer,
             now: now_offset,
@@ -132,6 +144,12 @@ impl PomodoroApp {
             state_dirty: true,
             last_save_at: now_offset,
             flash: FlashOverlay::new(FLASH_DURATION),
+            hint: if should_show_hint {
+                ShortcutHintOverlay::triggered_at(now_offset)
+            } else {
+                ShortcutHintOverlay::idle()
+            },
+            has_seen_shortcut_hint: true,
             window_sender: None,
         }
     }
@@ -157,6 +175,7 @@ impl PomodoroApp {
             current_scene: self.fader.current(),
             saved_elapsed_secs: self.now.as_secs(),
             saved_wall_secs: current_wall_secs(),
+            has_seen_shortcut_hint: self.has_seen_shortcut_hint,
         }
     }
 
@@ -223,7 +242,8 @@ impl App for PomodoroApp {
         widget::node(
             Stack::new()
                 .child(content_column(t))
-                .child(flash_overlay_widget()),
+                .child(flash_overlay_widget())
+                .child(shortcut_hint_overlay_widget()),
         )
     }
 
@@ -303,6 +323,44 @@ fn flash_overlay_widget() -> impl widget::Widget {
     })
 }
 
+/// 首次启动快捷键提示叠加层: 窗口右下角三行快捷键说明, 由 `hint.progress()` 驱动 alpha。
+/// 不激活时完全透明 (无视觉影响); 激活时按 ease-out 淡入 → 停留 → ease-in 淡出。
+/// 布局策略: 外层 Column 用 fill spacer 把内容推到下方; 内层 Row 用 fill spacer 把内容推到右;
+/// 最后 Padding 加 `spacing_lg` 的右/下内边距, 等价于把文本锚定在窗口右下角内缩 16px。
+fn shortcut_hint_overlay_widget() -> impl widget::Widget {
+    let line_painter = |s: &PomodoroApp| {
+        let alpha = s.hint.progress(s.now).unwrap_or(0.0);
+        let c = s.palette().text_secondary;
+        Color::rgba(c.r, c.g, c.b, c.a * alpha)
+    };
+    let t = LightTheme;
+    let line_a = Text::new("Ctrl+Shift+P  显示/隐藏")
+        .font_size(t.font_size_small())
+        .bind_color(line_painter);
+    let line_b = Text::new("Ctrl+Shift+S  暂停/开始")
+        .font_size(t.font_size_small())
+        .bind_color(line_painter);
+    let line_c = Text::new("Ctrl+Shift+Q  退出")
+        .font_size(t.font_size_small())
+        .bind_color(line_painter);
+    let text_column = Column::new().child(line_a).child(line_b).child(line_c);
+    let edge = t.spacing_lg();
+    let padded = Padding::new(
+        Edges {
+            top: 0.0,
+            right: edge,
+            bottom: edge,
+            left: 0.0,
+        },
+        text_column,
+    );
+    Column::new().fill(UiBox::new(Color::TRANSPARENT), 1).child(
+        Row::new()
+            .fill(UiBox::new(Color::TRANSPARENT), 1)
+            .child(padded),
+    )
+}
+
 /// 中央倒计时块：大字倒计时 + 阶段/场景标注。
 /// 暂停时: 倒计时切 `text_secondary` + 整体降饱和 + 副标加 "已暂停" 文字。
 /// 三重信号确保暂停态视觉明显, 用户无需猜测。
@@ -369,7 +427,7 @@ fn control_pill(t: SceneTheme) -> impl widget::Widget {
         .bind_color(|s: &PomodoroApp| s.palette().surface)
         .radius(28.0)
         .child(Padding::new(
-            danqing::Edges::symmetric(t.spacing_sm(), t.spacing_xs()),
+            Edges::symmetric(t.spacing_sm(), t.spacing_xs()),
             Row::new()
                 .gap(t.spacing_xs())
                 .child(ghost_button(t, "前", Msg::PrevScene))
