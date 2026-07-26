@@ -21,15 +21,22 @@ use winit::window::Window as WinitWindow;
 
 use crate::Color;
 
-/// 根据平台选择单一主 backend，避免实例创建时扫描多个后端。
+/// 根据平台选择单一主 backend, 避免实例创建时扫描多个后端。
 ///
-/// Windows 固定走 Vulkan：`Backends::PRIMARY` 会同时拉起 Vulkan 与 DX12
-/// 两套后端加载器（各自的驱动 DLL 与分配），常驻内存高约 100MB；
-/// 而单独走 DX12 时核显 `request_adapter` 明显偏慢（Intel Xe 实测常
-/// 稳态 ~1.0~1.5s，超出 ≤1s 启动门槛）。Vulkan 单后端启动稳态 ~0.6s，
-/// 常驻内存仅比 DX12 多约 16MB（远在 360MB 预算内），是启动/内存的最优折中。
+/// Windows 固定走 DX12: Intel Xe 核显实测 (Windows 32.0.101.7085 驱动, wgpu 30)
+///   DX12 单后端:    dev 启动 ~940ms / release 启动 ~680ms
+///   Vulkan 单后端: dev 启动 ~1180ms / release 启动 ~720ms
+///   Vulkan context init 反而快 (143ms vs 792ms), 但净启动时间 DX12 反胜
+///   ~240ms, 且 DX12 不多占 ~16MB 运行时内存。结论: 本机 DX12 启动更优。
+///   其他驱动 / 厂商可能相反, 用 `DANQING_WGPU_BACKEND=vulkan` 现场验证。
+///
+/// 旧 commit (`4741fe1`) 引用了反向数据 (声称 Vulkan 启动 0.6s, DX12 1.0~1.5s),
+/// 与本机实测相反。`4741fe1` 引入的环境变量覆盖机制本身仍有用, 保留;
+///
+/// `Backends::PRIMARY` 会同时拉起 Vulkan 与 DX12 两套后端加载器
+/// (各自的驱动 DLL 与分配), 常驻内存高约 100MB, 不在启动预算内用。
 #[cfg(target_os = "windows")]
-const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
+const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::DX12;
 #[cfg(target_os = "macos")]
 const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::METAL;
 #[cfg(all(unix, not(target_os = "macos")))]
