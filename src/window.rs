@@ -301,6 +301,23 @@ pub mod tray_action_ids {
     pub const QUIT: u8 = 3;
 }
 
+/// 快捷键 label 字符串 (供 UI 展示: 托盘菜单右侧 + 首次启动 hint)。
+///
+/// 单一来源: 注册用了 P/S/Q, 展示也用 P/S/Q, 杜绝字符串漂移。
+/// 与 [`hotkey_ids`] / [`tray_action_ids`] 同居本模块, 框架保证三者同步。
+/// 即使两组 ID 当前数值一致, 仍显式双检以防未来解耦时漏改。
+pub fn shortcut_for_id(id: u8) -> &'static str {
+    if id == hotkey_ids::TOGGLE_VISIBLE || id == tray_action_ids::TOGGLE_VISIBLE {
+        "Ctrl+Shift+P"
+    } else if id == hotkey_ids::START_PAUSE || id == tray_action_ids::START_PAUSE {
+        "Ctrl+Shift+S"
+    } else if id == hotkey_ids::QUIT || id == tray_action_ids::QUIT {
+        "Ctrl+Shift+Q"
+    } else {
+        ""
+    }
+}
+
 /// 托盘支持 (Windows / macOS 走 `tray-icon`; 其他平台 stub)。
 ///
 /// `TrayHandle` 持有底层 `tray-icon::TrayIcon`, drop 时 tray-icon 内部清理并
@@ -311,6 +328,7 @@ pub mod tray {
     use tray_icon::Icon;
     use tray_icon::TrayIcon;
     use tray_icon::TrayIconBuilder;
+    use tray_icon::menu::Menu;
 
     /// 托盘生命周期句柄。持有 `TrayIcon` 以阻止其 drop (drop 会移除托盘图标)。
     pub struct TrayHandle {
@@ -319,11 +337,19 @@ pub mod tray {
         _tray: TrayIcon,
     }
 
-    /// 安装系统托盘图标 (空菜单, 仅图标)。`icon` 通常来自 `load_window_icon`。
+    /// 安装系统托盘 (图标 + 菜单)。
     ///
-    /// 返回 `None` 表示安装失败 (日志已记录)。Slice 3 将在此基础上加菜单结构。
-    pub fn install_tray(icon: Icon) -> Option<TrayHandle> {
-        match TrayIconBuilder::new().with_icon(icon).build() {
+    /// `icon` 通常来自 [`load_tray_icon`] 或窗口图标;
+    /// `menu` 由调用方构建 (例: `examples/pomodoro/tray.rs::build_menu`),
+    /// 一旦传入即归 TrayIcon 所有, 调用方不应再持有。
+    ///
+    /// 返回 `None` 表示安装失败 (日志已记录)。
+    pub fn install_tray(icon: Icon, menu: Menu) -> Option<TrayHandle> {
+        match TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_icon(icon)
+            .build()
+        {
             Ok(tray) => {
                 log::info!("托盘图标已安装 (Windows)");
                 Some(TrayHandle { _tray: tray })
@@ -339,12 +365,14 @@ pub mod tray {
 #[cfg(not(target_os = "windows"))]
 pub mod tray {
     use tray_icon::Icon;
+    use tray_icon::menu::Menu;
 
     /// 非 Windows 占位句柄 (持有即「不安装」)。
     pub struct TrayHandle;
 
     /// 非 Windows 平台: 暂不支持, 返回 `None`。
-    pub fn install_tray(_icon: Icon) -> Option<TrayHandle> {
+    /// `icon` 与 `menu` 仅用于类型对齐, 不被消费。
+    pub fn install_tray(_icon: Icon, _menu: Menu) -> Option<TrayHandle> {
         log::info!("托盘在当前平台未启用");
         None
     }
@@ -1008,11 +1036,16 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 }
             }
         }
-        // 托盘菜单事件轮询 (tray-icon 内部维护通道, 静态 receiver)。
-        // Slice 2 暂不消费 (空菜单无事件); Slice 3 起按 MenuId 派发到 `app.tray_action`。
+        // 托盘菜单事件轮询 (muda 内部维护的全局通道)。每个 MenuId 是字符串
+        // 包装 (`MenuId(pub String)`); 我们约定菜单项 id 用 ASCII 数字 ("1"/"2"/"3"),
+        // 解析成 u8 后转交 `app.tray_action`。非法 id 静默忽略。
         let tray_rx = tray_icon::menu::MenuEvent::receiver();
-        while tray_rx.try_recv().is_ok() {
-            // 暂丢弃: 菜单结构尚未挂上, 无可派发的 action。
+        while let Ok(event) = tray_rx.try_recv() {
+            if let Ok(id) = event.id.0.parse::<u8>() {
+                if let Some(msg) = self.app.tray_action(id) {
+                    self.app.update(msg);
+                }
+            }
         }
         // 窗口事件通道轮询
         while let Ok(event) = self.window_event_rx.try_recv() {
@@ -1092,8 +1125,11 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
     });
     // 启动全局热键监听线程 (None 表示平台不支持)
     let hotkey_rx = hotkeys::spawn().map(|(rx, _handle)| rx);
-    // 安装系统托盘 (复用 16x16 托盘尺寸图标; None 表示平台不支持或加载失败)。
-    let tray = load_tray_icon().and_then(tray::install_tray);
+    // 安装系统托盘 (图标 + 菜单)。load_tray_icon 失败则降级到无托盘。
+    let tray = load_tray_icon().and_then(|icon| {
+        let menu = app.tray_menu();
+        tray::install_tray(icon, menu)
+    });
     let mut handler = Handler {
         tree: app.view(),
         config,

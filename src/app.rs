@@ -13,6 +13,7 @@ use crate::event::Event;
 use crate::render::BackgroundFrame;
 use crate::widget::Node;
 use crate::window::WindowEventSender;
+use tray_icon::menu::Menu;
 
 /// 动画 / 时间上下文，由框架每帧传入 `Widget::animate`。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -85,5 +86,12 @@ pub trait App: Any {
     /// 常量见 [`crate::window::tray_action_ids`], 与 `hotkey_ids` 编号独立但语义对齐。
     fn tray_action(&mut self, _id: u8) -> Option<Self::Msg> {
         None
+    }
+
+    /// 构建系统托盘菜单 (右键托盘图标弹出)。默认返回空菜单。
+    /// `run_app` 启动时调用一次, 移动到 TrayIcon 内部。返回的 Menu 由调用方构建,
+    /// 不应在调用方持有引用 (TrayIcon 接管所有权)。
+    fn tray_menu(&self) -> Menu {
+        Menu::new()
     }
 }

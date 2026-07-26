@@ -19,6 +19,7 @@ mod hint;
 mod scenes;
 mod state;
 mod timer;
+mod tray;
 
 #[path = "../common/log.rs"]
 mod example_log;
@@ -32,7 +33,7 @@ use danqing::widget::{
 use danqing::{
     AnimationCtx, App, BackgroundConfig, BackgroundFrame, Color, Easing, Edges, LightTheme,
     ScaleMode, ScenePalette, SceneTheme, Size, Theme, WindowAction, WindowConfig,
-    WindowEventSender, hotkey_ids,
+    WindowEventSender, hotkey_ids, tray_action_ids,
 };
 use fader::SceneFader;
 use flash::FlashOverlay;
@@ -40,6 +41,7 @@ use hint::ShortcutHintOverlay;
 use scenes::SCENES;
 use state::{PomodoroState, RunState, load_state, save_state};
 use timer::{Pomodoro, Run};
+use tray::build_menu;
 
 /// 完成反馈视觉脉冲时长 (头部满 → 尾部透明)。
 const FLASH_DURATION: Duration = Duration::from_millis(600);
@@ -294,6 +296,19 @@ impl App for PomodoroApp {
             hotkey_ids::QUIT => Some(Msg::Quit),
             _ => None,
         }
+    }
+
+    fn tray_action(&mut self, id: u8) -> Option<Msg> {
+        match id {
+            tray_action_ids::TOGGLE_VISIBLE => Some(Msg::ToggleVisible),
+            tray_action_ids::START_PAUSE => Some(Msg::StartPause),
+            tray_action_ids::QUIT => Some(Msg::Quit),
+            _ => None,
+        }
+    }
+
+    fn tray_menu(&self) -> danqing::tray_icon::menu::Menu {
+        build_menu()
     }
 }
 
