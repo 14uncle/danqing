@@ -21,20 +21,11 @@ use winit::window::Window as WinitWindow;
 
 use crate::Color;
 
-/// 根据平台选择单一主 backend, 避免实例创建时扫描多个后端。
+/// 根据平台选择单一主 backend，避免实例创建时扫描多个后端。
 ///
-/// Windows 固定走 DX12: Intel Xe 核显实测 (Windows 32.0.101.7085 驱动, wgpu 30)
-///   DX12 单后端:    dev 启动 ~940ms / release 启动 ~680ms
-///   Vulkan 单后端: dev 启动 ~1180ms / release 启动 ~720ms
-///   Vulkan context init 反而快 (143ms vs 792ms), 但净启动时间 DX12 反胜
-///   ~240ms, 且 DX12 不多占 ~16MB 运行时内存。结论: 本机 DX12 启动更优。
-///   其他驱动 / 厂商可能相反, 用 `DANQING_WGPU_BACKEND=vulkan` 现场验证。
-///
-/// 旧 commit (`4741fe1`) 引用了反向数据 (声称 Vulkan 启动 0.6s, DX12 1.0~1.5s),
-/// 与本机实测相反。`4741fe1` 引入的环境变量覆盖机制本身仍有用, 保留;
-///
-/// `Backends::PRIMARY` 会同时拉起 Vulkan 与 DX12 两套后端加载器
-/// (各自的驱动 DLL 与分配), 常驻内存高约 100MB, 不在启动预算内用。
+/// Windows 固定走 DX12：`Backends::PRIMARY` 会同时拉起 Vulkan 与 DX12
+/// 两套后端加载器（各自的驱动 DLL 与分配），常驻内存更高；DX12 在
+/// Win10+ 全平台可用、核显驱动最省，单后端与本注释意图一致。
 #[cfg(target_os = "windows")]
 const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::DX12;
 #[cfg(target_os = "macos")]
@@ -47,22 +38,6 @@ const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
     all(unix, not(target_os = "macos"))
 )))]
 const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::PRIMARY;
-
-/// 选择 wgpu 后端。默认走平台单一主后端 [`DEFAULT_BACKENDS`]；
-/// 可用环境变量 `DANQING_WGPU_BACKEND` 覆盖以便对比测量启动/内存：
-/// `dx12` / `vulkan` / `gl` / `primary`（大小写不敏感）。
-fn select_backends() -> wgpu::Backends {
-    match env::var("DANQING_WGPU_BACKEND") {
-        Ok(v) => match v.to_ascii_lowercase().as_str() {
-            "dx12" => wgpu::Backends::DX12,
-            "vulkan" | "vk" => wgpu::Backends::VULKAN,
-            "gl" | "opengl" => wgpu::Backends::GL,
-            "primary" => wgpu::Backends::PRIMARY,
-            _ => DEFAULT_BACKENDS,
-        },
-        Err(_) => DEFAULT_BACKENDS,
-    }
-}
 
 /// wgpu 实例标志。
 ///
@@ -137,10 +112,9 @@ impl GpuDevice {
 
     async fn new_async() -> Result<Self, RenderError> {
         let flags = instance_flags();
-        let backends = select_backends();
-        log::info!("创建 wgpu instance：backends={backends:?}, flags={flags:?}");
+        log::info!("创建 wgpu instance：backends={DEFAULT_BACKENDS:?}, flags={flags:?}");
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends,
+            backends: DEFAULT_BACKENDS,
             flags,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
