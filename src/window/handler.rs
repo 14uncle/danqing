@@ -38,47 +38,95 @@ use super::event::{WindowAppEvent, convert_event};
 use super::icon::{apply_windows_undecorated_style, load_window_icon};
 
 /// winit 应用处理器, 驱动窗口生命周期与事件分发。
+///
+/// 字段全部私有:外部通过 [`Handler::new`] 构造, 通过 trait 方法(resumed /
+/// window_event / about_to_wait)操作。
 pub(super) struct Handler<'a, A: App> {
-    pub(super) config: WindowConfig,
-    pub(super) window: Option<Arc<WinitWindow>>,
-    pub(super) context: Option<Context>,
+    config: WindowConfig,
+    window: Option<Arc<WinitWindow>>,
+    context: Option<Context>,
     /// 文本收集器 (持久持有字体与图集)。
-    pub(super) texts: TextBatch,
+    texts: TextBatch,
     /// 当前光标位置 (鼠标输入事件的位置来源)。
-    pub(super) cursor: Point,
+    cursor: Point,
     /// 当前修饰键状态。
-    pub(super) modifiers: ModifiersState,
+    modifiers: ModifiersState,
     /// 应用本体 (状态容器)。
-    pub(super) app: &'a mut A,
+    app: &'a mut A,
     /// 组件树 (启动时由 App::view 构建一次)。
-    pub(super) tree: Node,
+    tree: Node,
     /// 组件产出的消息队列。
-    pub(super) msgs: MsgQueue,
+    msgs: MsgQueue,
     /// 根矩形 (事件命中用, 每帧布局后更新)。
-    pub(super) root_area: Rect,
-    pub(super) focus: FocusManager,
+    root_area: Rect,
+    focus: FocusManager,
     /// 应用启动时间 (用于动画)。
-    pub(super) start: Instant,
+    start: Instant,
     /// 系统剪贴板 (懒加载)。
-    pub(super) clipboard: Option<arboard::Clipboard>,
+    clipboard: Option<arboard::Clipboard>,
     /// 是否已完成首帧渲染 (用于一次性诊断计时)。
-    pub(super) first_frame_done: bool,
+    first_frame_done: bool,
     /// 进程入口时间 (run_app 起点, 用于启动总耗时基准)。
-    pub(super) boot: Instant,
+    boot: Instant,
     /// 全局热键接收器 (来自热键线程, `None` 表示未启用或平台不支持)。
-    pub(super) hotkey_rx: Option<Receiver<u8>>,
+    hotkey_rx: Option<Receiver<u8>>,
     /// 托盘生命周期句柄 (持有期间托盘图标可见; Drop 时移除)。
     /// 仅靠 Drop 副作用保活, 字段本身不读; `dead_code` 抑制。
     #[allow(dead_code)]
-    pub(super) tray: Option<super::tray::TrayHandle>,
+    tray: Option<super::tray::TrayHandle>,
     /// 窗口事件接收器 (App 主动发出: 显隐 / 退出)。
-    pub(super) window_event_rx: Receiver<WindowAppEvent>,
+    window_event_rx: Receiver<WindowAppEvent>,
     /// 当前窗口可见性 (热键 ToggleVisible 状态记录, 与 Handler 同步)。
-    pub(super) is_visible: bool,
+    is_visible: bool,
     /// 后台预建 GPU 设备的线程句柄 (与字体加载/建窗重叠, `resumed` 时 join)。
     ///
     /// `None` 表示未启用后台预建 (join 后置空, 或平台回退同步创建)。
-    pub(super) gpu_handle: Option<JoinHandle<Result<GpuDevice, RenderError>>>,
+    gpu_handle: Option<JoinHandle<Result<GpuDevice, RenderError>>>,
+}
+
+impl<'a, A: App> Handler<'a, A> {
+    /// 构造 Handler。仅接收调用方真正提供的值, 其他字段用合理默认值
+    /// (None / empty / new / Instant::now())就地初始化。
+    /// `tree` 应为 `app.view()` 的结果 (在调用方先求值, 以满足借用检查)。
+    ///
+    /// 9 个参数是必要的(每个子系统一个入口: 配置 / App / 组件树 / 文本 /
+    /// 热键通道 / 托盘 / 窗口事件 / 启动基准 / GPU 线程), 单点构造不接受
+    /// 拆 sub-config (各子系统生命周期独立, 强耦合反而失真)。
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new(
+        config: WindowConfig,
+        app: &'a mut A,
+        tree: Node,
+        texts: TextBatch,
+        hotkey_rx: Option<Receiver<u8>>,
+        tray: Option<super::tray::TrayHandle>,
+        window_event_rx: Receiver<WindowAppEvent>,
+        boot: Instant,
+        gpu_handle: Option<JoinHandle<Result<GpuDevice, RenderError>>>,
+    ) -> Self {
+        Self {
+            config,
+            window: None,
+            context: None,
+            texts,
+            cursor: Point::ZERO,
+            modifiers: ModifiersState::empty(),
+            app,
+            tree,
+            msgs: MsgQueue::new(),
+            root_area: Rect::default(),
+            focus: FocusManager::new(),
+            start: Instant::now(),
+            clipboard: None,
+            first_frame_done: false,
+            boot,
+            hotkey_rx,
+            tray,
+            window_event_rx,
+            is_visible: true,
+            gpu_handle,
+        }
+    }
 }
 
 use super::WindowConfig;

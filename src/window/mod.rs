@@ -22,12 +22,12 @@ pub mod tray;
 use std::sync::mpsc::channel;
 use std::time::Instant;
 
-use winit::{event_loop::EventLoop, keyboard::ModifiersState};
+use winit::event_loop::EventLoop;
 
 use crate::app::App;
 use crate::render::{BackgroundConfig, GpuDevice, TextBatch};
-use crate::widget::{FocusManager, MsgQueue, Node};
-use crate::{Color, Point, Rect, Size};
+use crate::widget::Node;
+use crate::{Color, Size};
 
 pub use event::{WindowAppEvent, WindowEventSender};
 pub use hotkey::hotkey_ids;
@@ -129,28 +129,17 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
         tray::install_tray(icon, menu)
     });
     let tree = app.view();
-    let mut handler = Handler {
+    let mut handler = Handler::new(
         config,
-        window: None,
-        context: None,
-        texts,
-        cursor: Point::ZERO,
-        modifiers: ModifiersState::empty(),
         app,
         tree,
-        msgs: MsgQueue::new(),
-        root_area: Rect::default(),
-        focus: FocusManager::new(),
-        start: Instant::now(),
-        clipboard: None,
-        first_frame_done: false,
-        boot,
+        texts,
         hotkey_rx,
         tray,
         window_event_rx,
-        is_visible: true,
-        gpu_handle: Some(gpu_handle),
-    };
+        boot,
+        Some(gpu_handle),
+    );
     let run_start = Instant::now();
     event_loop.run_app(&mut handler)?;
     log::info!("事件循环运行耗时：{:?}", run_start.elapsed());
