@@ -47,7 +47,7 @@ pub enum WindowError {
 }
 
 fn error_chain_messages(label: &str, error: &(dyn std::error::Error + 'static)) -> Vec<String> {
-    let mut messages = vec![format!("{label}:{error}")];
+    let mut messages = vec![format!("{label}：{error}")];
     let mut source = error.source();
     let mut depth = 1;
     while let Some(error) = source {
