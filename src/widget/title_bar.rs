@@ -256,27 +256,31 @@ impl TitleBar {
         self
     }
 
+    fn set_action<M: 'static>(slot: &mut Option<ActionFactory>, f: impl Fn() -> M + 'static) {
+        *slot = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
+    }
+
     /// 设置关闭按钮产出的消息。
     pub fn on_close<M: 'static>(mut self, f: impl Fn() -> M + 'static) -> Self {
-        self.on_close = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
+        Self::set_action(&mut self.on_close, f);
         self
     }
 
     /// 设置最小化按钮产出的消息。
     pub fn on_minimize<M: 'static>(mut self, f: impl Fn() -> M + 'static) -> Self {
-        self.on_minimize = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
+        Self::set_action(&mut self.on_minimize, f);
         self
     }
 
     /// 设置最大化 / 还原按钮产出的消息。
     pub fn on_maximize<M: 'static>(mut self, f: impl Fn() -> M + 'static) -> Self {
-        self.on_maximize = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
+        Self::set_action(&mut self.on_maximize, f);
         self
     }
 
     /// 设置标题栏拖拽时产出的消息。
     pub fn on_drag<M: 'static>(mut self, f: impl Fn() -> M + 'static) -> Self {
-        self.on_drag = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
+        Self::set_action(&mut self.on_drag, f);
         self
     }
 
