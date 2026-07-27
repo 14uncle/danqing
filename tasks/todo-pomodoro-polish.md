@@ -13,7 +13,7 @@
 - [x] 提交 Phase 1
 
 ## Phase 2: WS3 今日完成计数
-- [ ] **Task 3** 今日计数纯逻辑 — `today_string()` (复用已有 dev-dep chrono `Local`) + `resolve_today_count` 跨日归零判定 + 单元测试
+- [x] **Task 3** 今日计数纯逻辑 — `today_string()` (复用已有 dev-dep chrono `Local`) + `resolve_today_count` 跨日归零判定 + 单元测试
 - [ ] **Task 4** 持久化 `today_date`/`today_count` + tick 计数接线 (`focus_completions` 累加, skip 不计) + 副标「今日 N」(N≥1 才显示) (依赖 1, 3)
 
 ### ⏸ Checkpoint 2: 今日计数就绪

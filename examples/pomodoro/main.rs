@@ -19,6 +19,7 @@ mod hint;
 mod scenes;
 mod state;
 mod timer;
+mod today;
 mod tray;
 
 #[path = "../common/log.rs"]
