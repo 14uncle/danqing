@@ -22,7 +22,7 @@ const BREAK_DURATION_SECS: u64 = 5 * 60; // 5 分钟
 const LONG_BREAK_DURATION_SECS: u64 = 15 * 60; // 15 分钟
 
 /// 每自然完成多少轮专注进入一次长休息。
-const CYCLE_LENGTH: u8 = 4;
+pub const CYCLE_LENGTH: u8 = 4;
 
 /// 计时阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,13 +132,14 @@ impl Pomodoro {
         run: Run,
         remaining: Duration,
         deadline: Option<Duration>,
+        completed_focus: u8,
     ) -> Self {
         Self {
             phase,
             run,
             remaining,
             deadline,
-            completed_focus: 0,
+            completed_focus,
         }
     }
 
@@ -158,8 +159,6 @@ impl Pomodoro {
     }
 
     /// 当前大循环内已自然完成的专注数 (0..CYCLE_LENGTH)。
-    // 副标轮次 UI 接线前暂无生产调用方; expect 在接线后会提醒移除此属性。
-    #[expect(dead_code)]
     pub fn completed_focus(&self) -> u8 {
         self.completed_focus
     }
@@ -397,14 +396,23 @@ mod tests {
 
     #[test]
     fn restore_preserves_all_fields() {
-        let p = Pomodoro::restore(Phase::Break, Run::Paused, Duration::from_secs(120), None);
+        let p = Pomodoro::restore(Phase::Break, Run::Paused, Duration::from_secs(120), None, 2);
         assert_eq!(p.phase(), Phase::Break);
         assert_eq!(p.run(), Run::Paused);
         assert!(!p.is_running());
+        assert_eq!(p.completed_focus(), 2);
         assert_eq!(
             p.remaining(Duration::from_secs(9999)),
             Duration::from_secs(120)
         );
+    }
+
+    #[test]
+    fn restore_cycle_count_continues_cycle() {
+        // 恢复第 4 轮 (completed_focus=3): 自然完成 Focus 应直接进 LongBreak。
+        let mut p = Pomodoro::restore(Phase::Focus, Run::Running, secs(60), Some(secs(60)), 3);
+        p.tick(secs(60));
+        assert_eq!(p.phase(), Phase::LongBreak);
     }
 
     #[test]
@@ -415,6 +423,7 @@ mod tests {
             Run::Running,
             Duration::from_secs(600),
             Some(now + Duration::from_secs(600)),
+            0,
         );
         assert!(p.is_running());
         assert_eq!(p.remaining(now), Duration::from_secs(600));

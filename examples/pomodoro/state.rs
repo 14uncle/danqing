@@ -66,6 +66,10 @@ pub struct PomodoroState {
     /// `serde(default)` 保证旧版 JSON 缺此字段时反序列化为 `false`, 触发一次性提示。
     #[serde(default)]
     pub has_seen_shortcut_hint: bool,
+    /// 当前大循环内已自然完成的专注数 (0..4)。
+    /// `serde(default)` 保证旧版 JSON 缺此字段时反序列化为 `0`。
+    #[serde(default)]
+    pub completed_focus: u8,
 }
 
 impl PomodoroState {
@@ -153,6 +157,7 @@ mod tests {
             saved_elapsed_secs: 567,
             saved_wall_secs: 1_000_000,
             has_seen_shortcut_hint: true,
+            completed_focus: 2,
         };
         let json = serde_json::to_string(&original).unwrap();
         let back: PomodoroState = serde_json::from_str(&json).unwrap();
@@ -173,6 +178,7 @@ mod tests {
             saved_elapsed_secs: 42,
             saved_wall_secs: 999_999,
             has_seen_shortcut_hint: false,
+            completed_focus: 3,
         };
         save_to_path(&path, &original).unwrap();
         let loaded = load_from_path(&path).unwrap();
@@ -202,6 +208,28 @@ mod tests {
             !loaded.has_seen_shortcut_hint,
             "缺字段时应默认为 false (触发提示)"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_old_state_without_cycle_field_defaults_to_zero() {
+        // 旧版 JSON 缺 completed_focus 字段 (打磨 WS2 新增): 反序列化应默认 0。
+        let dir = std::env::temp_dir().join("danqing-test-old-cycle");
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("pomodoro.json");
+        fs::create_dir_all(&dir).unwrap();
+        let old_json = r#"{
+            "phase": "Focus",
+            "run": "Running",
+            "remaining_secs": 700,
+            "current_scene": 1,
+            "saved_elapsed_secs": 10,
+            "saved_wall_secs": 100,
+            "has_seen_shortcut_hint": true
+        }"#;
+        fs::write(&path, old_json).unwrap();
+        let loaded = load_from_path(&path).expect("旧版 JSON 应能加载");
+        assert_eq!(loaded.completed_focus, 0, "缺字段时应默认为 0");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -244,6 +272,7 @@ mod tests {
             saved_elapsed_secs: 100,
             saved_wall_secs: now_secs.saturating_sub(100),
             has_seen_shortcut_hint: false,
+            completed_focus: 0,
         };
         let offset = s.effective_now_offset().as_secs();
         // 期望 ≈ saved_elapsed + (now - saved_wall) = 100 + 100 = 200

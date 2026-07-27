@@ -5,12 +5,12 @@
 
 ## Phase 1: WS2 长休息 + 轮次
 - [x] **Task 1** `timer.rs` — `Phase::LongBreak` (15min) + 轮次计数 `completed_focus` (0..4) + `tick` 返回值升级 `TickReport { advanced, focus_completions }`; skip 不推进轮次; 既有测试适配 + 新增 ≥6 测试
-- [ ] **Task 2** 持久化 `completed_focus` (`#[serde(default)]` 兼容旧 JSON) + 副标轮次显示 (`第 N/4 轮` 仅 Focus 相位; `长休息` label) (依赖 1)
+- [x] **Task 2** 持久化 `completed_focus` (`#[serde(default)]` 兼容旧 JSON) + 副标轮次显示 (`第 N/4 轮` 仅 Focus 相位; `长休息` label) (依赖 1)
 
 ### ⏸ Checkpoint 1: 长休息 + 轮次就绪
-- [ ] `cargo test --example pomodoro` 全绿; fmt + clippy 零警告
+- [x] `cargo test --example pomodoro` 全绿; fmt + clippy 零警告
 - [ ] 手动验: skip 连按 7 次走一遍 4 轮相位流转, 副标轮次正确
-- [ ] 提交 Phase 1
+- [x] 提交 Phase 1
 
 ## Phase 2: WS3 今日完成计数
 - [ ] **Task 3** 今日计数纯逻辑 — `today_string()` (复用已有 dev-dep chrono `Local`) + `resolve_today_count` 跨日归零判定 + 单元测试

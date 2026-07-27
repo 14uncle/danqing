@@ -40,7 +40,7 @@ use flash::FlashOverlay;
 use hint::ShortcutHintOverlay;
 use scenes::SCENES;
 use state::{PomodoroState, RunState, load_state, save_state};
-use timer::{Pomodoro, Run};
+use timer::{Phase, Pomodoro, Run};
 use tray::build_menu;
 
 /// 完成反馈视觉脉冲时长 (头部满 → 尾部透明)。
@@ -130,7 +130,7 @@ impl PomodoroApp {
         } else {
             None
         };
-        let timer = Pomodoro::restore(state.phase, run, remaining, deadline);
+        let timer = Pomodoro::restore(state.phase, run, remaining, deadline, state.completed_focus);
         let fader = if state.current_scene < SCENES.len() {
             SceneFader::new(state.current_scene, FADE_DURATION)
         } else {
@@ -178,6 +178,7 @@ impl PomodoroApp {
             saved_elapsed_secs: self.now.as_secs(),
             saved_wall_secs: current_wall_secs(),
             has_seen_shortcut_hint: self.has_seen_shortcut_hint,
+            completed_focus: self.timer.completed_focus(),
         }
     }
 
@@ -382,6 +383,24 @@ fn shortcut_hint_overlay_widget() -> impl widget::Widget {
     )
 }
 
+/// 副标文案 (纯逻辑, 可测):
+/// - Running + Focus: `专注 · 场景 · 第 N/4 轮` (轮次 = completed_focus + 1);
+/// - Running + Break/LongBreak: `休息 · 场景` / `长休息 · 场景` (不带轮次);
+/// - 暂停/停止: `⏸ 已暂停 · 场景`。
+fn subtitle_text(running: bool, phase: Phase, scene_name: &str, completed_focus: u8) -> String {
+    if !running {
+        return format!("⏸ 已暂停 · {scene_name}");
+    }
+    match phase {
+        Phase::Focus => format!(
+            "专注 · {scene_name} · 第 {}/{} 轮",
+            completed_focus + 1,
+            timer::CYCLE_LENGTH
+        ),
+        Phase::Break | Phase::LongBreak => format!("{} · {scene_name}", phase.label()),
+    }
+}
+
 /// 中央倒计时块：大字倒计时 + 阶段/场景标注。
 /// 暂停时: 倒计时切 `text_secondary` + 整体降饱和 + 副标加 "已暂停" 文字。
 /// 三重信号确保暂停态视觉明显, 用户无需猜测。
@@ -402,11 +421,12 @@ fn countdown_block(t: SceneTheme) -> impl widget::Widget {
         .child(Center::new(
             Text::bind(|s: &PomodoroApp| {
                 let scene_name = SCENES[s.fader.current()].name;
-                if s.timer.is_running() {
-                    format!("{} · {}", s.timer.phase().label(), scene_name)
-                } else {
-                    format!("⏸ 已暂停 · {}", scene_name)
-                }
+                subtitle_text(
+                    s.timer.is_running(),
+                    s.timer.phase(),
+                    scene_name,
+                    s.timer.completed_focus(),
+                )
             })
             .font_size(t.font_size_body())
             .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
@@ -502,4 +522,39 @@ fn run() -> anyhow::Result<()> {
     // 退出 flush: 立即落盘一次, 不走节流。
     app.flush();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subtitle_running_focus_shows_round() {
+        assert_eq!(
+            subtitle_text(true, Phase::Focus, "篝火", 1),
+            "专注 · 篝火 · 第 2/4 轮"
+        );
+        assert_eq!(
+            subtitle_text(true, Phase::Focus, "海", 0),
+            "专注 · 海 · 第 1/4 轮"
+        );
+    }
+
+    #[test]
+    fn subtitle_running_break_and_long_break_hide_round() {
+        assert_eq!(subtitle_text(true, Phase::Break, "海", 2), "休息 · 海");
+        assert_eq!(
+            subtitle_text(true, Phase::LongBreak, "山", 0),
+            "长休息 · 山"
+        );
+    }
+
+    #[test]
+    fn subtitle_paused_keeps_paused_wording() {
+        assert_eq!(subtitle_text(false, Phase::Focus, "雨", 3), "⏸ 已暂停 · 雨");
+        assert_eq!(
+            subtitle_text(false, Phase::LongBreak, "森林", 0),
+            "⏸ 已暂停 · 森林"
+        );
+    }
 }
