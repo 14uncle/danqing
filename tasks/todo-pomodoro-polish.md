@@ -22,7 +22,7 @@
 - [x] 提交 Phase 2
 
 ## Phase 3: WS1 场景环境音(重头戏)
-- [ ] **Task 5** 音源资产 — 5 场景 CC0 音源 (Freesound/OpenGameArt CC0) → OGG ≤2MB × 5, 循环点 50ms 微 crossfade; `assets/audio/` + `ATTRIBUTION.md`; 资产护栏测试 (可与 Task 6 并行)
+- [x] **Task 5** 音源资产 — 5 场景 CC0 音源 (OpenGameArt CC0) → OGG ≤2MB × 5, 循环点 50ms 微 crossfade; `assets/audio/` + `ATTRIBUTION.md`; 资产护栏测试 (可与 Task 6 并行)
 - [x] **Task 6** `ambient.rs` — `AmbientMixer` 纯逻辑 (淡化插值 × 暂停 300ms 包络, 目标音量 0.6) + `SCENE_AUDIO` 平行数组 + ≥6 单元测试 (可与 Task 5 并行)
 - [ ] **Task 7** rodio 接入 — dev-dep rodio (0.21+ API, 先 spike); 2 槽 Sink (from/to, 对齐视觉 LRU) + `repeat_infinite`; 懒初始化 + 静默降级; `tick` 一行接线 (依赖 5, 6)
 
