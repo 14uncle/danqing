@@ -9,8 +9,11 @@
 //!   切换中按 fade 在 from/to 间分配, 与画面 800ms 交叉淡化同源同步。
 //! - 暂停沉降包络: running 边沿触发 300ms 线性 fade-in/fade-out,
 //!   与视觉降饱和同条件 (`is_running`), 稳定态精确为 0.0 / 1.0。
+//!
 //! 时间由外部注入, 不读 wall-clock, 可完整单元测试。
-//! rodio 输出适配层 (Sink 重建 / set_volume) 在音频管线接入时补充。
+//!
+//! 下半部分为 rodio 输出适配层 (`AmbientPlayer`): 懒初始化输出流 +
+//! from/to 双槽 `Player` (与视觉场景纹理 LRU 同构) + 静默降级。
 
 use std::time::Duration;
 
@@ -83,6 +86,139 @@ impl AmbientMixer {
 impl Default for AmbientMixer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// rodio 输出适配层
+// ---------------------------------------------------------------------------
+
+use std::fs::File;
+use std::io::BufReader;
+
+use rodio::Source;
+
+/// 环境音播放器: 输出流 + from/to 双槽, 消费 [`AmbientMixer`] 的帧音量。
+///
+/// - 懒初始化: 首次出现非零音量才打开输出设备, 启动路径 (Idle 静音) 不触音频。
+/// - 双槽: 槽位绑定场景, 与视觉 `(from, to)` 纹理 LRU 同构;
+///   淡化结束后旧场景槽自动释放, 新场景槽按需重建 (`Decoder` 流式 + 无限循环)。
+/// - 静默降级: 打开设备失败永久降级 (`disabled`); 单条音源打不开记入
+///   `failed_scenes` 不再重试。所有失败仅 `log::warn`, 不 panic。
+pub struct AmbientPlayer {
+    /// 输出流 (懒初始化; None = 尚未打开设备)。
+    stream: Option<rodio::MixerDeviceSink>,
+    /// 双槽: (绑定场景索引, 播放器)。drop 即停播。
+    slots: [Option<(usize, rodio::Player)>; 2],
+    /// 永久降级旗标: 输出设备打开失败后置位, 之后每帧直接返回。
+    disabled: bool,
+    /// 打不开 (缺文件 / 解码失败) 的场景, 避免 60fps 重试刷日志。
+    failed_scenes: [bool; SCENE_AUDIO.len()],
+}
+
+impl AmbientPlayer {
+    /// 创建播放器: 未初始化, 未降级, 双槽为空。
+    pub fn new() -> Self {
+        Self {
+            stream: None,
+            slots: [None, None],
+            disabled: false,
+            failed_scenes: [false; SCENE_AUDIO.len()],
+        }
+    }
+
+    /// 每帧应用混音结果: 对齐槽位与活跃场景, 设置两槽音量。
+    ///
+    /// 全静音且无活动槽时直接返回 (不开设备); 任一步失败仅 warn 不 panic。
+    pub fn apply(&mut self, frame: [(usize, f32); 2]) {
+        if self.disabled {
+            return;
+        }
+        // 启动 Idle: 无音量且无槽, 不触碰音频设备。
+        let idle = frame.iter().all(|(_, v)| *v <= 0.0) && self.slots.iter().all(Option::is_none);
+        if idle {
+            return;
+        }
+        if self.stream.is_none() {
+            match rodio::DeviceSinkBuilder::open_default_sink() {
+                Ok(stream) => self.stream = Some(stream),
+                Err(err) => {
+                    log::warn!("环境音输出设备打开失败, 永久降级: {err}");
+                    self.disabled = true;
+                    return;
+                }
+            }
+        }
+        let Some(stream) = self.stream.as_ref() else {
+            return;
+        };
+        let active = [frame[0].0, frame[1].0];
+        // 释放不再活跃的槽 (淡化完成后旧 from 退场)。
+        for slot in &mut self.slots {
+            if let Some((scene, _)) = slot {
+                if !active.contains(scene) {
+                    *slot = None;
+                }
+            }
+        }
+        // 活跃场景缺槽时绑定到空槽; 已知失败的场景跳过。
+        for (scene, _) in frame.iter().copied() {
+            if scene >= SCENE_AUDIO.len()
+                || self.failed_scenes[scene]
+                || self.slots.iter().flatten().any(|(s, _)| *s == scene)
+            {
+                continue;
+            }
+            let Some(slot) = self.slots.iter_mut().find(|slot| slot.is_none()) else {
+                continue;
+            };
+            match Self::build_player(stream, scene) {
+                Some(player) => *slot = Some((scene, player)),
+                None => self.failed_scenes[scene] = true,
+            }
+        }
+        // 音量每帧直写 (300ms 包络 / 800ms 淡化都由 mixer 算好)。
+        for (scene, volume) in frame {
+            if let Some((_, player)) = self.slots.iter().flatten().find(|(s, _)| *s == scene) {
+                player.set_volume(volume);
+            }
+        }
+    }
+
+    /// 为场景构建循环播放槽: 打开文件 + 流式解码 + 无限循环。
+    fn build_player(stream: &rodio::MixerDeviceSink, scene: usize) -> Option<rodio::Player> {
+        let path = SCENE_AUDIO[scene];
+        let file = match File::open(path) {
+            Ok(file) => file,
+            Err(err) => {
+                log::warn!("环境音文件打开失败 ({path}): {err}");
+                return None;
+            }
+        };
+        let decoder = match rodio::Decoder::new(BufReader::new(file)) {
+            Ok(decoder) => decoder,
+            Err(err) => {
+                log::warn!("环境音解码失败 ({path}): {err}");
+                return None;
+            }
+        };
+        let player = rodio::Player::connect_new(stream.mixer());
+        player.append(decoder.repeat_infinite());
+        Some(player)
+    }
+}
+
+impl Default for AmbientPlayer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+impl AmbientPlayer {
+    /// 测试辅助: 强制永久降级, 避免 tick 路径触碰真实音频设备。
+    pub fn disable_for_test(&mut self) {
+        self.disabled = true;
     }
 }
 
@@ -198,5 +334,37 @@ mod tests {
         assert_eq!(v[1].1, 0.0);
         let v = m.frame_volumes(2, 2, 1.0, true, ms(300));
         assert!((v[1].1 - AMBIENT_VOLUME).abs() < 1e-6);
+    }
+
+    #[test]
+    fn player_idle_apply_does_not_touch_device() {
+        // 全静音 + 空槽: apply 直接返回, 不开输出设备, 不降级。
+        let mut player = AmbientPlayer::new();
+        player.apply([(0, 0.0), (0, 0.0)]);
+        assert!(player.stream.is_none(), "Idle 不应打开输出设备");
+        assert!(!player.disabled);
+    }
+
+    #[test]
+    fn player_failed_scene_is_skipped_on_apply() {
+        // 已知失败的场景: apply 跳过绑定, 不建槽不降级。
+        let mut player = AmbientPlayer::new();
+        player.failed_scenes[4] = true;
+        player.apply([(4, 0.0), (4, 0.0)]);
+        assert!(player.slots.iter().all(Option::is_none));
+        assert!(!player.disabled);
+    }
+
+    #[test]
+    fn scene_audio_files_decode_as_ogg_vorbis() {
+        // 解码冒烟: 验证 rodio 精简特性 (symphonia-ogg + symphonia-vorbis)
+        // 足以解码 5 条资产; 不触输出设备, 纯解码路径。
+        for path in SCENE_AUDIO {
+            let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+            let decoder = rodio::Decoder::new(std::io::BufReader::new(file))
+                .unwrap_or_else(|e| panic!("{path} 解码失败: {e}"));
+            let total = decoder.take(4096).count();
+            assert!(total > 0, "{path} 应能解出采样");
+        }
     }
 }

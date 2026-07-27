@@ -12,10 +12,8 @@
     windows_subsystem = "windows"
 )]
 
-mod audio;
-// 音频输出适配层 (rodio) 接入前, 混音器仅测试可见; 接入后转为常规模块。
-#[cfg(test)]
 mod ambient;
+mod audio;
 mod fader;
 mod flash;
 mod hint;
@@ -56,7 +54,7 @@ const NOISE: &str = "assets/background/noise.png";
 const NOISE_OPACITY: f32 = 0.06;
 /// 场景交叉淡化时长 (spec: 600~1000ms)。
 const FADE_DURATION: Duration = Duration::from_millis(800);
-/// 持久化节流间隔: state_dirty 为 true 时, 距上次保存超过此间隔才落盘。
+/// 持久化节流间隔：state_dirty 为 true 时，距上次保存超过此间隔才落盘。
 const SAVE_THROTTLE: Duration = Duration::from_secs(1);
 
 /// 淡化缓动曲线 (淡入淡出两端柔和)。
@@ -72,7 +70,7 @@ struct PomodoroApp {
     fader: SceneFader,
     /// 启动时 elapsed 偏移 (持久化恢复); 0 表示全新会话。
     now_offset: Duration,
-    /// 状态脏旗标: update 触发, tick 节流落盘后清零。
+    /// 状态脏旗标：update 触发，tick 节流落盘后清零。
     state_dirty: bool,
     /// 最近一次成功落盘的 now 值 (节流基准)。
     last_save_at: Duration,
@@ -84,9 +82,13 @@ struct PomodoroApp {
     has_seen_shortcut_hint: bool,
     /// 今日计数所属日期 (YYYY-MM-DD, 与 today_count 配对)。
     today_date: String,
-    /// 今日已自然完成的专注数 (skip 不计, 跨日归零)。
+    /// 今日已自然完成的专注数 (skip 不计，跨日归零)。
     today_count: u32,
-    /// 窗口事件发送器 (run_app 启动时注入, App 借此控制窗口显隐 / 退出)。
+    /// 环境音混音器 (纯逻辑: 淡化权重 × 暂停沉降包络)。
+    ambient_mixer: ambient::AmbientMixer,
+    /// 环境音播放器 (rodio 适配层: 懒初始化 + 双槽 + 静默降级)。
+    ambient_player: ambient::AmbientPlayer,
+    /// 窗口事件发送器 (run_app 启动时注入，App 借此控制窗口显隐 / 退出)。
     window_sender: Option<WindowEventSender>,
 }
 
@@ -95,7 +97,7 @@ struct PomodoroApp {
 enum Msg {
     /// 开始 / 暂停切换。
     StartPause,
-    /// 跳过当前阶段, 进入下一阶段。
+    /// 跳过当前阶段，进入下一阶段。
     Skip,
     /// 重置回专注 25:00 停止态。
     Reset,
@@ -110,7 +112,7 @@ enum Msg {
 }
 
 impl PomodoroApp {
-    /// 默认会话构造: 25:00 Focus Idle, 场景 0, 全部偏移为 0。
+    /// 默认会话构造：25:00 Focus Idle, 场景 0, 全部偏移为 0。
     fn new_default() -> Self {
         Self {
             timer: Pomodoro::new(),
@@ -120,16 +122,18 @@ impl PomodoroApp {
             state_dirty: true,
             last_save_at: Duration::ZERO,
             flash: FlashOverlay::new(FLASH_DURATION),
-            // 全新会话: 触发一次性快捷键提示, 同时标记为已见 (节流落盘后 JSON 持久化)。
+            // 全新会话：触发一次性快捷键提示，同时标记为已见 (节流落盘后 JSON 持久化)。
             hint: ShortcutHintOverlay::triggered_at(Duration::ZERO),
             has_seen_shortcut_hint: true,
             today_date: today::today_string(),
             today_count: 0,
+            ambient_mixer: ambient::AmbientMixer::new(),
+            ambient_player: ambient::AmbientPlayer::new(),
             window_sender: None,
         }
     }
 
-    /// 从持久化状态恢复: 设置 timer / 场景 / now_offset,
+    /// 从持久化状态恢复：设置 timer / 场景 / now_offset,
     /// 状态保持 dirty 以确保一次重写。
     fn from_state(state: PomodoroState) -> Self {
         let now_offset = state.effective_now_offset();
@@ -146,9 +150,9 @@ impl PomodoroApp {
         } else {
             SceneFader::new(0, FADE_DURATION)
         };
-        // 一次性快捷键提示: 没看过就触发一次, 触发即标记为已见。
+        // 一次性快捷键提示：没看过就触发一次，触发即标记为已见。
         let should_show_hint = !state.has_seen_shortcut_hint;
-        // 今日计数: 跨日归零恢复 (空串/过期日期一律归零)。
+        // 今日计数：跨日归零恢复 (空串/过期日期一律归零)。
         let today = today::today_string();
         let today_count = today::resolve_today_count(&state.today_date, state.today_count, &today);
         Self {
@@ -167,19 +171,21 @@ impl PomodoroApp {
             has_seen_shortcut_hint: true,
             today_date: today,
             today_count,
+            ambient_mixer: ambient::AmbientMixer::new(),
+            ambient_player: ambient::AmbientPlayer::new(),
             window_sender: None,
         }
     }
 
-    /// 立即落盘 (退出/异常时调用, 不走节流)。
-    /// 失败不 panic: 进程即将退出, 错误仅供日志, 重试窗口已无。
+    /// 立即落盘 (退出/异常时调用，不走节流)。
+    /// 失败不 panic: 进程即将退出，错误仅供日志，重试窗口已无。
     fn flush(&mut self) {
         match save_state(&self.snapshot_state()) {
             Ok(()) => {
                 self.state_dirty = false;
                 self.last_save_at = self.now;
             }
-            Err(err) => log::warn!("flush 状态失败: {err}"),
+            Err(err) => log::warn!("flush 状态失败：{err}"),
         }
     }
 
@@ -279,8 +285,8 @@ impl App for PomodoroApp {
                 sender.phase_advanced();
             }
         }
-        // 今日计数: 自然完成的专注才计 (skip 不产生 focus_completions);
-        // 跨日先归零再累加, 并标脏触发 1Hz 节流持久化。
+        // 今日计数：自然完成的专注才计 (skip 不产生 focus_completions);
+        // 跨日先归零再累加，并标脏触发 1Hz 节流持久化。
         if report.focus_completions > 0 {
             let today = today::today_string();
             self.today_count =
@@ -289,7 +295,7 @@ impl App for PomodoroApp {
             self.today_date = today;
             self.state_dirty = true;
         }
-        // 1Hz 节流落盘: 状态变更后, 距上次保存 ≥ 1s 才写。
+        // 1Hz 节流落盘：状态变更后，距上次保存 ≥ 1s 才写。
         if self.state_dirty && self.now.saturating_sub(self.last_save_at) >= SAVE_THROTTLE {
             match save_state(&self.snapshot_state()) {
                 Ok(()) => {
@@ -297,11 +303,17 @@ impl App for PomodoroApp {
                     self.state_dirty = false;
                 }
                 Err(err) => {
-                    log::warn!("保存状态失败: {err}");
-                    self.last_save_at = self.now; // 节流, 避免 60fps 重复刷写
+                    log::warn!("保存状态失败：{err}");
+                    self.last_save_at = self.now; // 节流，避免 60fps 重复刷写
                 }
             }
         }
+        // 环境音：与视觉淡化同源 (from/to/fade), 300ms 暂停沉降; 懒初始化 + 静默降级。
+        let (from, to, fade) = self.fader.frame(self.now, |t| FADE_EASING.eval(t));
+        let frame =
+            self.ambient_mixer
+                .frame_volumes(from, to, fade, self.timer.is_running(), self.now);
+        self.ambient_player.apply(frame);
     }
 
     fn background_frame(&self) -> Option<BackgroundFrame> {
@@ -340,7 +352,7 @@ impl App for PomodoroApp {
     }
 }
 
-/// 内容列: 标题栏 + 中央倒计时 + 底部控件条 (无 flash 叠加, flash 由 Stack 在根上盖)。
+/// 内容列：标题栏 + 中央倒计时 + 底部控件条 (无 flash 叠加，flash 由 Stack 在根上盖)。
 fn content_column(t: SceneTheme) -> impl widget::Widget {
     Column::new()
         .cross_stretch()
@@ -356,7 +368,7 @@ fn content_column(t: SceneTheme) -> impl widget::Widget {
         .child(Padding::all(t.spacing_xl(), Center::new(control_pill(t))))
 }
 
-/// 全屏 flash 叠加层: 阶段流转时 accent 色脉冲衰减。
+/// 全屏 flash 叠加层：阶段流转时 accent 色脉冲衰减。
 /// 未激活时 alpha = 0, 完全透明 (无视觉影响); 激活时由 `progress()` 驱动 alpha。
 fn flash_overlay_widget() -> impl widget::Widget {
     UiBox::new(Color::TRANSPARENT).bind_color(|s: &PomodoroApp| {
@@ -366,9 +378,9 @@ fn flash_overlay_widget() -> impl widget::Widget {
     })
 }
 
-/// 首次启动快捷键提示叠加层: 窗口右下角三行快捷键说明, 由 `hint.progress()` 驱动 alpha。
+/// 首次启动快捷键提示叠加层：窗口右下角三行快捷键说明，由 `hint.progress()` 驱动 alpha。
 /// 不激活时完全透明 (无视觉影响); 激活时按 ease-out 淡入 → 停留 → ease-in 淡出。
-/// 布局策略: 外层 Column 用 fill spacer 把内容推到下方; 内层 Row 用 fill spacer 把内容推到右;
+/// 布局策略：外层 Column 用 fill spacer 把内容推到下方; 内层 Row 用 fill spacer 把内容推到右;
 /// 最后 Padding 加 `spacing_lg` 的右/下内边距, 等价于把文本锚定在窗口右下角内缩 16px。
 fn shortcut_hint_overlay_widget() -> impl widget::Widget {
     let line_painter = |s: &PomodoroApp| {
@@ -410,7 +422,7 @@ fn shortcut_hint_overlay_widget() -> impl widget::Widget {
     )
 }
 
-/// 副标文案 (纯逻辑, 可测):
+/// 副标文案 (纯逻辑，可测):
 /// - Running + Focus: `专注 · 场景 · 第 N/4 轮` (轮次 = completed_focus + 1);
 /// - Running + Break/LongBreak: `休息 · 场景` / `长休息 · 场景` (不带轮次);
 /// - 暂停/停止: `⏸ 已暂停 · 场景`;
@@ -442,8 +454,8 @@ fn subtitle_text(
 }
 
 /// 中央倒计时块：大字倒计时 + 阶段/场景标注。
-/// 暂停时: 倒计时切 `text_secondary` + 整体降饱和 + 副标加 "已暂停" 文字。
-/// 三重信号确保暂停态视觉明显, 用户无需猜测。
+/// 暂停时：倒计时切 `text_secondary` + 整体降饱和 + 副标加 "已暂停" 文字。
+/// 三重信号确保暂停态视觉明显，用户无需猜测。
 fn countdown_block(t: SceneTheme) -> impl widget::Widget {
     Column::new()
         .cross_stretch()
@@ -537,7 +549,7 @@ fn run() -> anyhow::Result<()> {
     let mut app = match load_state() {
         Some(state) => {
             log::info!(
-                "从持久化恢复: phase={:?} run={:?} remaining={}s scene={} now_offset={}s",
+                "从持久化恢复：phase={:?} run={:?} remaining={}s scene={} now_offset={}s",
                 state.phase,
                 state.run,
                 state.remaining_secs,
@@ -557,12 +569,12 @@ fn run() -> anyhow::Result<()> {
         size: Size::new(960.0, 640.0),
         clear_color: SCENES[0].palette.base,
         background,
-        // 常驻型应用: 关闭按钮 / Alt+F4 只隐藏窗口, 进程由托盘 / 全局热键退出。
+        // 常驻型应用：关闭按钮 / Alt+F4 只隐藏窗口，进程由托盘 / 全局热键退出。
         close_behavior: danqing::CloseBehavior::Hide,
         ..WindowConfig::default()
     };
     danqing::run_app(config, &mut app)?;
-    // 退出 flush: 立即落盘一次, 不走节流。
+    // 退出 flush: 立即落盘一次，不走节流。
     app.flush();
     Ok(())
 }
@@ -625,6 +637,7 @@ mod tests {
         let mut app = PomodoroApp::new_default();
         assert_eq!(app.today_count, 0);
         app.last_save_at = Duration::from_secs(25 * 60); // 防测试触发真实落盘
+        app.ambient_player.disable_for_test(); // 防测试触碰音频设备
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_secs(25 * 60));
         app.tick(&ctx);
@@ -638,6 +651,7 @@ mod tests {
         app.today_date = "2020-01-01".into();
         app.today_count = 7;
         app.last_save_at = Duration::from_secs(25 * 60); // 防测试触发真实落盘
+        app.ambient_player.disable_for_test(); // 防测试触碰音频设备
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_secs(25 * 60));
         app.tick(&ctx);
