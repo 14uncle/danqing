@@ -3,15 +3,15 @@
 
 //! 窗口与事件循环封装 (winit 平台适配层)。
 //!
-//! 本模块是唯一允许接触 OS 窗口 API 的地方:负责窗口创建、事件循环驱动,
+//! 本模块是唯一允许接触 OS 窗口 API 的地方：负责窗口创建、事件循环驱动，
 //! 并把 winit 事件转换为平台无关的内部事件。
 //!
-//! 子模块:
+//! 子模块：
 //! - `event`   应用 → Handler 事件通道 + winit → 内部事件适配
 //! - `icon`    窗口 / 托盘图标加载 + Windows 无边框样式
 //! - `hotkey`  全局热键 ID 常量 + Windows 注册线程
 //! - `tray`    托盘菜单项 ID + 快捷键 label 单一来源 + 跨平台托盘
-//! - `handler` ApplicationHandler 实现(本模块最大, 单独拆出)
+//! - `handler` ApplicationHandler 实现 (本模块最大，单独拆出)
 
 mod event;
 mod handler;
@@ -47,7 +47,7 @@ pub enum WindowError {
 }
 
 fn error_chain_messages(label: &str, error: &(dyn std::error::Error + 'static)) -> Vec<String> {
-    let mut messages = vec![format!("{label}：{error}")];
+    let mut messages = vec![format!("{label}:{error}")];
     let mut source = error.source();
     let mut depth = 1;
     while let Some(error) = source {
@@ -88,10 +88,10 @@ impl Default for WindowConfig {
         Self {
             title: "danqing showcase".into(),
             size: Size::new(1280.0, 800.0),
-            // 深蓝灰:非常量黑 / 白,用于验证颜色参数通路
+            // 深蓝灰：非常量黑 / 白，用于验证颜色参数通路
             clear_color: Color::rgb(0.10, 0.16, 0.24),
             background: BackgroundConfig::default(),
-            // 浅灰边框,与浅色毛玻璃主题协调
+            // 浅灰边框，与浅色毛玻璃主题协调
             border_color: Color::rgba(0.0, 0.0, 0.0, 0.12),
             border_radius: 12.0,
             border_thickness: 1.0,
@@ -99,7 +99,7 @@ impl Default for WindowConfig {
     }
 }
 
-/// 打开窗口并运行应用:事件分发、消息驱动、每帧重绘,直到窗口关闭。
+/// 打开窗口并运行应用：事件分发、消息驱动、每帧重绘，直到窗口关闭。
 pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowError> {
     use handler::Handler;
     use hotkey::hotkeys;
@@ -113,7 +113,7 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
         "文本批次初始化 (含字体加载) 耗时：{:?}",
         texts_start.elapsed()
     );
-    // 注入窗口事件发送器 (App 主动控制窗口:显隐 / 退出)
+    // 注入窗口事件发送器 (App 主动控制窗口：显隐 / 退出)
     let (window_event_tx, window_event_rx) = channel();
     app.attach_window_sender(WindowEventSender {
         sender: window_event_tx,
@@ -160,8 +160,8 @@ pub fn run(config: WindowConfig) -> Result<(), WindowError> {
 mod tests {
     use super::*;
 
-    /// 冒烟测试:仅创建事件循环 (链接触发 shim 生成的导入库)。
-    /// 若导入库损坏,本测试会以访问违规崩溃。
+    /// 冒烟测试：仅创建事件循环 (链接触发 shim 生成的导入库)。
+    /// 若导入库损坏，本测试会以访问违规崩溃。
     #[test]
     fn event_loop_creation_smoke() {
         use winit::platform::windows::EventLoopBuilderExtWindows;
@@ -169,8 +169,8 @@ mod tests {
         drop(event_loop.expect("创建事件循环失败"));
     }
 
-    /// 单一来源契约:三个共享 ID 在 hotkey_ids / tray_action_ids 两套下
-    /// 都必须返回同一个 label,任何一组漏改都会立刻被这条测试发现。
+    /// 单一来源契约：三个共享 ID 在 hotkey_ids / tray_action_ids 两套下
+    /// 都必须返回同一个 label，任何一组漏改都会立刻被这条测试发现。
     #[test]
     fn shortcut_for_id_returns_consistent_label_across_id_sets() {
         assert_eq!(shortcut_for_id(hotkey_ids::TOGGLE_VISIBLE), "Ctrl+Shift+P");

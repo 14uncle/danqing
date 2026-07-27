@@ -1,10 +1,10 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! winit 应用处理器: 驱动窗口生命周期与事件分发。
+//! winit 应用处理器：驱动窗口生命周期与事件分发。
 //!
-//! 由 `run_app` 构造, 通过 `event_loop.run_app(&mut handler)` 启动。
-//! 持有应用本体 (`&mut A`)、组件树、GPU 上下文、事件通道, 协调:
+//! 由 `run_app` 构造，通过 `event_loop.run_app(&mut handler)` 启动。
+//! 持有应用本体 (`&mut A`)、组件树、GPU 上下文、事件通道，协调：
 //! - 窗口创建 (resumed)
 //! - 事件分发 (window_event)
 //! - 消息消费 (downcast 到 `WindowAction` 或 `App::Msg`)
@@ -36,10 +36,10 @@ use crate::{Point, Rect, Size};
 use super::event::{WindowAppEvent, convert_event};
 use super::icon::{apply_windows_undecorated_style, load_window_icon};
 
-/// winit 应用处理器, 驱动窗口生命周期与事件分发。
+/// winit 应用处理器，驱动窗口生命周期与事件分发。
 ///
-/// 字段全部私有:外部通过 [`Handler::new`] 构造, 通过 trait 方法(resumed /
-/// window_event / about_to_wait)操作。
+/// 字段全部私有：外部通过 [`Handler::new`] 构造，通过 trait 方法 (resumed /
+/// window_event / about_to_wait) 操作。
 pub(super) struct Handler<'a, A: App> {
     config: WindowConfig,
     window: Option<Arc<WinitWindow>>,
@@ -56,7 +56,7 @@ pub(super) struct Handler<'a, A: App> {
     tree: Node,
     /// 组件产出的消息队列。
     msgs: MsgQueue,
-    /// 根矩形 (事件命中用, 每帧布局后更新)。
+    /// 根矩形 (事件命中用，每帧布局后更新)。
     root_area: Rect,
     focus: FocusManager,
     /// 应用启动时间 (用于动画)。
@@ -65,28 +65,28 @@ pub(super) struct Handler<'a, A: App> {
     clipboard: Option<arboard::Clipboard>,
     /// 是否已完成首帧渲染 (用于一次性诊断计时)。
     first_frame_done: bool,
-    /// 进程入口时间 (run_app 起点, 用于启动总耗时基准)。
+    /// 进程入口时间 (run_app 起点，用于启动总耗时基准)。
     boot: Instant,
-    /// 全局热键接收器 (来自热键线程, `None` 表示未启用或平台不支持)。
+    /// 全局热键接收器 (来自热键线程，`None` 表示未启用或平台不支持)。
     hotkey_rx: Option<Receiver<u8>>,
     /// 托盘生命周期句柄 (持有期间托盘图标可见; Drop 时移除)。
-    /// 仅靠 Drop 副作用保活, 字段本身不读; `dead_code` 抑制。
+    /// 仅靠 Drop 副作用保活，字段本身不读; `dead_code` 抑制。
     #[allow(dead_code)]
     tray: Option<super::tray::TrayHandle>,
-    /// 窗口事件接收器 (App 主动发出: 显隐 / 退出)。
+    /// 窗口事件接收器 (App 主动发出：显隐 / 退出)。
     window_event_rx: Receiver<WindowAppEvent>,
-    /// 当前窗口可见性 (热键 ToggleVisible 状态记录, 与 Handler 同步)。
+    /// 当前窗口可见性 (热键 ToggleVisible 状态记录，与 Handler 同步)。
     is_visible: bool,
 }
 
 impl<'a, A: App> Handler<'a, A> {
-    /// 构造 Handler。仅接收调用方真正提供的值, 其他字段用合理默认值
-    /// (None / empty / new / Instant::now())就地初始化。
-    /// `tree` 应为 `app.view()` 的结果 (在调用方先求值, 以满足借用检查)。
+    /// 构造 Handler。仅接收调用方真正提供的值，其他字段用合理默认值
+    /// (None / empty / new / Instant::now()) 就地初始化。
+    /// `tree` 应为 `app.view()` 的结果 (在调用方先求值，以满足借用检查)。
     ///
-    /// 9 个参数是必要的(每个子系统一个入口: 配置 / App / 组件树 / 文本 /
+    /// 9 个参数是必要的 (每个子系统一个入口：配置 / App / 组件树 / 文本 /
     /// 热键通道 / 托盘 / 窗口事件 / 启动基准 / GPU 线程), 单点构造不接受
-    /// 拆 sub-config (各子系统生命周期独立, 强耦合反而失真)。
+    /// 拆 sub-config (各子系统生命周期独立，强耦合反而失真)。
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         config: WindowConfig,
@@ -178,7 +178,7 @@ impl<A: App> Handler<'_, A> {
 
     /// 将键盘 /IME/ 剪贴板事件路由到当前焦点组件。
     fn dispatch_focused_event(&mut self, event: &Event) {
-        // Tab 遍历与当前焦点状态无关, 必须最先处理:
+        // Tab 遍历与当前焦点状态无关，必须最先处理：
         // 清焦 (点击空白/Escape) 后键盘仍能借此重回焦点链。
         if let Event::Key {
             key: Key::Named(NamedKey::Tab),
@@ -204,7 +204,7 @@ impl<A: App> Handler<'_, A> {
             Event::Key { key, pressed, .. } if *pressed => {
                 match key {
                     Key::Named(NamedKey::Escape) => {
-                        // 焦点组件未消费 Escape 时清除焦点,
+                        // 焦点组件未消费 Escape 时清除焦点，
                         // 键盘事件随后回退到应用层。
                         let consumed = event_at_path(
                             &mut self.tree,
@@ -381,8 +381,8 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         if self.window.is_some() {
             return;
         }
-        // 持久化恢复: 用 app 的 boot_elapsed_offset 重置 start, 使得
-        // AnimationCtx::elapsed 从 effective_now 起算, 而不是 0。
+        // 持久化恢复：用 app 的 boot_elapsed_offset 重置 start, 使得
+        // AnimationCtx::elapsed 从 effective_now 起算，而不是 0。
         self.start = Instant::now() - self.app.boot_elapsed_offset();
         let attrs = WindowAttributes::default()
             .with_title(&self.config.title)
@@ -392,7 +392,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 f64::from(self.config.size.width),
                 f64::from(self.config.size.height),
             ));
-        // 全平台使用自绘标题栏 (按钮布局样式由 TitleBar 按平台适配,
+        // 全平台使用自绘标题栏 (按钮布局样式由 TitleBar 按平台适配，
         // 参见 docs/specs/title-bar-cross-platform.md)。
         let attrs = attrs.with_decorations(false);
         let window = match event_loop.create_window(attrs) {
@@ -410,7 +410,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
 
         // 同步 inline 初始化 GPU 上下文 (实例 + surface + 适配器 + 设备 + 管线)。
         // request_adapter 传 `compatible_surface: Some(&surface)` 让 DX12 后端
-        // 一步优化 device / presentation engine 创建,比传 None 省 ~200ms。
+        // 一步优化 device / presentation engine 创建，比传 None 省 ~200ms。
         // 这里没有用后台线程预建 GpuDevice:实测 DX12 上 inline 比 join 快。
         let ctx_start = Instant::now();
         match Context::new(
@@ -433,7 +433,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 机器可读启动基准 (ASCII, 供 tools/benchmark.ps1 解析)。
         log::info!("perf startup_to_visible {:?}", self.boot.elapsed());
         self.window = Some(window);
-        // 持续渲染模式: 请求首帧, 之后每帧结束再请求下一帧
+        // 持续渲染模式：请求首帧，之后每帧结束再请求下一帧
         if let Some(window) = &self.window {
             window.request_redraw();
         }
@@ -449,7 +449,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             return;
         }
 
-        // 鼠标事件经组件树命中分发, 分发后可能更新焦点
+        // 鼠标事件经组件树命中分发，分发后可能更新焦点
         if matches!(
             event,
             WindowEvent::CursorMoved { .. }
@@ -501,7 +501,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         match event {
             WindowEvent::CloseRequested => {
                 // 关闭按钮 = 隐藏 (不退出进程); 进程由 Quit 显式退出。
-                log::info!("收到关闭请求, 隐藏");
+                log::info!("收到关闭请求，隐藏");
                 self.hide_window();
             }
             WindowEvent::Resized(size) => {
@@ -520,7 +520,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 });
                 if let Some(screen) = screen {
                     let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
-                    // 每帧心跳先行: 计时 / 过渡动画推进后, 绑定闭包在 sync 中读到新状态。
+                    // 每帧心跳先行：计时 / 过渡动画推进后，绑定闭包在 sync 中读到新状态。
                     self.app.tick(&ctx);
                     self.tree.sync(self.app);
                     self.tree.animate(&ctx);
@@ -570,8 +570,8 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         log::debug!("[about_to_wait] tick");
         // 隐藏态时主动 tick: RedrawRequested 不会发火 (窗口隐藏), 必须自己驱动
-        // app.tick, 否则计时器冻结, 阶段流转 / 持久化 / flash / beep 全停。
-        // ControlFlow::Poll 已保证循环持续转, 此处 tick 每帧推进。
+        // app.tick, 否则计时器冻结，阶段流转 / 持久化 / flash / beep 全停。
+        // ControlFlow::Poll 已保证循环持续转，此处 tick 每帧推进。
         if !self.is_visible {
             let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
             self.app.tick(&ctx);
@@ -599,16 +599,16 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         while let Ok(event) = self.window_event_rx.try_recv() {
             self.apply_window_event(event, event_loop);
         }
-        // 控制流:
-        // 可见时: 主动 request_redraw + WaitUntil(16ms), 等效 60fps 重绘。
-        //   WaitUntil 比 Poll 显著省 CPU (空载时 Poll 一秒跑几千次, WaitUntil 仅
+        // 控制流：
+        // 可见时：主动 request_redraw + WaitUntil(16ms), 等效 60fps 重绘。
+        //   WaitUntil 比 Poll 显著省 CPU (空载时 Poll 一秒跑几千次，WaitUntil 仅
         //   ~60 次), 同时 OS 调度超时 / 外部事件 / 模态菜单 close 仍能及时唤醒
         //   winit, 行为等价。
-        //   关键: muda 托盘菜单的 TrackPopupMenu 是 Windows 阻塞 API, 会在主线程
-        //         跑模态消息循环, 期间 winit 事件循环被冻结; 菜单关闭后必须主动
+        //   关键：muda 托盘菜单的 TrackPopupMenu 是 Windows 阻塞 API, 会在主线程
+        //         跑模态消息循环，期间 winit 事件循环被冻结; 菜单关闭后必须主动
         //         重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
-        //         过滤/丢弃, UI 卡在旧值不更新(读秒停止、按钮 label 不切)。
-        // 隐藏时: Poll 驱动 app.tick (RedrawRequested 不会发, 因为窗口不可见)。
+        //         过滤/丢弃, UI 卡在旧值不更新 (读秒停止、按钮 label 不切)。
+        // 隐藏时：Poll 驱动 app.tick (RedrawRequested 不会发，因为窗口不可见)。
         if self.is_visible {
             if let Some(window) = &self.window {
                 window.request_redraw();
@@ -623,8 +623,8 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
 }
 
 impl<A: App> Handler<'_, A> {
-    /// 隐藏窗口: 应用层 `is_visible` 与 OS 状态同步翻转。
-    /// 状态切换的"动作"统一收口在此, 减少 toggle / close / min 等路径的复制。
+    /// 隐藏窗口：应用层 `is_visible` 与 OS 状态同步翻转。
+    /// 状态切换的"动作"统一收口在此，减少 toggle / close / min 等路径的复制。
     fn hide_window(&mut self) {
         if let Some(window) = &self.window {
             window.set_visible(false);
@@ -632,7 +632,7 @@ impl<A: App> Handler<'_, A> {
         self.is_visible = false;
     }
 
-    /// 显示窗口 + 抢焦点 + 重绘。winit 的 SW_SHOW 默认不抢焦点,
+    /// 显示窗口 + 抢焦点 + 重绘。winit 的 SW_SHOW 默认不抢焦点，
     /// 显式 focus_window 防止"已显示但被遮" (尤其在另一 app 后台时)。
     fn show_window(&self) {
         if let Some(window) = &self.window {
@@ -646,7 +646,7 @@ impl<A: App> Handler<'_, A> {
     fn apply_window_event(&mut self, event: WindowAppEvent, event_loop: &ActiveEventLoop) {
         match event {
             WindowAppEvent::ToggleVisible => {
-                // Handler 是 is_visible 唯一事实源: 翻转后立即应用到 winit 窗口。
+                // Handler 是 is_visible 唯一事实源：翻转后立即应用到 winit 窗口。
                 self.is_visible = !self.is_visible;
                 if self.is_visible {
                     self.show_window();
@@ -656,10 +656,10 @@ impl<A: App> Handler<'_, A> {
             }
             WindowAppEvent::Quit => event_loop.exit(),
             WindowAppEvent::PhaseAdvanced => {
-                // 隐藏态时阶段流转 → 自动呼出 (用户可能没在电脑前, 或在另一 app)
+                // 隐藏态时阶段流转 → 自动呼出 (用户可能没在电脑前，或在另一 app)
                 if !self.is_visible {
                     self.is_visible = true;
-                    log::info!("阶段流转, 自动呼出窗口");
+                    log::info!("阶段流转，自动呼出窗口");
                     self.show_window();
                 }
             }
