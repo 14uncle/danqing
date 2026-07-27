@@ -11,16 +11,12 @@
 /// 当前本地日期串 (YYYY-MM-DD)。
 ///
 /// 复用已有 dev-dependency `chrono`; 读取点集中于此, 测试不依赖系统时钟。
-// 计数接线 (tick 累加 + 持久化) 后 expect 会提醒移除此属性。
-#[expect(dead_code)]
 pub fn today_string() -> String {
     chrono::Local::now().date_naive().to_string()
 }
 
 /// 今日计数归零判定: 已存日期与今日相同则保留计数, 否则归零。
 /// 空串 (旧版 JSON / 首次启动) 视为不同日期, 一律归零。
-// 计数接线 (tick 累加 + 持久化) 后 expect 会提醒移除此属性。
-#[expect(dead_code)]
 pub fn resolve_today_count(saved_date: &str, saved_count: u32, today: &str) -> u32 {
     if !saved_date.is_empty() && saved_date == today {
         saved_count

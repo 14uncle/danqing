@@ -70,6 +70,12 @@ pub struct PomodoroState {
     /// `serde(default)` 保证旧版 JSON 缺此字段时反序列化为 `0`。
     #[serde(default)]
     pub completed_focus: u8,
+    /// 今日计数所属日期 (YYYY-MM-DD); 空串表示未记录 (旧版 JSON / 首次启动)。
+    #[serde(default)]
+    pub today_date: String,
+    /// 今日已自然完成的专注数 (跨日归零由 `today::resolve_today_count` 判定)。
+    #[serde(default)]
+    pub today_count: u32,
 }
 
 impl PomodoroState {
@@ -158,6 +164,8 @@ mod tests {
             saved_wall_secs: 1_000_000,
             has_seen_shortcut_hint: true,
             completed_focus: 2,
+            today_date: "2026-07-27".into(),
+            today_count: 2,
         };
         let json = serde_json::to_string(&original).unwrap();
         let back: PomodoroState = serde_json::from_str(&json).unwrap();
@@ -179,6 +187,8 @@ mod tests {
             saved_wall_secs: 999_999,
             has_seen_shortcut_hint: false,
             completed_focus: 3,
+            today_date: "2026-07-26".into(),
+            today_count: 5,
         };
         save_to_path(&path, &original).unwrap();
         let loaded = load_from_path(&path).unwrap();
@@ -234,6 +244,31 @@ mod tests {
     }
 
     #[test]
+    fn load_old_state_without_today_fields_defaults() {
+        // 旧版 JSON 缺 today_date / today_count 字段 (打磨 WS3 新增):
+        // 反序列化应默认为空串与 0 (空串经 resolve_today_count 判定即归零)。
+        let dir = std::env::temp_dir().join("danqing-test-old-today");
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("pomodoro.json");
+        fs::create_dir_all(&dir).unwrap();
+        let old_json = r#"{
+            "phase": "Break",
+            "run": "Paused",
+            "remaining_secs": 300,
+            "current_scene": 0,
+            "saved_elapsed_secs": 0,
+            "saved_wall_secs": 0,
+            "has_seen_shortcut_hint": true,
+            "completed_focus": 1
+        }"#;
+        fs::write(&path, old_json).unwrap();
+        let loaded = load_from_path(&path).expect("旧版 JSON 应能加载");
+        assert!(loaded.today_date.is_empty(), "缺字段时应默认为空串");
+        assert_eq!(loaded.today_count, 0, "缺字段时应默认为 0");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn load_from_nonexistent_path_returns_none() {
         let path = std::env::temp_dir().join("danqing-test-nonexistent.json");
         let _ = fs::remove_file(&path);
@@ -273,6 +308,8 @@ mod tests {
             saved_wall_secs: now_secs.saturating_sub(100),
             has_seen_shortcut_hint: false,
             completed_focus: 0,
+            today_date: String::new(),
+            today_count: 0,
         };
         let offset = s.effective_now_offset().as_secs();
         // 期望 ≈ saved_elapsed + (now - saved_wall) = 100 + 100 = 200

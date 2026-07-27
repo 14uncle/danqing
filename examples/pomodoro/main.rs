@@ -79,6 +79,10 @@ struct PomodoroApp {
     hint: ShortcutHintOverlay,
     /// 当前持久化的「已见过快捷键提示」旗标 (snapshot_state 直接读)。
     has_seen_shortcut_hint: bool,
+    /// 今日计数所属日期 (YYYY-MM-DD, 与 today_count 配对)。
+    today_date: String,
+    /// 今日已自然完成的专注数 (skip 不计, 跨日归零)。
+    today_count: u32,
     /// 窗口事件发送器 (run_app 启动时注入, App 借此控制窗口显隐 / 退出)。
     window_sender: Option<WindowEventSender>,
 }
@@ -116,6 +120,8 @@ impl PomodoroApp {
             // 全新会话: 触发一次性快捷键提示, 同时标记为已见 (节流落盘后 JSON 持久化)。
             hint: ShortcutHintOverlay::triggered_at(Duration::ZERO),
             has_seen_shortcut_hint: true,
+            today_date: today::today_string(),
+            today_count: 0,
             window_sender: None,
         }
     }
@@ -139,6 +145,9 @@ impl PomodoroApp {
         };
         // 一次性快捷键提示: 没看过就触发一次, 触发即标记为已见。
         let should_show_hint = !state.has_seen_shortcut_hint;
+        // 今日计数: 跨日归零恢复 (空串/过期日期一律归零)。
+        let today = today::today_string();
+        let today_count = today::resolve_today_count(&state.today_date, state.today_count, &today);
         Self {
             timer,
             now: now_offset,
@@ -153,6 +162,8 @@ impl PomodoroApp {
                 ShortcutHintOverlay::idle()
             },
             has_seen_shortcut_hint: true,
+            today_date: today,
+            today_count,
             window_sender: None,
         }
     }
@@ -180,6 +191,8 @@ impl PomodoroApp {
             saved_wall_secs: current_wall_secs(),
             has_seen_shortcut_hint: self.has_seen_shortcut_hint,
             completed_focus: self.timer.completed_focus(),
+            today_date: self.today_date.clone(),
+            today_count: self.today_count,
         }
     }
 
@@ -262,6 +275,16 @@ impl App for PomodoroApp {
             if let Some(sender) = &self.window_sender {
                 sender.phase_advanced();
             }
+        }
+        // 今日计数: 自然完成的专注才计 (skip 不产生 focus_completions);
+        // 跨日先归零再累加, 并标脏触发 1Hz 节流持久化。
+        if report.focus_completions > 0 {
+            let today = today::today_string();
+            self.today_count =
+                today::resolve_today_count(&self.today_date, self.today_count, &today)
+                    + u32::from(report.focus_completions);
+            self.today_date = today;
+            self.state_dirty = true;
         }
         // 1Hz 节流落盘: 状态变更后, 距上次保存 ≥ 1s 才写。
         if self.state_dirty && self.now.saturating_sub(self.last_save_at) >= SAVE_THROTTLE {
@@ -387,18 +410,31 @@ fn shortcut_hint_overlay_widget() -> impl widget::Widget {
 /// 副标文案 (纯逻辑, 可测):
 /// - Running + Focus: `专注 · 场景 · 第 N/4 轮` (轮次 = completed_focus + 1);
 /// - Running + Break/LongBreak: `休息 · 场景` / `长休息 · 场景` (不带轮次);
-/// - 暂停/停止: `⏸ 已暂停 · 场景`。
-fn subtitle_text(running: bool, phase: Phase, scene_name: &str, completed_focus: u8) -> String {
-    if !running {
-        return format!("⏸ 已暂停 · {scene_name}");
-    }
-    match phase {
-        Phase::Focus => format!(
-            "专注 · {scene_name} · 第 {}/{} 轮",
-            completed_focus + 1,
-            timer::CYCLE_LENGTH
-        ),
-        Phase::Break | Phase::LongBreak => format!("{} · {scene_name}", phase.label()),
+/// - 暂停/停止: `⏸ 已暂停 · 场景`;
+/// - 今日计数 ≥ 1 时所有形态追加 ` · 今日 N`。
+fn subtitle_text(
+    running: bool,
+    phase: Phase,
+    scene_name: &str,
+    completed_focus: u8,
+    today_count: u32,
+) -> String {
+    let base = if !running {
+        format!("⏸ 已暂停 · {scene_name}")
+    } else {
+        match phase {
+            Phase::Focus => format!(
+                "专注 · {scene_name} · 第 {}/{} 轮",
+                completed_focus + 1,
+                timer::CYCLE_LENGTH
+            ),
+            Phase::Break | Phase::LongBreak => format!("{} · {scene_name}", phase.label()),
+        }
+    };
+    if today_count >= 1 {
+        format!("{base} · 今日 {today_count}")
+    } else {
+        base
     }
 }
 
@@ -427,6 +463,7 @@ fn countdown_block(t: SceneTheme) -> impl widget::Widget {
                     s.timer.phase(),
                     scene_name,
                     s.timer.completed_focus(),
+                    s.today_count,
                 )
             })
             .font_size(t.font_size_body())
@@ -532,30 +569,102 @@ mod tests {
     #[test]
     fn subtitle_running_focus_shows_round() {
         assert_eq!(
-            subtitle_text(true, Phase::Focus, "篝火", 1),
+            subtitle_text(true, Phase::Focus, "篝火", 1, 0),
             "专注 · 篝火 · 第 2/4 轮"
         );
         assert_eq!(
-            subtitle_text(true, Phase::Focus, "海", 0),
+            subtitle_text(true, Phase::Focus, "海", 0, 0),
             "专注 · 海 · 第 1/4 轮"
         );
     }
 
     #[test]
     fn subtitle_running_break_and_long_break_hide_round() {
-        assert_eq!(subtitle_text(true, Phase::Break, "海", 2), "休息 · 海");
+        assert_eq!(subtitle_text(true, Phase::Break, "海", 2, 0), "休息 · 海");
         assert_eq!(
-            subtitle_text(true, Phase::LongBreak, "山", 0),
+            subtitle_text(true, Phase::LongBreak, "山", 0, 0),
             "长休息 · 山"
         );
     }
 
     #[test]
     fn subtitle_paused_keeps_paused_wording() {
-        assert_eq!(subtitle_text(false, Phase::Focus, "雨", 3), "⏸ 已暂停 · 雨");
         assert_eq!(
-            subtitle_text(false, Phase::LongBreak, "森林", 0),
+            subtitle_text(false, Phase::Focus, "雨", 3, 0),
+            "⏸ 已暂停 · 雨"
+        );
+        assert_eq!(
+            subtitle_text(false, Phase::LongBreak, "森林", 0, 0),
             "⏸ 已暂停 · 森林"
         );
+    }
+
+    #[test]
+    fn subtitle_appends_today_count_when_positive() {
+        assert_eq!(
+            subtitle_text(true, Phase::Focus, "篝火", 1, 3),
+            "专注 · 篝火 · 第 2/4 轮 · 今日 3"
+        );
+        assert_eq!(
+            subtitle_text(true, Phase::Break, "海", 2, 1),
+            "休息 · 海 · 今日 1"
+        );
+        assert_eq!(
+            subtitle_text(false, Phase::Focus, "雨", 3, 2),
+            "⏸ 已暂停 · 雨 · 今日 2"
+        );
+    }
+
+    #[test]
+    fn focus_completion_bumps_today_count() {
+        let mut app = PomodoroApp::new_default();
+        assert_eq!(app.today_count, 0);
+        app.last_save_at = Duration::from_secs(25 * 60); // 防测试触发真实落盘
+        app.timer.toggle(app.now);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_secs(25 * 60));
+        app.tick(&ctx);
+        assert_eq!(app.today_count, 1);
+        assert!(app.state_dirty, "计数变更应标脏以触发持久化");
+    }
+
+    #[test]
+    fn completion_on_new_day_resets_before_bump() {
+        let mut app = PomodoroApp::new_default();
+        app.today_date = "2020-01-01".into();
+        app.today_count = 7;
+        app.last_save_at = Duration::from_secs(25 * 60); // 防测试触发真实落盘
+        app.timer.toggle(app.now);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_secs(25 * 60));
+        app.tick(&ctx);
+        assert_eq!(app.today_count, 1, "跨日应先归零再 +1");
+        assert_eq!(app.today_date, today::today_string());
+    }
+
+    #[test]
+    fn skip_does_not_bump_today_count() {
+        let mut app = PomodoroApp::new_default();
+        app.timer.toggle(app.now);
+        app.update(Msg::Skip);
+        assert_eq!(app.today_count, 0);
+    }
+
+    #[test]
+    fn today_count_survives_state_roundtrip() {
+        let mut app = PomodoroApp::new_default();
+        app.today_count = 3;
+        app.today_date = today::today_string();
+        let state = app.snapshot_state();
+        let restored = PomodoroApp::from_state(state);
+        assert_eq!(restored.today_count, 3);
+    }
+
+    #[test]
+    fn stale_date_resets_on_restore() {
+        let mut app = PomodoroApp::new_default();
+        app.today_count = 9;
+        app.today_date = "2020-01-01".into();
+        let state = app.snapshot_state();
+        let restored = PomodoroApp::from_state(state);
+        assert_eq!(restored.today_count, 0, "过期日期恢复时应归零");
     }
 }

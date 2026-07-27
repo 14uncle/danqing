@@ -14,12 +14,12 @@
 
 ## Phase 2: WS3 今日完成计数
 - [x] **Task 3** 今日计数纯逻辑 — `today_string()` (复用已有 dev-dep chrono `Local`) + `resolve_today_count` 跨日归零判定 + 单元测试
-- [ ] **Task 4** 持久化 `today_date`/`today_count` + tick 计数接线 (`focus_completions` 累加, skip 不计) + 副标「今日 N」(N≥1 才显示) (依赖 1, 3)
+- [x] **Task 4** 持久化 `today_date`/`today_count` + tick 计数接线 (`focus_completions` 累加, skip 不计) + 副标「今日 N」(N≥1 才显示) (依赖 1, 3)
 
 ### ⏸ Checkpoint 2: 今日计数就绪
-- [ ] `cargo test --example pomodoro` 全绿; fmt + clippy 零警告
+- [x] `cargo test --example pomodoro` 全绿; fmt + clippy 零警告
 - [ ] 手动验: 完成一个 Focus (或构造 state), 副标显示「今日 1」
-- [ ] 提交 Phase 2
+- [x] 提交 Phase 2
 
 ## Phase 3: WS1 场景环境音(重头戏)
 - [ ] **Task 5** 音源资产 — 5 场景 CC0 音源 (Freesound/OpenGameArt CC0) → OGG ≤2MB × 5, 循环点 50ms 微 crossfade; `assets/audio/` + `ATTRIBUTION.md`; 资产护栏测试 (可与 Task 6 并行)
