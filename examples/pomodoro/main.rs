@@ -13,6 +13,9 @@
 )]
 
 mod audio;
+// 音频输出适配层 (rodio) 接入前, 混音器仅测试可见; 接入后转为常规模块。
+#[cfg(test)]
+mod ambient;
 mod fader;
 mod flash;
 mod hint;
@@ -554,6 +557,8 @@ fn run() -> anyhow::Result<()> {
         size: Size::new(960.0, 640.0),
         clear_color: SCENES[0].palette.base,
         background,
+        // 常驻型应用: 关闭按钮 / Alt+F4 只隐藏窗口, 进程由托盘 / 全局热键退出。
+        close_behavior: danqing::CloseBehavior::Hide,
         ..WindowConfig::default()
     };
     danqing::run_app(config, &mut app)?;
