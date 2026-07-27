@@ -251,8 +251,8 @@ impl App for PomodoroApp {
 
     fn tick(&mut self, ctx: &AnimationCtx) {
         self.now = ctx.elapsed;
-        let advanced = self.timer.tick(ctx.elapsed);
-        if advanced {
+        let report = self.timer.tick(ctx.elapsed);
+        if report.advanced {
             // 阶段流转触发视觉脉冲 + 系统提示音
             self.flash.trigger(self.now);
             audio::beep();
