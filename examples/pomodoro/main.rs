@@ -322,11 +322,21 @@ impl App for PomodoroApp {
                 }
             }
         }
-        // 环境音：与视觉淡化同源 (from/to/fade), 300ms 暂停沉降; 懒初始化 + 静默降级。
+        // 环境音：与视觉淡化同源 (from/to/fade), 300ms 增益包络;
+        // 休息期 duck 沉降 (世界退远一步), 懒初始化 + 静默降级。
         let (from, to, fade) = self.fader.frame(self.now, |t| FADE_EASING.eval(t));
-        let frame =
-            self.ambient_mixer
-                .frame_volumes(from, to, fade, self.timer.is_running(), self.now);
+        let duck = match self.timer.phase() {
+            Phase::Focus => 1.0,
+            Phase::Break | Phase::LongBreak => ambient::BREAK_DUCK,
+        };
+        let frame = self.ambient_mixer.frame_volumes(
+            from,
+            to,
+            fade,
+            self.timer.is_running(),
+            duck,
+            self.now,
+        );
         self.ambient_player.apply(frame);
     }
 

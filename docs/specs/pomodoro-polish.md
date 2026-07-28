@@ -38,6 +38,7 @@
 - [x] `tools/benchmark.ps1` 启动 ≤1s、常驻 WS ≤360MB 门槛不破 (2026-07-28: 693.8ms / 177.5MB)
 - [x] `assets/audio/ATTRIBUTION.md` 记录全部音源出处与许可
 - [x] `AmbientMixer` 纯逻辑单元测试: 淡化插值、暂停沉降、边界 (单场景/首尾切换)
+- [x] 休息期 (Break/LongBreak) 环境音增益沉降 ×0.5, 回专注 300ms 滑回全量; skip 进休息同样生效 (2026-07-28 增补, 用户决策: Focus/Break 不换图换声, 仅音量沉降)
 
 ## WS2 长休息 + 轮次
 

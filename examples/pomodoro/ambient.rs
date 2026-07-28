@@ -4,11 +4,12 @@
 //! 场景环境音混音器 (纯逻辑)。
 //!
 //! 每帧把视觉淡化的 `(from, to, fade)` 与运行态转成两个音频槽的音量:
-//! 音量 = 淡化权重 × 暂停沉降包络 × `AMBIENT_VOLUME`。
+//! 音量 = 淡化权重 × 增益包络 × `AMBIENT_VOLUME`。
 //! - 淡化权重: 静止 (from == to, fade = 1) 时全量落在 to 槽;
 //!   切换中按 fade 在 from/to 间分配, 与画面 800ms 交叉淡化同源同步。
-//! - 暂停沉降包络: running 边沿触发 300ms 线性 fade-in/fade-out,
-//!   与视觉降饱和同条件 (`is_running`), 稳定态精确为 0.0 / 1.0。
+//! - 增益包络: 目标增益 = running ? duck : 0 (暂停静音; 休息期 duck 沉降)。
+//!   目标变化 (开始/暂停/相位切换) 触发 300ms 线性包络, 反向边沿从当前值
+//!   续接 (无跳变), 稳定态精确到达目标。
 //!
 //! 时间由外部注入, 不读 wall-clock, 可完整单元测试。
 //!
@@ -33,18 +34,21 @@ pub const SCENE_AUDIO: [&str; 5] = [
 /// 环境音目标音量 (固定, 无设置 UI)。
 pub const AMBIENT_VOLUME: f32 = 0.6;
 
-/// 暂停沉降包络时长 (淡入/淡出对称)。
+/// 休息期 (Break/LongBreak) 增益沉降系数: 世界还在, 但退远一步。
+pub const BREAK_DUCK: f32 = 0.5;
+
+/// 增益包络时长 (淡入/淡出/沉降/恢复对称)。
 const ENVELOPE_DURATION: Duration = Duration::from_millis(300);
 
-/// 环境音混音器: 淡化权重 × 暂停沉降包络。
+/// 环境音混音器: 淡化权重 × 增益包络。
 #[derive(Debug, Clone)]
 pub struct AmbientMixer {
     /// 包络当前值 (0..1, 1 = 全量)。
     envelope: f32,
     /// 进行中的包络动画: (起始值, 目标值, 开始时刻)。
     anim: Option<(f32, f32, Duration)>,
-    /// 上一帧见到的 running 状态 (边沿检测)。
-    last_running: bool,
+    /// 上一帧见到的目标增益 (边沿检测: running 与 duck 合成)。
+    last_target: f32,
 }
 
 impl AmbientMixer {
@@ -53,26 +57,29 @@ impl AmbientMixer {
         Self {
             envelope: 0.0,
             anim: None,
-            last_running: false,
+            last_target: 0.0,
         }
     }
 
     /// 计算两槽音量: `[(from, v_from), (to, v_to)]`。
     ///
-    /// `fade` 为视觉淡化进度 (0..1, 经缓动); `running` 为计时运行态。
-    /// running 边沿触发 300ms 包络动画; 动画进行中反向边沿从当前值续接 (无跳变)。
+    /// `fade` 为视觉淡化进度 (0..1, 经缓动); `running` 为计时运行态;
+    /// `duck` 为相位沉降系数 (Focus = 1.0, Break/LongBreak = [`BREAK_DUCK`])。
+    /// 目标增益 = running ? duck : 0; 目标变化触发 300ms 包络动画,
+    /// 动画进行中反向边沿从当前值续接 (无跳变)。
     pub fn frame_volumes(
         &mut self,
         from: usize,
         to: usize,
         fade: f32,
         running: bool,
+        duck: f32,
         now: Duration,
     ) -> [(usize, f32); 2] {
-        if running != self.last_running {
-            let target = if running { 1.0 } else { 0.0 };
+        let target = if running { duck } else { 0.0 };
+        if target != self.last_target {
             self.anim = Some((self.envelope, target, now));
-            self.last_running = running;
+            self.last_target = target;
         }
         if let Some((start_v, target_v, start_t)) = self.anim {
             let t = (now.saturating_sub(start_t).as_secs_f32() / ENVELOPE_DURATION.as_secs_f32())
@@ -318,7 +325,7 @@ mod tests {
     fn idle_stays_silent() {
         let mut m = AmbientMixer::new();
         for t in [0, 100, 10_000] {
-            let v = m.frame_volumes(0, 0, 1.0, false, ms(t));
+            let v = m.frame_volumes(0, 0, 1.0, false, 1.0, ms(t));
             assert_eq!(v, [(0, 0.0), (0, 0.0)], "Idle 应始终静音 (t={t})");
         }
     }
@@ -327,47 +334,47 @@ mod tests {
     fn running_fades_in_over_300ms() {
         let mut m = AmbientMixer::new();
         // 边沿帧: 包络从 0 起, 音量为 0。
-        let v = m.frame_volumes(0, 0, 1.0, true, ms(1000));
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1000));
         assert_eq!(v[1].1, 0.0);
         // 中点: 包络 0.5 → 音量 0.3。
-        let v = m.frame_volumes(0, 0, 1.0, true, ms(1150));
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1150));
         assert!((v[1].1 - 0.3).abs() < 1e-6, "中点应为半量: {}", v[1].1);
         // 终点及之后: 稳定全量 0.6。
-        let v = m.frame_volumes(0, 0, 1.0, true, ms(1300));
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1300));
         assert!((v[1].1 - AMBIENT_VOLUME).abs() < 1e-6);
-        let v = m.frame_volumes(0, 0, 1.0, true, ms(999_999));
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(999_999));
         assert!((v[1].1 - AMBIENT_VOLUME).abs() < 1e-6);
     }
 
     #[test]
     fn pause_fades_out_over_300ms() {
         let mut m = AmbientMixer::new();
-        m.frame_volumes(0, 0, 1.0, true, ms(0));
-        m.frame_volumes(0, 0, 1.0, true, ms(300)); // 淡入完成, 全量
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(0));
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(300)); // 淡入完成, 全量
         // 暂停边沿: 从全量起淡。
-        let v = m.frame_volumes(0, 0, 1.0, false, ms(1000));
+        let v = m.frame_volumes(0, 0, 1.0, false, 1.0, ms(1000));
         assert!((v[1].1 - AMBIENT_VOLUME).abs() < 1e-6, "边沿帧应连续");
-        let v = m.frame_volumes(0, 0, 1.0, false, ms(1150));
+        let v = m.frame_volumes(0, 0, 1.0, false, 1.0, ms(1150));
         assert!((v[1].1 - 0.3).abs() < 1e-6, "中点应为半量: {}", v[1].1);
-        let v = m.frame_volumes(0, 0, 1.0, false, ms(1300));
+        let v = m.frame_volumes(0, 0, 1.0, false, 1.0, ms(1300));
         assert_eq!(v[1].1, 0.0);
     }
 
     #[test]
     fn fade_interpolation_splits_volume() {
         let mut m = AmbientMixer::new();
-        m.frame_volumes(0, 0, 1.0, true, ms(0));
-        m.frame_volumes(0, 0, 1.0, true, ms(300)); // 全量
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(0));
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(300)); // 全量
         // 切换起点: 全量在 from。
-        let v = m.frame_volumes(0, 1, 0.0, true, ms(400));
+        let v = m.frame_volumes(0, 1, 0.0, true, 1.0, ms(400));
         assert!((v[0].1 - AMBIENT_VOLUME).abs() < 1e-6);
         assert_eq!(v[1].1, 0.0);
         // 中点: 两槽各半。
-        let v = m.frame_volumes(0, 1, 0.5, true, ms(500));
+        let v = m.frame_volumes(0, 1, 0.5, true, 1.0, ms(500));
         assert!((v[0].1 - 0.3).abs() < 1e-6);
         assert!((v[1].1 - 0.3).abs() < 1e-6);
         // 终点: 全量在 to。
-        let v = m.frame_volumes(0, 1, 1.0, true, ms(600));
+        let v = m.frame_volumes(0, 1, 1.0, true, 1.0, ms(600));
         assert_eq!(v[0].1, 0.0);
         assert!((v[1].1 - AMBIENT_VOLUME).abs() < 1e-6);
     }
@@ -375,9 +382,9 @@ mod tests {
     #[test]
     fn envelope_and_fade_are_independent() {
         let mut m = AmbientMixer::new();
-        m.frame_volumes(0, 0, 1.0, true, ms(0));
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(0));
         // 淡化中点 + 包络中点 (150ms): 音量 = 0.5 淡化 × 0.5 包络 × 0.6 = 0.15。
-        let v = m.frame_volumes(0, 1, 0.5, true, ms(150));
+        let v = m.frame_volumes(0, 1, 0.5, true, 1.0, ms(150));
         assert!((v[0].1 - 0.15).abs() < 1e-6, "from: {}", v[0].1);
         assert!((v[1].1 - 0.15).abs() < 1e-6, "to: {}", v[1].1);
     }
@@ -385,22 +392,22 @@ mod tests {
     #[test]
     fn retrigger_mid_envelope_continues_from_current_value() {
         let mut m = AmbientMixer::new();
-        m.frame_volumes(0, 0, 1.0, true, ms(0));
-        m.frame_volumes(0, 0, 1.0, true, ms(300)); // 全量
-        m.frame_volumes(0, 0, 1.0, false, ms(1000)); // 开始淡出
-        let v = m.frame_volumes(0, 0, 1.0, false, ms(1150)); // 淡出中点 0.3
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(0));
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(300)); // 全量
+        m.frame_volumes(0, 0, 1.0, false, 1.0, ms(1000)); // 开始淡出
+        let v = m.frame_volumes(0, 0, 1.0, false, 1.0, ms(1150)); // 淡出中点 0.3
         let mid = v[1].1;
         // 淡出中点恢复: 从当前包络值 (0.5) 续接淡入, 不跳变。
-        let v = m.frame_volumes(0, 0, 1.0, true, ms(1200));
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1200));
         assert!(
             (v[1].1 - mid).abs() < 1e-6,
             "反向边沿应连续: {mid} -> {}",
             v[1].1
         );
         // 固定 300ms 包络时长: 中点 (150ms) 走到 0.75 → 0.45; 终点 (300ms) 回全量。
-        let v = m.frame_volumes(0, 0, 1.0, true, ms(1350));
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1350));
         assert!((v[1].1 - 0.45).abs() < 1e-6, "中点: {}", v[1].1);
-        let v = m.frame_volumes(0, 0, 1.0, true, ms(1500));
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1500));
         assert!((v[1].1 - AMBIENT_VOLUME).abs() < 1e-6);
     }
 
@@ -408,10 +415,59 @@ mod tests {
     fn restored_running_session_fades_in_from_silence() {
         // 恢复 Running 会话: 首帧即 running=true, 从静音淡入而非爆音。
         let mut m = AmbientMixer::new();
-        let v = m.frame_volumes(2, 2, 1.0, true, ms(0));
+        let v = m.frame_volumes(2, 2, 1.0, true, 1.0, ms(0));
         assert_eq!(v[1].1, 0.0);
-        let v = m.frame_volumes(2, 2, 1.0, true, ms(300));
+        let v = m.frame_volumes(2, 2, 1.0, true, 1.0, ms(300));
         assert!((v[1].1 - AMBIENT_VOLUME).abs() < 1e-6);
+    }
+
+    #[test]
+    fn break_duck_glides_to_half_volume() {
+        let mut m = AmbientMixer::new();
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(0));
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(300)); // 全量
+        // 进入休息: duck 0.5, 300ms 滑到半量。
+        let v = m.frame_volumes(0, 0, 1.0, true, BREAK_DUCK, ms(400));
+        assert!((v[1].1 - AMBIENT_VOLUME).abs() < 1e-6, "边沿帧应连续");
+        let v = m.frame_volumes(0, 0, 1.0, true, BREAK_DUCK, ms(550));
+        assert!((v[1].1 - 0.45).abs() < 1e-6, "中点应为 0.45: {}", v[1].1);
+        let v = m.frame_volumes(0, 0, 1.0, true, BREAK_DUCK, ms(700));
+        let half = AMBIENT_VOLUME * BREAK_DUCK;
+        assert!(
+            (v[1].1 - half).abs() < 1e-6,
+            "终点应为半量 {half}: {}",
+            v[1].1
+        );
+        // 稳定在半量。
+        let v = m.frame_volumes(0, 0, 1.0, true, BREAK_DUCK, ms(999_999));
+        assert!((v[1].1 - half).abs() < 1e-6);
+    }
+
+    #[test]
+    fn paused_during_break_stays_silent() {
+        // 休息期暂停: 目标 = 0 (duck 不抬升), 保持静音。
+        let mut m = AmbientMixer::new();
+        for t in [0, 100, 10_000] {
+            let v = m.frame_volumes(0, 0, 1.0, false, BREAK_DUCK, ms(t));
+            assert_eq!(v[1].1, 0.0, "休息期暂停应静音 (t={t})");
+        }
+    }
+
+    #[test]
+    fn return_to_focus_restores_full_volume() {
+        let mut m = AmbientMixer::new();
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(0));
+        m.frame_volumes(0, 0, 1.0, true, BREAK_DUCK, ms(300)); // 全量→duck 边沿
+        let v = m.frame_volumes(0, 0, 1.0, true, BREAK_DUCK, ms(600)); // 到半量
+        assert!((v[1].1 - AMBIENT_VOLUME * BREAK_DUCK).abs() < 1e-6);
+        // 回专注: 300ms 滑回全量。
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(700));
+        assert!(
+            (v[1].1 - AMBIENT_VOLUME * BREAK_DUCK).abs() < 1e-6,
+            "边沿帧应连续"
+        );
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1000));
+        assert!((v[1].1 - AMBIENT_VOLUME).abs() < 1e-6, "终点应回全量");
     }
 
     #[test]
