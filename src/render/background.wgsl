@@ -15,30 +15,31 @@ struct Uniforms {
 }
 
 // ---- 雨丝动效 (雨场景试点) ----
-// 参数集中于本段, 调参只动这里。三层速度取整数比 (0.25/0.5/0.75 周期/秒),
-// 公共周期 4s, 与 Rust 侧 `RAIN_WRAP_SECS` 一致 (上传前取模, 保 f32 精度)。
-const RAIN_SLANT: f32 = 0.12;        // 斜率: x 随 y 的偏移 (风向)
+// 参数集中于本段, 调参只动这里。三层速度取整数比 (0.125/0.25/0.375 周期/秒),
+// 公共周期 8s, 与 Rust 侧 `RAIN_WRAP_SECS` 一致 (上传前取模, 保 f32 精度)。
+const RAIN_SLANT: f32 = 0.12;        // 斜率: 雨落朝右下 (\ 形), 与静态雨图一致
 const RAIN_YSCALE: f32 = 0.5;        // 纵向压缩: 同屏每列最多一段雨丝
-const RAIN_GAIN: f32 = 0.35;         // 总亮度上限 (线性空间 additive)
+const RAIN_GAIN: f32 = 0.20;         // 总亮度上限 (线性空间 additive)
 
-// 丝宽为 y 循环空间单位, 屏高占比 ≈ 丝宽 × 4 (尾羽) / YSCALE。
-const RAIN_DENSITY_FAR: f32 = 150.0; // 远层: 密、细、慢、淡 (960px 窗约 6px/列)
-const RAIN_SPEED_FAR: f32 = 0.25;
-const RAIN_WIDTH_FAR: f32 = 0.02;    // 尾羽占屏高 ~16%
-const RAIN_BRIGHT_FAR: f32 = 0.22;
-const RAIN_ON_FAR: f32 = 0.80;       // hash > 此值的列才有雨 (20%)
+// 丝宽为 y 循环空间单位, 屏高占比 ≈ 丝宽 × 2.5 (尾羽) / YSCALE。
+// 列密度对照: 静态雨图丝宽 ~2px; 960px 窗下 480/360/320 列 ≈ 2.0/2.7/3.0px。
+const RAIN_DENSITY_FAR: f32 = 480.0; // 远层: 密、细、慢、淡
+const RAIN_SPEED_FAR: f32 = 0.125;
+const RAIN_WIDTH_FAR: f32 = 0.02;    // 尾羽占屏高 ~10%
+const RAIN_BRIGHT_FAR: f32 = 0.16;
+const RAIN_ON_FAR: f32 = 0.93;       // hash > 此值的列才有雨 (~34 列有雨)
 
-const RAIN_DENSITY_MID: f32 = 110.0; // 中层
-const RAIN_SPEED_MID: f32 = 0.5;
-const RAIN_WIDTH_MID: f32 = 0.025;   // 尾羽占屏高 ~20%
-const RAIN_BRIGHT_MID: f32 = 0.33;
-const RAIN_ON_MID: f32 = 0.75;       // 25%
+const RAIN_DENSITY_MID: f32 = 360.0; // 中层
+const RAIN_SPEED_MID: f32 = 0.25;
+const RAIN_WIDTH_MID: f32 = 0.025;   // 尾羽占屏高 ~12%
+const RAIN_BRIGHT_MID: f32 = 0.22;
+const RAIN_ON_MID: f32 = 0.91;       // ~32 列
 
-const RAIN_DENSITY_NEAR: f32 = 70.0; // 近层: 疏、粗、快、亮
-const RAIN_SPEED_NEAR: f32 = 0.75;
-const RAIN_WIDTH_NEAR: f32 = 0.03;   // 尾羽占屏高 ~24%
-const RAIN_BRIGHT_NEAR: f32 = 0.45;
-const RAIN_ON_NEAR: f32 = 0.85;      // 15%
+const RAIN_DENSITY_NEAR: f32 = 320.0; // 近层: 疏、粗、快、亮
+const RAIN_SPEED_NEAR: f32 = 0.375;
+const RAIN_WIDTH_NEAR: f32 = 0.03;   // 尾羽占屏高 ~15%
+const RAIN_BRIGHT_NEAR: f32 = 0.30;
+const RAIN_ON_NEAR: f32 = 0.95;      // ~16 列
 
 fn rain_hash(p: f32) -> f32 {
     return fract(sin(p * 127.1) * 43758.5453);
@@ -55,13 +56,14 @@ fn rain_layer(
     bright: f32,
     on: f32,
 ) -> f32 {
-    let x = uv.x + uv.y * RAIN_SLANT; // 斜向拉条
+    let x = uv.x - uv.y * RAIN_SLANT; // 斜向拉条 (\ 形, 朝右下)
     let col = floor(x * density);
     let rnd = rain_hash(col * 1.37);
     // 相位随机 (常量), 速度全列一致: 雨的真实感来自同速不同相,
     // 同时保证公共周期成立 (速度不带逐列抖动)。
     let y = fract(uv.y * RAIN_YSCALE - t * speed + rnd * 7.0);
-    let streak = smoothstep(0.0, width, y) * (1.0 - smoothstep(width, width * 4.0, y));
+    // 近似均匀亮度的一段丝 (亮头长尾会读出流星/烟花感, 尾羽刻意短)。
+    let streak = smoothstep(0.0, width, y) * (1.0 - smoothstep(width, width * 2.5, y));
     let visible = step(on, rain_hash(col * 3.1 + 17.0));
     return streak * visible * bright;
 }

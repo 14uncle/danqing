@@ -88,9 +88,9 @@ impl BackgroundFrame {
 }
 
 /// 雨效时间取模周期 (秒): 与 background.wgsl 三层雨丝速度的公共周期一致
-/// (0.25 / 0.5 / 0.75 周期/秒 → 公共周期 4s)。上传 uniform 前取模,
+/// (0.125 / 0.25 / 0.375 周期/秒 → 公共周期 8s)。上传 uniform 前取模,
 /// 避免常驻数小时后 f32 时间精度退化导致雨丝相位抖动。
-const RAIN_WRAP_SECS: f32 = 4.0;
+const RAIN_WRAP_SECS: f32 = 8.0;
 
 /// 雨效时间取模 (纯逻辑): 折回 `[0, RAIN_WRAP_SECS)`; 负值按欧几里得余数处理。
 fn wrap_motion_time(time: f32) -> f32 {
@@ -922,8 +922,8 @@ mod tests {
     fn wrap_motion_time_wraps_and_stays_positive() {
         assert!(wrap_motion_time(0.0).abs() < f32::EPSILON);
         assert!(wrap_motion_time(RAIN_WRAP_SECS).abs() < f32::EPSILON);
-        assert!((wrap_motion_time(5.5) - 1.5).abs() < 1e-6);
-        assert!((wrap_motion_time(-0.5) - 3.5).abs() < 1e-6);
+        assert!((wrap_motion_time(9.5) - 1.5).abs() < 1e-6);
+        assert!((wrap_motion_time(-0.5) - (RAIN_WRAP_SECS - 0.5)).abs() < 1e-6);
         // 常驻数小时的大时间值仍折回周期内 (f32 精度护栏)。
         assert!(wrap_motion_time(36000.0) < RAIN_WRAP_SECS);
     }
