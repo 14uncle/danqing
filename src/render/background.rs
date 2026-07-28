@@ -60,18 +60,41 @@ pub struct BackgroundFrame {
     pub fade: f32,
     /// 本帧清屏色 (随场景基调流动)。
     pub clear_color: crate::Color,
+    /// 动效时间 (秒, 注入时间轴; 默认 0, 经 [`BackgroundFrame::with_motion`] 设置)。
+    pub time: f32,
+    /// 雨丝动效强度 (0.0 ..= 1.0; 默认 0 = 无动效, shader 输出与静态一致)。
+    pub rain_intensity: f32,
 }
 
 impl BackgroundFrame {
-    /// 构造每帧背景状态;`fade` 夹到 0..1。
+    /// 构造每帧背景状态;`fade` 夹到 0..1, 动效参数默认为 0 (无动效)。
     pub fn new(from: usize, to: usize, fade: f32, clear_color: crate::Color) -> Self {
         Self {
             from,
             to,
             fade: fade.clamp(0.0, 1.0),
             clear_color,
+            time: 0.0,
+            rain_intensity: 0.0,
         }
     }
+
+    /// 设置场景动效参数 (时间秒 + 雨丝强度); 强度夹到 0..1。
+    pub fn with_motion(mut self, time: f32, rain_intensity: f32) -> Self {
+        self.time = time;
+        self.rain_intensity = rain_intensity.clamp(0.0, 1.0);
+        self
+    }
+}
+
+/// 雨效时间取模周期 (秒): 与 background.wgsl 三层雨丝速度的公共周期一致
+/// (0.25 / 0.5 / 0.75 周期/秒 → 公共周期 4s)。上传 uniform 前取模,
+/// 避免常驻数小时后 f32 时间精度退化导致雨丝相位抖动。
+const RAIN_WRAP_SECS: f32 = 4.0;
+
+/// 雨效时间取模 (纯逻辑): 折回 `[0, RAIN_WRAP_SECS)`; 负值按欧几里得余数处理。
+fn wrap_motion_time(time: f32) -> f32 {
+    time.rem_euclid(RAIN_WRAP_SECS)
 }
 
 /// 将每帧背景状态解析为合法的场景索引对 (纯逻辑, 便于测试)。
@@ -510,10 +533,14 @@ impl BackgroundPipeline {
             to: 0,
             fade: 0.0,
             clear_color: target.clear_color,
+            time: 0.0,
+            rain_intensity: 0.0,
         });
         let Some((from, to, fade)) = resolve_frame(frame, self.scene_bytes.len()) else {
             return;
         };
+        // 场景层动效参数 (雨丝强度 + 取模后的时间); 叠加层无动效恒 0。
+        let motion = [frame.rain_intensity, wrap_motion_time(frame.time)];
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("background pass"),
@@ -547,12 +574,12 @@ impl BackgroundPipeline {
         let tex_to = self.scene_cache.get(&to);
         if let (Some(tex_from), Some(tex_to)) = (tex_from, tex_to) {
             self.draw_layer(
-                &mut pass, queue, target, 0, tex_from, tex_to, self.scale, 1.0, fade,
+                &mut pass, queue, target, 0, tex_from, tex_to, self.scale, 1.0, fade, motion,
             );
         } else if let Some(only) = tex_from.or(tex_to) {
             // 仅一端就绪: 单图绘制, fade=0 (无淡化)
             self.draw_layer(
-                &mut pass, queue, target, 0, only, only, self.scale, 1.0, 0.0,
+                &mut pass, queue, target, 0, only, only, self.scale, 1.0, 0.0, motion,
             );
         } // 两端都缺失: 不画场景层, 让 clear_color 透出
         if let Some(glow) = &self.glow {
@@ -566,6 +593,7 @@ impl BackgroundPipeline {
                 ScaleMode::Cover,
                 self.glow_opacity,
                 0.0,
+                [0.0, 0.0],
             );
         }
         if let Some(noise) = &self.noise {
@@ -579,11 +607,13 @@ impl BackgroundPipeline {
                 ScaleMode::Stretch,
                 self.noise_opacity,
                 0.0,
+                [0.0, 0.0],
             );
         }
     }
 
     /// 绘制单个叠加层: 上传该层顶点与 uniform, 绑定资源后绘制。
+    /// `motion` = [雨丝强度, 取模后的动效时间], 仅场景层 (层 0) 非零。
     #[allow(clippy::too_many_arguments)]
     fn draw_layer(
         &self,
@@ -596,6 +626,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
+        motion: [f32; 2],
     ) {
         // 淡化要求 from/to 同尺寸 (场景生成管线保证统一画布);
         // UV 按 from 纹理计算, 尺寸不一致时退回只画 from。
@@ -615,6 +646,7 @@ impl BackgroundPipeline {
             scale,
             opacity,
             fade,
+            motion,
         );
         pass.set_bind_group(0, &self.uniform_binds[layer], &[]);
         pass.set_bind_group(1, &tex_from.bind_group, &[]);
@@ -624,6 +656,7 @@ impl BackgroundPipeline {
     }
 
     /// 按缩放模式计算顶点与 UV, 写入指定层的顶点区段与 uniform buffer。
+    /// uniform 布局: [opacity, fade, 雨丝强度, 动效时间] (复用 16B 的两个 pad 位)。
     #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
@@ -635,6 +668,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
+        motion: [f32; 2],
     ) {
         let screen_w = target.width;
         let screen_h = target.height;
@@ -701,7 +735,7 @@ impl BackgroundPipeline {
         queue.write_buffer(
             &self.uniform_bufs[layer],
             0,
-            bytemuck::cast_slice(&[opacity, fade, 0.0, 0.0f32]),
+            bytemuck::cast_slice(&[opacity, fade, motion[0], motion[1]]),
         );
     }
 }
@@ -864,6 +898,34 @@ mod tests {
         assert_eq!(cfg.scenes.len(), 3);
         assert!(cfg.image.is_none());
         assert_eq!(cfg.scale, ScaleMode::Cover);
+    }
+
+    #[test]
+    fn background_frame_motion_defaults_zero() {
+        let f = BackgroundFrame::new(0, 1, 0.5, crate::Color::BLACK);
+        assert_eq!(f.time, 0.0);
+        assert_eq!(f.rain_intensity, 0.0);
+    }
+
+    #[test]
+    fn with_motion_sets_time_and_clamps_intensity() {
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_motion(12.5, 1.7);
+        assert!((f.time - 12.5).abs() < f32::EPSILON);
+        assert!((f.rain_intensity - 1.0).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_motion(3.0, -0.2);
+        assert_eq!(f.rain_intensity, 0.0);
+    }
+
+    #[test]
+    fn wrap_motion_time_wraps_and_stays_positive() {
+        assert!(wrap_motion_time(0.0).abs() < f32::EPSILON);
+        assert!(wrap_motion_time(RAIN_WRAP_SECS).abs() < f32::EPSILON);
+        assert!((wrap_motion_time(5.5) - 1.5).abs() < 1e-6);
+        assert!((wrap_motion_time(-0.5) - 3.5).abs() < 1e-6);
+        // 常驻数小时的大时间值仍折回周期内 (f32 精度护栏)。
+        assert!(wrap_motion_time(36000.0) < RAIN_WRAP_SECS);
     }
 
     #[test]

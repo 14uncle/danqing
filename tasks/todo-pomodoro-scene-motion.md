@@ -3,7 +3,7 @@
 > Plan: `tasks/plan-pomodoro-scene-motion.md` | Spec: `docs/specs/pomodoro-scene-motion.md`
 > 提交门槛(每次提交前): `cargo fmt` + `cargo clippy -- -D warnings` + `cargo test --lib --tests` 全绿。
 
-- [ ] **T1: 框架雨效能力(暗启动)**
+- [x] **T1: 框架雨效能力(暗启动)**
   - Acceptance: `BackgroundFrame.with_motion(time, rain_intensity)`(默认 0、强度 clamp);uniform 复用 16B pad 位;`background.wgsl` 雨丝叠加(intensity=0 输出不变);time Rust 侧取模;showcase/pomodoro 视觉零变化;`DANQING_WGPU_VALIDATION=1` 无校验错误
   - Verify: `cargo test --lib --tests` + clippy + 手动 showcase/pomodoro 目检无变化
   - Files: `src/render/background.rs`、`src/render/background.wgsl`
