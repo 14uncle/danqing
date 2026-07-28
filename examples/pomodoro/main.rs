@@ -17,6 +17,7 @@ mod audio;
 mod fader;
 mod flash;
 mod hint;
+mod motion;
 mod scenes;
 mod state;
 mod timer;

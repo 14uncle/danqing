@@ -8,7 +8,7 @@
   - Verify: `cargo test --lib --tests` + clippy + 手动 showcase/pomodoro 目检无变化
   - Files: `src/render/background.rs`、`src/render/background.wgsl`
 
-- [ ] **T2: motion.rs 纯逻辑**
+- [x] **T2: motion.rs 纯逻辑**
   - Acceptance: `RAIN_SCENE` 场景名锁定测试;`MotionEnvelope` 500ms 边沿/续接/反向无跳变;`rain_intensity` from 雨/to 雨/双非雨 × fade 合成;`cargo test --example pomodoro` 全绿
   - Verify: `cargo test --example pomodoro motion`
   - Files: `examples/pomodoro/motion.rs`(新,头注释 @author/@date)、`examples/pomodoro/main.rs`(仅 mod 声明)
@@ -16,7 +16,7 @@
 - [ ] **T3: 接线 + 首轮剂量调参**
   - Acceptance: 雨场景雨丝一眼可见、余光不抢戏;暂停 500ms 淡出/恢复 500ms 淡入;场景切换雨效无跳变;print-window 连拍两帧(≥300ms)雨场景像素差 > 阈值、非雨场景 ≈ 0
   - Verify: `cargo run --example pomodoro` 人工目检 + `tools/print-window.ps1` 连拍对比
-  - Files: `examples/pomodoro/main.rs`(调参含 `src/render/background.wgsl` 常量)
+  - Files: `examples/pomodoro/main.rs`(调参含 `src/render/background.wgsl` 常量);同时移除 `motion.rs` 顶部的 `#![allow(dead_code)]` 过渡行
 
 - [ ] **T4: 门槛 + 人工终审**
   - Acceptance: spec Success Criteria 1~8 全过(benchmark 双门槛、三绿、隐藏零渲染回归、帧差佐证、用户终审);终审不过 → `git revert` T1~T3
