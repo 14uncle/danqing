@@ -91,6 +91,10 @@ struct PomodoroApp {
     ambient_mixer: ambient::AmbientMixer,
     /// 环境音播放器 (rodio 适配层: 懒初始化 + 双槽 + 静默降级)。
     ambient_player: ambient::AmbientPlayer,
+    /// 场景动效沉降包络 (纯逻辑: 暂停 500ms 淡出 / 恢复淡入)。
+    motion_envelope: motion::MotionEnvelope,
+    /// 最近 tick 算出的动效包络值 (`background_frame` 只读)。
+    motion_gain: f32,
     /// 窗口事件发送器 (run_app 启动时注入，App 借此控制窗口显隐 / 退出)。
     window_sender: Option<WindowEventSender>,
 }
@@ -133,6 +137,8 @@ impl PomodoroApp {
             today_count: 0,
             ambient_mixer: ambient::AmbientMixer::new(),
             ambient_player: ambient::AmbientPlayer::new(),
+            motion_envelope: motion::MotionEnvelope::new(),
+            motion_gain: 0.0,
             window_sender: None,
         }
     }
@@ -178,6 +184,8 @@ impl PomodoroApp {
             today_count,
             ambient_mixer: ambient::AmbientMixer::new(),
             ambient_player: ambient::AmbientPlayer::new(),
+            motion_envelope: motion::MotionEnvelope::new(),
+            motion_gain: 0.0,
             window_sender: None,
         }
     }
@@ -339,11 +347,17 @@ impl App for PomodoroApp {
             self.now,
         );
         self.ambient_player.apply(frame);
+        // 场景动效: 与音频同潮汐契约 — 运行全量, 暂停 500ms 沉降 (视觉独立时长)。
+        self.motion_gain = self.motion_envelope.gain(self.timer.is_running(), self.now);
     }
 
     fn background_frame(&self) -> Option<BackgroundFrame> {
         let (from, to, fade) = self.fader.frame(self.now, |t| FADE_EASING.eval(t));
-        Some(BackgroundFrame::new(from, to, fade, self.palette().base))
+        let intensity = motion::rain_intensity(from, to, fade, self.motion_gain);
+        Some(
+            BackgroundFrame::new(from, to, fade, self.palette().base)
+                .with_motion(self.now.as_secs_f32(), intensity),
+        )
     }
 
     fn boot_elapsed_offset(&self) -> Duration {
@@ -713,8 +727,85 @@ mod tests {
     }
 
     #[test]
+    fn background_frame_carries_rain_motion_when_running_on_rain_scene() {
+        let mut app = PomodoroApp::new_default();
+        app.last_save_at = Duration::from_secs(25 * 60); // 防测试触发真实落盘
+        app.ambient_player.disable_for_test(); // 防测试触碰音频设备
+        app.fader.switch_to(motion::RAIN_SCENE, app.now);
+        app.timer.toggle(app.now); // 开始计时
+        // 场景淡化 (800ms) 完成后包络才开始走 (首次 tick 边沿), 再走满 500ms。
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
+        app.tick(&ctx);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
+        app.tick(&ctx);
+        let frame = app.background_frame().expect("应有背景帧");
+        assert!(
+            (frame.rain_intensity - 1.0).abs() < 1e-6,
+            "雨场景运行中雨效应全量: {}",
+            frame.rain_intensity
+        );
+        assert!(
+            (frame.time - 1.4).abs() < 1e-6,
+            "动效时间应注入: {}",
+            frame.time
+        );
+    }
+
+    #[test]
+    fn background_frame_rain_settles_on_pause() {
+        let mut app = PomodoroApp::new_default();
+        app.last_save_at = Duration::from_secs(25 * 60);
+        app.ambient_player.disable_for_test();
+        app.fader.switch_to(motion::RAIN_SCENE, app.now);
+        app.timer.toggle(app.now);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
+        app.tick(&ctx);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
+        app.tick(&ctx);
+        // 暂停: 边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
+        app.timer.toggle(app.now);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1650));
+        app.tick(&ctx);
+        let frame = app.background_frame().expect("应有背景帧");
+        assert!(
+            (frame.rain_intensity - 1.0).abs() < 1e-6,
+            "暂停边沿帧应连续: {}",
+            frame.rain_intensity
+        );
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
+        app.tick(&ctx);
+        let frame = app.background_frame().expect("应有背景帧");
+        assert!(
+            (frame.rain_intensity - 0.5).abs() < 1e-6,
+            "暂停沉降中点: {}",
+            frame.rain_intensity
+        );
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2150));
+        app.tick(&ctx);
+        let frame = app.background_frame().expect("应有背景帧");
+        assert!(
+            frame.rain_intensity.abs() < 1e-6,
+            "暂停 500ms 后雨效应消失: {}",
+            frame.rain_intensity
+        );
+    }
+
+    #[test]
+    fn background_frame_rain_stays_zero_on_non_rain_scene() {
+        let mut app = PomodoroApp::new_default();
+        app.last_save_at = Duration::from_secs(25 * 60);
+        app.ambient_player.disable_for_test();
+        app.timer.toggle(app.now); // 运行中, 但场景是篝火 (非雨)
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
+        app.tick(&ctx);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
+        app.tick(&ctx);
+        let frame = app.background_frame().expect("应有背景帧");
+        assert_eq!(frame.rain_intensity, 0.0, "非雨场景雨效恒 0");
+    }
+
+    #[test]
     fn midnight_rollover_resets_today_count_without_completion() {
-        // 常驻应用跨午夜且无完成: tick 的 1Hz 日期检查应主动归零,
         // 不等下次自然完成 (评审发现: 副标曾会显示昨天的「今日 N」)。
         let mut app = PomodoroApp::new_default();
         app.today_date = "2020-01-01".into();

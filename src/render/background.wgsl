@@ -21,28 +21,40 @@ const RAIN_SLANT: f32 = 0.12;        // 斜率: x 随 y 的偏移 (风向)
 const RAIN_YSCALE: f32 = 0.5;        // 纵向压缩: 同屏每列最多一段雨丝
 const RAIN_GAIN: f32 = 0.35;         // 总亮度上限 (线性空间 additive)
 
-const RAIN_DENSITY_FAR: f32 = 25.0;  // 远层: 细、慢、淡
+// 丝宽为 y 循环空间单位, 屏高占比 ≈ 丝宽 × 4 (尾羽) / YSCALE。
+const RAIN_DENSITY_FAR: f32 = 150.0; // 远层: 密、细、慢、淡 (960px 窗约 6px/列)
 const RAIN_SPEED_FAR: f32 = 0.25;
-const RAIN_WIDTH_FAR: f32 = 0.10;
-const RAIN_BRIGHT_FAR: f32 = 0.30;
+const RAIN_WIDTH_FAR: f32 = 0.02;    // 尾羽占屏高 ~16%
+const RAIN_BRIGHT_FAR: f32 = 0.22;
+const RAIN_ON_FAR: f32 = 0.80;       // hash > 此值的列才有雨 (20%)
 
-const RAIN_DENSITY_MID: f32 = 40.0;  // 中层
+const RAIN_DENSITY_MID: f32 = 110.0; // 中层
 const RAIN_SPEED_MID: f32 = 0.5;
-const RAIN_WIDTH_MID: f32 = 0.08;
-const RAIN_BRIGHT_MID: f32 = 0.45;
+const RAIN_WIDTH_MID: f32 = 0.025;   // 尾羽占屏高 ~20%
+const RAIN_BRIGHT_MID: f32 = 0.33;
+const RAIN_ON_MID: f32 = 0.75;       // 25%
 
-const RAIN_DENSITY_NEAR: f32 = 60.0; // 近层: 粗、快、亮
+const RAIN_DENSITY_NEAR: f32 = 70.0; // 近层: 疏、粗、快、亮
 const RAIN_SPEED_NEAR: f32 = 0.75;
-const RAIN_WIDTH_NEAR: f32 = 0.06;
-const RAIN_BRIGHT_NEAR: f32 = 0.60;
+const RAIN_WIDTH_NEAR: f32 = 0.03;   // 尾羽占屏高 ~24%
+const RAIN_BRIGHT_NEAR: f32 = 0.45;
+const RAIN_ON_NEAR: f32 = 0.85;      // 15%
 
 fn rain_hash(p: f32) -> f32 {
     return fract(sin(p * 127.1) * 43758.5453);
 }
 
 // 单层雨丝: density 列密度, speed 下落速度 (fract 周期/秒),
-// width 丝头宽度, bright 亮度权重。
-fn rain_layer(uv: vec2<f32>, t: f32, density: f32, speed: f32, width: f32, bright: f32) -> f32 {
+// width 丝头宽度, bright 亮度权重, on 有雨列的 hash 门槛。
+fn rain_layer(
+    uv: vec2<f32>,
+    t: f32,
+    density: f32,
+    speed: f32,
+    width: f32,
+    bright: f32,
+    on: f32,
+) -> f32 {
     let x = uv.x + uv.y * RAIN_SLANT; // 斜向拉条
     let col = floor(x * density);
     let rnd = rain_hash(col * 1.37);
@@ -50,14 +62,14 @@ fn rain_layer(uv: vec2<f32>, t: f32, density: f32, speed: f32, width: f32, brigh
     // 同时保证公共周期成立 (速度不带逐列抖动)。
     let y = fract(uv.y * RAIN_YSCALE - t * speed + rnd * 7.0);
     let streak = smoothstep(0.0, width, y) * (1.0 - smoothstep(width, width * 4.0, y));
-    let on = step(0.6, rain_hash(col * 3.1 + 17.0)); // 40% 的列有雨
-    return streak * on * bright;
+    let visible = step(on, rain_hash(col * 3.1 + 17.0));
+    return streak * visible * bright;
 }
 
 fn rain_overlay(uv: vec2<f32>, t: f32) -> f32 {
-    var acc = rain_layer(uv, t, RAIN_DENSITY_FAR, RAIN_SPEED_FAR, RAIN_WIDTH_FAR, RAIN_BRIGHT_FAR);
-    acc += rain_layer(uv, t, RAIN_DENSITY_MID, RAIN_SPEED_MID, RAIN_WIDTH_MID, RAIN_BRIGHT_MID);
-    acc += rain_layer(uv, t, RAIN_DENSITY_NEAR, RAIN_SPEED_NEAR, RAIN_WIDTH_NEAR, RAIN_BRIGHT_NEAR);
+    var acc = rain_layer(uv, t, RAIN_DENSITY_FAR, RAIN_SPEED_FAR, RAIN_WIDTH_FAR, RAIN_BRIGHT_FAR, RAIN_ON_FAR);
+    acc += rain_layer(uv, t, RAIN_DENSITY_MID, RAIN_SPEED_MID, RAIN_WIDTH_MID, RAIN_BRIGHT_MID, RAIN_ON_MID);
+    acc += rain_layer(uv, t, RAIN_DENSITY_NEAR, RAIN_SPEED_NEAR, RAIN_WIDTH_NEAR, RAIN_BRIGHT_NEAR, RAIN_ON_NEAR);
     return min(acc, 1.0) * RAIN_GAIN;
 }
 

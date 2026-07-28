@@ -13,7 +13,7 @@
   - Verify: `cargo test --example pomodoro motion`
   - Files: `examples/pomodoro/motion.rs`(新,头注释 @author/@date)、`examples/pomodoro/main.rs`(仅 mod 声明)
 
-- [ ] **T3: 接线 + 首轮剂量调参**
+- [x] **T3: 接线 + 首轮剂量调参**
   - Acceptance: 雨场景雨丝一眼可见、余光不抢戏;暂停 500ms 淡出/恢复 500ms 淡入;场景切换雨效无跳变;print-window 连拍两帧(≥300ms)雨场景像素差 > 阈值、非雨场景 ≈ 0
   - Verify: `cargo run --example pomodoro` 人工目检 + `tools/print-window.ps1` 连拍对比
   - Files: `examples/pomodoro/main.rs`(调参含 `src/render/background.wgsl` 常量);同时移除 `motion.rs` 顶部的 `#![allow(dead_code)]` 过渡行

@@ -9,9 +9,6 @@
 //! 时间由外部注入 (`AnimationCtx.elapsed` 累计值), 不读 wall-clock,
 //! 可完整单元测试。
 
-// 纯逻辑先行 (T2), main.rs 接线在 T3 —— 届时移除此行。
-#![allow(dead_code)]
-
 use std::time::Duration;
 
 /// 雨场景在 `SCENES` 中的索引 (单测锁定名称, 防生成器重排静默错位)。
