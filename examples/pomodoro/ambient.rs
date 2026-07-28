@@ -15,7 +15,11 @@
 //! 下半部分为 rodio 输出适配层 (`AmbientPlayer`): 懒初始化输出流 +
 //! from/to 双槽 `Player` (与视觉场景纹理 LRU 同构) + 静默降级。
 
+use std::fs::File;
+use std::io::BufReader;
 use std::time::Duration;
+
+use rodio::Source;
 
 /// 场景音源路径 (与 `scenes::SCENES` 索引对齐: 篝火/海/雨/山/森林)。
 pub const SCENE_AUDIO: [&str; 5] = [
@@ -92,11 +96,6 @@ impl Default for AmbientMixer {
 // ---------------------------------------------------------------------------
 // rodio 输出适配层
 // ---------------------------------------------------------------------------
-
-use std::fs::File;
-use std::io::BufReader;
-
-use rodio::Source;
 
 /// 环境音播放器: 输出流 + from/to 双槽, 消费 [`AmbientMixer`] 的帧音量。
 ///
@@ -264,12 +263,12 @@ impl Iterator for LoopingDecoder {
     fn next(&mut self) -> Option<f32> {
         // 最多两轮: 当前解码器取流 → 耗尽则回卷/重开再取; 仍无采样视为永久失败。
         for _ in 0..2 {
-            let decoder = self.current.as_mut()?;
+            let mut decoder = self.current.take()?;
             if let Some(sample) = decoder.next() {
+                self.current = Some(decoder);
                 return Some(sample);
             }
             // 耗尽: 优先 seek 回起点 (cheap); 不支持 seek 则重开文件。
-            let mut decoder = self.current.take().expect("上面已确认 Some");
             self.current = if decoder.try_seek(Duration::ZERO).is_ok() {
                 Some(decoder)
             } else {
