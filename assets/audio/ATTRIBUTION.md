@@ -16,11 +16,15 @@
 
 ```
 ffmpeg -i <源> -filter_complex \
-  "[0:a]asplit[a][b];[a]atrim=0:0.05,asetpts=PTS-STARTPTS[start];\
+  "[0:a]volume=<增益>dB,asplit[a][b];[a]atrim=0:0.05,asetpts=PTS-STARTPTS[start];\
    [b]atrim=0.05,asetpts=PTS-STARTPTS[rest];\
    [rest][start]acrossfade=d=0.05:c1=tri:c2=tri[out]" \
   -map "[out]" -c:a libvorbis -q:a 4 <目标>.ogg
 ```
+
+响度统一 (2026-07-28): 源响度差异极大 (-13.8 ~ -46.4 LUFS), 按静态增益归一到
+**-28 LUFS** (以雨/山听感为锚): 篝火 +12.7dB / 海 -14.2dB / 雨 +1.7dB / 森林 +18.4dB /
+山 0dB (未动)。增益后峰值均 ≤ -3.3dBFS, 无削波。
 
 ## 备注
 
