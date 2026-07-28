@@ -408,7 +408,8 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 同步 inline 初始化 GPU 上下文 (实例 + surface + 适配器 + 设备 + 管线)。
         // request_adapter 传 `compatible_surface: Some(&surface)` 让 DX12 后端
         // 一步优化 device / presentation engine 创建，比传 None 省 ~200ms。
-        // 这里没有用后台线程预建 GpuDevice:实测 DX12 上 inline 比 join 快。
+        // 实例预建后台线程试过又撤回 (2026-07): 实例时间确实藏住了, 但
+        // request_adapter 等额变贵 (+250ms), 净收益为零且方差更大。
         let ctx_start = Instant::now();
         match Context::new(
             Arc::clone(&window),

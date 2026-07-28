@@ -325,9 +325,9 @@ impl BackgroundPipeline {
                     scene_dims.push(dims);
                 }
                 None => {
-                    // 预读失败: 占位空字节, 后续 ensure_loaded 会再次失败
-                    // 并按 log+panic 路径暴露, 不静默跳过避免索引错位。
-                    log::warn!("场景图预读失败, 将在按需加载时再次尝试: {}", path.display());
+                    // 预读失败: 占位空字节保持索引对齐, ensure_loaded 静默
+                    // 跳过, draw 端走缺失分支降级 (clear_color 透出)。
+                    log::warn!("场景图预读失败, 该场景将不显示: {}", path.display());
                     scene_bytes.push(Vec::new());
                     scene_dims.push((0, 0));
                 }
@@ -400,10 +400,16 @@ impl BackgroundPipeline {
             self.lru_order.push_front(idx);
             return;
         }
-        // 未命中: decode + 创建纹理。
+        // 未命中: decode + 创建纹理 (PNG 字节在此才解码, 见 read_scene_bytes)。
         let bytes = self.scene_bytes[idx].clone();
         let dims = self.scene_dims[idx];
-        let tex = self.create_scene_texture(&bytes, dims, idx);
+        let Some(tex) = self.create_scene_texture(&bytes, dims, idx) else {
+            // 解码失败: 置空槽位, 后续 ensure_loaded 走空字节静默守卫,
+            // 避免每帧重试解码 + 刷 warn 日志 (set_frame 是每帧调用的)。
+            // 字节不可变, 失败槽位永远不可能之后解码成功, 置空无损。
+            self.scene_bytes[idx] = Vec::new();
+            return;
+        };
         // 缓存已满时淘汰 LRU 尾。
         while self.scene_cache.len() >= SCENE_CACHE_CAPACITY {
             if let Some(evicted) = self.lru_order.pop_back() {
@@ -416,13 +422,21 @@ impl BackgroundPipeline {
         self.lru_order.push_front(idx);
     }
 
-    /// 从已预读的字节创建 wgpu 纹理 (懒加载的实际解码上传)。
+    /// 从预读的 PNG 字节解码并创建 wgpu 纹理 (懒加载的实际解码上传)。
+    /// 解码失败返回 None (调用方跳过插入, draw 端走缺失分支降级)。
     fn create_scene_texture(
         &self,
         bytes: &[u8],
         dims: (u32, u32),
         idx: usize,
-    ) -> BackgroundTexture {
+    ) -> Option<BackgroundTexture> {
+        let img = match image::load_from_memory(bytes) {
+            Ok(img) => img.into_rgba8(),
+            Err(err) => {
+                log::warn!("场景图解码失败 scene[{idx}]: {err}");
+                return None;
+            }
+        };
         let (width, height) = dims;
         let size = wgpu::Extent3d {
             width,
@@ -467,7 +481,7 @@ impl BackgroundPipeline {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            bytes,
+            &img,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * width),
@@ -475,13 +489,13 @@ impl BackgroundPipeline {
             },
             size,
         );
-        BackgroundTexture {
+        Some(BackgroundTexture {
             texture,
             view,
             bind_group,
             width,
             height,
-        }
+        })
     }
 
     /// 绘制背景层 (在 RectBatch 之前调用)。
@@ -692,16 +706,20 @@ impl BackgroundPipeline {
     }
 }
 
-/// 读取 PNG 文件, 解析为 RGBA8 字节与 (宽, 高); 失败时返回 None 并记录警告。
+/// 读取场景 PNG 文件字节与尺寸 (尺寸从内存字节解析头, 不解码); 失败时返回 None。
 ///
-/// 与 `load_texture` 不同: 本函数只 decode PNG, 不接触 wgpu 设备, 是
-/// `BackgroundPipeline::new` 阶段预读场景字节的纯 CPU 操作。
-/// `BackgroundTexture` 的真正创建推迟到 `ensure_loaded` 懒加载路径。
+/// 与 `load_texture` 不同: 本函数只读原始 PNG 字节 (5 场景合计 ~0.8MB),
+/// 不接触 wgpu 设备, 也不做 RGBA 解码 — 解码推迟到 `ensure_loaded`
+/// 懒加载路径, 避免启动期为 5 张图常驻 ~31MB 解码缓冲。
+/// 尺寸与字节同源 (单次文件读取), 不存在两次读文件之间被替换的不一致窗口。
 fn read_scene_bytes(path: &Path) -> Option<(Vec<u8>, (u32, u32))> {
     let data = std::fs::read(path).ok()?;
-    let img = image::load_from_memory(&data).ok()?.into_rgba8();
-    let (width, height) = img.dimensions();
-    Some((img.into_raw(), (width, height)))
+    let dims = image::ImageReader::new(std::io::Cursor::new(&data))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    Some((data, dims))
 }
 
 /// 加载 PNG 并创建纹理与 bind group; 失败时返回 None 并记录警告。
