@@ -46,7 +46,7 @@ pub struct TextBatch {
 }
 
 impl TextBatch {
-    /// 新建：按策略加载字体 (系统优先，内嵌兜底), 建默认图集。
+    /// 新建：按策略加载字体 (内嵌黑体优先，系统兜底), 建默认图集。
     pub fn new() -> Self {
         Self {
             font: Font::load(),

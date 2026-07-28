@@ -42,6 +42,46 @@ impl Color {
     pub const fn from_srgb8(r: u8, g: u8, b: u8) -> Self {
         Self::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
     }
+
+    /// 向另一颜色线性插值 (分量独立,`t` 夹到 0..1)。
+    ///
+    /// 用于主题/场景过渡动画;在存储空间 (sRGB 编码) 内插值,
+    /// 与逐帧渲染的观感一致。端点处返回原值拷贝,
+    /// 保证过渡结束态与目标色逐位一致 (无浮点漂移)。
+    pub fn lerp(self, other: Color, t: f32) -> Self {
+        if t <= 0.0 {
+            return self;
+        }
+        if t >= 1.0 {
+            return other;
+        }
+        Self::rgba(
+            self.r + (other.r - self.r) * t,
+            self.g + (other.g - self.g) * t,
+            self.b + (other.b - self.b) * t,
+            self.a + (other.a - self.a) * t,
+        )
+    }
+
+    /// 降低饱和度: 向 mid-gray (0.5) 线性插值, 同时收敛到中性亮度。
+    /// `factor=0` 保留原色, `factor=1` 全 mid-gray。
+    /// 双向移动: 暗色被提亮, 亮色被压暗, 中性色不变 — 视觉对比在暗/亮场景都明显。
+    /// `factor` 夹到 `0..1`。Alpha 保持不变 (玻璃等需要保留透明度)。
+    pub fn desaturate(self, factor: f32) -> Self {
+        let factor = factor.clamp(0.0, 1.0);
+        if factor <= 0.0 {
+            return self;
+        }
+        if factor >= 1.0 {
+            return Self::rgba(0.5, 0.5, 0.5, self.a);
+        }
+        Self::rgba(
+            self.r + (0.5 - self.r) * factor,
+            self.g + (0.5 - self.g) * factor,
+            self.b + (0.5 - self.b) * factor,
+            self.a,
+        )
+    }
 }
 
 /// 二维点，逻辑像素坐标 (原点为窗口左上角，y 向下)。
@@ -147,6 +187,24 @@ impl Rect {
             Some(Self::from_xywh(x0, y0, width, height))
         } else {
             None
+        }
+    }
+
+    /// 将原点与范围四舍五入到最近的整数像素边界。
+    ///
+    /// 表面组件 (Box / TextInput / TextArea) 的填充与描边共用对齐后的矩形:
+    /// 两者轮廓精确重合 (贴合), 且 1px 细描边落在完整像素行上满强度渲染
+    /// (细线发虚的根因对策)。每边偏移不超过 0.5px, 对布局与命中无影响。
+    /// 极端小矩形对齐后退化时保留原矩形。
+    pub fn snap_to_pixels(&self) -> Self {
+        let x0 = self.origin.x.round();
+        let y0 = self.origin.y.round();
+        let x1 = (self.origin.x + self.size.width).round();
+        let y1 = (self.origin.y + self.size.height).round();
+        if x1 > x0 && y1 > y0 {
+            Self::from_xywh(x0, y0, x1 - x0, y1 - y0)
+        } else {
+            *self
         }
     }
 }
@@ -310,12 +368,87 @@ mod tests {
     use super::*;
 
     #[test]
+    fn desaturate_factor_zero_is_identity() {
+        let c = Color::rgb(0.8, 0.2, 0.4);
+        assert_eq!(c.desaturate(0.0), c);
+        assert_eq!(c.desaturate(-1.0), c);
+    }
+
+    #[test]
+    fn desaturate_factor_one_is_mid_gray() {
+        let c = Color::rgb(0.6, 0.3, 0.9);
+        let gray = c.desaturate(1.0);
+        assert!((gray.r - 0.5).abs() < 1e-6);
+        assert!((gray.g - 0.5).abs() < 1e-6);
+        assert!((gray.b - 0.5).abs() < 1e-6);
+        assert_eq!(gray.a, c.a);
+    }
+
+    #[test]
+    fn desaturate_factor_half_converges_to_mid_gray() {
+        let c = Color::rgb(1.0, 0.0, 0.0); // 纯红
+        let mid = c.desaturate(0.5);
+        // r: 1.0 + (0.5 - 1.0) * 0.5 = 0.75
+        // g: 0.0 + (0.5 - 0.0) * 0.5 = 0.25
+        // b: 0.0 + (0.5 - 0.0) * 0.5 = 0.25
+        assert!((mid.r - 0.75).abs() < 1e-6);
+        assert!((mid.g - 0.25).abs() < 1e-6);
+        assert!((mid.b - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn desaturate_dark_color_lifts_toward_mid_gray() {
+        // 暗色 (R<0.5) 应该被提亮, 这是修复"暗场景暂停不明显"的关键
+        let c = Color::rgb(0.10, 0.06, 0.04); // 篝火 base
+        let dimmed = c.desaturate(0.7);
+        // r: 0.10 + (0.5 - 0.10) * 0.7 = 0.10 + 0.28 = 0.38
+        // 比原色更亮, 视觉上明显
+        assert!(dimmed.r > 0.30, "dark color should lift, got {}", dimmed.r);
+        assert!(dimmed.g > 0.25, "dark color should lift, got {}", dimmed.g);
+    }
+
+    #[test]
+    fn desaturate_clamps_factor_above_one() {
+        let c = Color::rgb(0.6, 0.3, 0.9);
+        assert_eq!(c.desaturate(1.0), c.desaturate(2.0));
+    }
+
+    #[test]
+    fn desaturate_preserves_alpha() {
+        let c = Color::rgba(0.6, 0.3, 0.9, 0.42);
+        assert_eq!(c.desaturate(0.5).a, 0.42);
+    }
+
+    #[test]
     fn rect_contains_edges() {
         let rect = Rect::from_xywh(10.0, 20.0, 100.0, 50.0);
         assert!(rect.contains(Point::new(10.0, 20.0))); // 左上角含
         assert!(rect.contains(Point::new(109.9, 69.9)));
         assert!(!rect.contains(Point::new(110.0, 70.0))); // 右下角不含
         assert!(!rect.contains(Point::new(9.9, 30.0)));
+    }
+
+    #[test]
+    fn rect_snap_to_pixels_rounds_origin_and_extent() {
+        // 四舍五入到最近整数: 每边偏移 ≤ 0.5px。
+        let rect = Rect::from_xywh(285.3, 142.553, 240.0, 35.951);
+        assert_eq!(
+            rect.snap_to_pixels(),
+            Rect::from_xywh(285.0, 143.0, 240.0, 36.0)
+        );
+        // 范围独立四舍五入 (110.6 → 111, 70.6 → 71), 每边偏移仍 ≤ 0.5px。
+        let rect = Rect::from_xywh(10.4, 20.4, 100.2, 50.2);
+        assert_eq!(
+            rect.snap_to_pixels(),
+            Rect::from_xywh(10.0, 20.0, 101.0, 51.0)
+        );
+        // 整数矩形对齐后不变 (幂等)。
+        let rect = Rect::from_xywh(10.0, 20.0, 100.0, 50.0);
+        assert_eq!(rect.snap_to_pixels(), rect);
+        assert_eq!(rect.snap_to_pixels().snap_to_pixels(), rect);
+        // 极端小矩形对齐后退化 (两边落入同一像素): 保留原矩形。
+        let tiny = Rect::from_xywh(5.1, 5.1, 0.1, 0.1);
+        assert_eq!(tiny.snap_to_pixels(), tiny);
     }
 
     #[test]
@@ -369,6 +502,33 @@ mod tests {
         assert_eq!(c.g, 0.0);
         assert!((c.b - 128.0 / 255.0).abs() < f32::EPSILON);
         assert_eq!(c.a, 1.0);
+    }
+
+    #[test]
+    fn color_lerp_endpoints() {
+        let a = Color::rgba(0.2, 0.4, 0.6, 0.8);
+        let b = Color::rgba(0.8, 0.2, 0.4, 0.4);
+        assert_eq!(a.lerp(b, 0.0), a);
+        assert_eq!(a.lerp(b, 1.0), b);
+    }
+
+    #[test]
+    fn color_lerp_midpoint() {
+        let a = Color::rgba(0.0, 0.2, 0.4, 0.0);
+        let b = Color::rgba(1.0, 0.8, 0.0, 1.0);
+        let mid = a.lerp(b, 0.5);
+        assert!((mid.r - 0.5).abs() < f32::EPSILON);
+        assert!((mid.g - 0.5).abs() < f32::EPSILON);
+        assert!((mid.b - 0.2).abs() < f32::EPSILON);
+        assert!((mid.a - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn color_lerp_clamps_t() {
+        let a = Color::BLACK;
+        let b = Color::WHITE;
+        assert_eq!(a.lerp(b, -0.5), a);
+        assert_eq!(a.lerp(b, 1.5), b);
     }
 
     #[test]

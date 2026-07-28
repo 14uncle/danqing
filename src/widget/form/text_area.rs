@@ -190,6 +190,12 @@ impl TextArea {
         self.color
     }
 
+    /// 当前光标所在行索引(测试用)。
+    #[cfg(test)]
+    pub(crate) fn cursor_line_index(&self) -> usize {
+        self.cursor_line()
+    }
+
     /// 当前圆角半径(测试用)。
     #[cfg(test)]
     pub(crate) fn radius_value(&self) -> f32 {
@@ -354,8 +360,10 @@ impl Widget for TextArea {
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
         self.area.set(area);
 
-        // 背景
-        rects.push_rect(area, self.background, self.radius);
+        // 背景与边框共用同一份像素对齐几何: 轮廓精确重合 (贴合),
+        // 且 1px 描边落在完整像素行上满强度渲染 (底边发虚的根因对策)。
+        let surface = area.snap_to_pixels();
+        rects.push_rect(surface, self.background, self.radius);
 
         // 边框: 聚焦时使用 accent,否则使用默认边框色。
         let border_color = if self.focused {
@@ -363,7 +371,7 @@ impl Widget for TextArea {
         } else {
             self.border_color
         };
-        rects.push_rounded_border(area, border_color, self.radius, self.border_width);
+        rects.push_rounded_border(surface, border_color, self.radius, self.border_width);
 
         let text_x = area.origin.x + self.padding.left;
         let ascent = texts.ascent(f32::from(self.font_size));
@@ -693,6 +701,40 @@ mod tests {
         t.insert("c");
         assert_eq!(t.value(), "ab\nc");
         assert_eq!(t.cursor(), 4);
+    }
+
+    #[test]
+    fn enter_after_first_line_advances_caret_to_second_line() {
+        // 回归测试:第一行输入字符后按 Enter,
+        // 光标必须落在第二行首列(而非 fallback 回第一行行首)。
+        // 根因:`break_lines` 未为末尾 '\n' 产生占位空行。
+        let mut t = TextArea::new();
+        let mut texts = crate::TextBatch::new();
+        t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
+
+        t.insert("ab");
+        assert_eq!(t.cursor(), 2);
+
+        t.event(
+            &Event::Key {
+                key: Key::Named(NamedKey::Enter),
+                pressed: true,
+                shift: false,
+                ctrl: false,
+            },
+            area(),
+            &mut Vec::new(),
+        );
+        assert_eq!(t.value(), "ab\n");
+        assert_eq!(t.cursor(), 3);
+
+        // 下一帧 layout 才会重建行;测试中显式触发。
+        t.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
+
+        // 光标应在新行(索引 1)而非第一行(索引 0)。
+        // paint() 通过同一个 cursor_line() 推 caret_y,
+        // 因此本断言同时覆盖布局与渲染两个面。
+        assert_eq!(t.cursor_line_index(), 1);
     }
 
     #[test]

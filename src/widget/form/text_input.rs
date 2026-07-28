@@ -1,7 +1,7 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! TextInput 组件:单行可编辑文本。
+//! TextInput 组件：单行可编辑文本。
 //!
 //! 支持光标、选区、键盘编辑、IME preedit 显示与 commit 插入。
 
@@ -14,7 +14,7 @@ use crate::widget::form::text_editor::TextEditor;
 use crate::widget::{EventResult, MsgQueue, Widget};
 use crate::{Color, Constraints, Edges, LightTheme, Rect, Size, Theme};
 
-/// 光标闪烁周期(秒)。
+/// 光标闪烁周期 (秒)。
 const BLINK_PERIOD: f32 = 0.5;
 
 /// 单行文本输入组件。
@@ -43,24 +43,24 @@ pub struct TextInput {
     focus_border_color: Color,
     /// 边框粗细。
     border_width: f32,
-    /// 显式宽度(未指定则按约束上限)。
+    /// 显式宽度 (未指定则按约束上限)。
     width: Option<f32>,
-    /// layout/paint 缓存:自身绝对矩形。
+    /// layout/paint 缓存：自身绝对矩形。
     area: Cell<Rect>,
-    /// 每个字符右侧的 x 偏移(用于鼠标点击定位光标与 IME 区域)。
+    /// 每个字符右侧的 x 偏移 (用于鼠标点击定位光标与 IME 区域)。
     char_offsets: Vec<f32>,
-    /// 行高(用于 IME 区域与光标高度)。
+    /// 行高 (用于 IME 区域与光标高度)。
     line_height: f32,
-    /// 光标可见性(由动画控制闪烁)。
+    /// 光标可见性 (由动画控制闪烁)。
     caret_visible: bool,
-    /// IME 合成文本(显示在光标处,带下划线)。
+    /// IME 合成文本 (显示在光标处，带下划线)。
     preedit: Option<String>,
     /// 鼠标拖拽选区状态。
     dragging: bool,
 }
 
 impl TextInput {
-    /// 创建文本输入框,使用默认浅色主题 token。
+    /// 创建文本输入框，使用默认浅色主题 token。
     pub fn new() -> Self {
         Self::themed(&LightTheme)
     }
@@ -126,54 +126,54 @@ impl TextInput {
         self
     }
 
-    /// 设置文本变化回调(每次编辑后触发)。
+    /// 设置文本变化回调 (每次编辑后触发)。
     pub fn on_change<M: 'static>(mut self, f: impl Fn(&str) -> M + 'static) -> Self {
         self.editor = self.editor.on_change(f);
         self
     }
 
-    /// 当前文本(不含 preedit)。
+    /// 当前文本 (不含 preedit)。
     pub fn value(&self) -> &str {
         self.editor.text()
     }
 
-    /// 光标位置(测试用)。
+    /// 光标位置 (测试用)。
     #[cfg(test)]
     pub(crate) fn cursor(&self) -> usize {
         self.editor.cursor()
     }
 
-    /// 设置光标位置(测试用)。
+    /// 设置光标位置 (测试用)。
     #[cfg(test)]
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
         self.editor.set_cursor(cursor);
     }
 
-    /// 选区锚点(测试用)。
+    /// 选区锚点 (测试用)。
     #[cfg(test)]
     pub(crate) fn anchor(&self) -> usize {
         self.editor.anchor()
     }
 
-    /// 设置选区锚点(测试用)。
+    /// 设置选区锚点 (测试用)。
     #[cfg(test)]
     pub(crate) fn set_anchor(&mut self, anchor: usize) {
         self.editor.set_anchor(anchor);
     }
 
-    /// 当前背景色(测试用)。
+    /// 当前背景色 (测试用)。
     #[cfg(test)]
     pub(crate) fn background_color(&self) -> Color {
         self.background
     }
 
-    /// 当前文本颜色(测试用)。
+    /// 当前文本颜色 (测试用)。
     #[cfg(test)]
     pub(crate) fn text_color_value(&self) -> Color {
         self.color
     }
 
-    /// 当前圆角半径(测试用)。
+    /// 当前圆角半径 (测试用)。
     #[cfg(test)]
     pub(crate) fn radius_value(&self) -> f32 {
         self.radius
@@ -194,7 +194,7 @@ impl TextInput {
         self.editor.select_all();
     }
 
-    /// 删除当前选区(若存在,测试用)。
+    /// 删除当前选区 (若存在，测试用)。
     #[cfg(test)]
     fn delete_selection(&mut self) {
         self.editor.delete_selection();
@@ -210,7 +210,7 @@ impl TextInput {
         self.editor.redo()
     }
 
-    /// 选区范围(起点,终点),保证 start <= end。
+    /// 选区范围 (起点，终点),保证 start <= end。
     fn selection_range(&self) -> (usize, usize) {
         self.editor.selection_range()
     }
@@ -223,7 +223,7 @@ impl TextInput {
         self.char_offsets.get(char_idx - 1).copied().unwrap_or(0.0)
     }
 
-    /// 将本地 x 坐标(相对于文本起点)转换为字符索引。
+    /// 将本地 x 坐标 (相对于文本起点) 转换为字符索引。
     fn hit_to_index(&self, local_x: f32) -> usize {
         if self.char_offsets.is_empty() {
             return 0;
@@ -266,7 +266,7 @@ impl Widget for TextInput {
         self.area.set(Rect::new(crate::Point::ZERO, size));
         self.line_height = line_height;
 
-        // 缓存每个字符右侧的 x 偏移,用于鼠标点击定位光标。
+        // 缓存每个字符右侧的 x 偏移，用于鼠标点击定位光标。
         self.char_offsets.clear();
         let mut x = 0.0f32;
         for ch in self.editor.text().chars() {
@@ -277,19 +277,21 @@ impl Widget for TextInput {
     }
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
-        // 缓存绝对矩形,供 IME 区域与后续事件使用。
+        // 缓存绝对矩形，供 IME 区域与后续事件使用。
         self.area.set(area);
 
-        // 背景
-        rects.push_rect(area, self.background, self.radius);
+        // 背景与边框共用同一份像素对齐几何：轮廓精确重合 (贴合),
+        // 且 1px 描边落在完整像素行上满强度渲染 (底边发虚的根因对策)。
+        let surface = area.snap_to_pixels();
+        rects.push_rect(surface, self.background, self.radius);
 
-        // 边框: 聚焦时使用 accent,否则使用默认边框色。
+        // 边框：聚焦时使用 accent，否则使用默认边框色。
         let border_color = if self.focused {
             self.focus_border_color
         } else {
             self.border_color
         };
-        rects.push_rounded_border(area, border_color, self.radius, self.border_width);
+        rects.push_rounded_border(surface, border_color, self.radius, self.border_width);
 
         // 文本起点
         let text_x = area.origin.x + self.padding.left;
@@ -628,7 +630,7 @@ mod tests {
             Rect::default(),
             &mut Vec::new(),
         );
-        assert_eq!(t.value(), "Hello"); // 空撤销栈,无变化
+        assert_eq!(t.value(), "Hello"); // 空撤销栈，无变化
 
         t.insert("!");
         assert_eq!(t.value(), "Hello!");
@@ -699,7 +701,7 @@ mod tests {
         for _ in 0..crate::widget::form::text_editor::MAX_UNDO {
             t.undo();
         }
-        // 再撤销一次应无变化(栈已空)
+        // 再撤销一次应无变化 (栈已空)
         let after_undos = t.value().to_string();
         t.undo();
         assert_eq!(t.value(), after_undos);
@@ -723,7 +725,7 @@ mod tests {
     #[test]
     fn backspace_deletes_previous_char() {
         let mut t = input();
-        // cursor 在末尾,Backspace 删除 'o'
+        // cursor 在末尾，Backspace 删除 'o'
         assert_eq!(t.cursor(), 5);
         t.event(
             &Event::Key {
@@ -810,7 +812,7 @@ mod tests {
         // 触发 layout 以计算 char_offsets
         t.layout(Constraints::loose(Size::new(500.0, 100.0)), &mut texts);
 
-        // 点击文本起点左侧,光标应在 0
+        // 点击文本起点左侧，光标应在 0
         t.event(
             &Event::MouseInput {
                 button: MouseButton::Left,
@@ -822,7 +824,7 @@ mod tests {
         );
         assert_eq!(t.cursor(), 0);
 
-        // 点击文本末尾右侧,光标应在末尾
+        // 点击文本末尾右侧，光标应在末尾
         let end_x = t.char_offsets.last().copied().unwrap_or(0.0) + 100.0;
         t.event(
             &Event::MouseInput {
@@ -875,19 +877,19 @@ mod tests {
     #[test]
     fn ime_area_follows_caret_after_paint() {
         let mut t = input();
-        // 将光标移到开头,避免光标偏移干扰原点判断。
+        // 将光标移到开头，避免光标偏移干扰原点判断。
         t.set_cursor(0);
         t.set_anchor(0);
 
         let mut texts = TextBatch::new();
         t.layout(Constraints::loose(Size::new(500.0, 100.0)), &mut texts);
 
-        // paint 前 area 为本地原点,IME 区域应位于 (padding.left, padding.top)。
+        // paint 前 area 为本地原点，IME 区域应位于 (padding.left, padding.top)。
         let local = t.ime_area().unwrap();
         assert!((local.origin.x - t.padding.left).abs() < f32::EPSILON);
         assert!((local.origin.y - t.padding.top).abs() < f32::EPSILON);
 
-        // paint 后缓存绝对矩形,IME 区域应跟随光标平移。
+        // paint 后缓存绝对矩形，IME 区域应跟随光标平移。
         let abs = Rect::from_xywh(20.0, 30.0, 500.0, 100.0);
         let mut rects = RectBatch::new();
         t.paint(abs, &mut rects, &mut texts);

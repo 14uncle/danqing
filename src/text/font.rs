@@ -1,15 +1,16 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! 字体加载:font-kit 查系统字体,内嵌 OFL 字体兜底。
+//! 字体加载:内嵌 OFL 黑体优先,系统字体兜底。
 //!
 //! 本模块为纯逻辑(CPU),不接触 GPU;字形栅格化由 fontdue 完成。
+//!
+//! 为何内嵌优先:系统 CJK 字体经 fontdue 展开后常驻内存极高
+//! (实测 Microsoft YaHei ~160 MB),内嵌 GB2312 子集仅 ~37 MB,
+//! 且加载耗时低一个数量级 (~30 ms vs ~220 ms)。
 
 /// 内嵌黑体字节(Noto Sans SC / 思源黑体 GB2312 子集, OFL, 位于 `assets/fonts/ofl-sans.ttf`)。
 const EMBEDDED_SANS_BYTES: &[u8] = include_bytes!("../../assets/fonts/ofl-sans.ttf");
-
-/// 内嵌回退字体字节(位于 `assets/fonts/fallback-font.ttf`,提交在版本控制中)。
-const FALLBACK_FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/fallback-font.ttf");
 
 /// 中文系统字体候选(按优先级,覆盖 Windows/macOS/Linux)。
 const SYSTEM_CJK_CANDIDATES: &[&str] = &[
@@ -48,19 +49,16 @@ impl Font {
         })
     }
 
-    /// 加载内嵌回退字体(ZCOOL XiaoWei,OFL)。
-    pub fn fallback() -> Self {
-        Self::from_bytes(FALLBACK_FONT_BYTES, "embedded ZCOOL XiaoWei (OFL)")
-            .expect("内嵌回退字体必须可解析")
+    /// 解析内嵌黑体字节 (私有, 供 `load` 与 `embedded_sans` 共享)。
+    fn try_embedded_sans() -> Result<Self, FontError> {
+        Self::from_bytes(EMBEDDED_SANS_BYTES, "embedded Noto Sans SC subset (OFL)")
     }
 
     /// 加载内嵌黑体(Noto Sans SC / 思源黑体 GB2312 子集, OFL)。
     ///
-    /// 笔画规整的正文字体, 系统黑体不可用时的首选兜底;
-    /// XiaoWei 笔画偏细, 仅作末位回退与品牌资产。
+    /// 笔画规整的正文字体, 系统黑体不可用时的兜底。
     pub fn embedded_sans() -> Self {
-        Self::from_bytes(EMBEDDED_SANS_BYTES, "embedded Noto Sans SC subset (OFL)")
-            .expect("内嵌黑体必须可解析")
+        Self::try_embedded_sans().expect("内嵌黑体必须可解析")
     }
 
     /// 尝试从系统加载中文字体;成功返回 Some。
@@ -99,18 +97,18 @@ impl Font {
         None
     }
 
-    /// 系统黑体优先, 依次回退 内嵌黑体 → XiaoWei 的加载策略。
+    /// 内嵌黑体优先, 解析失败时回退系统黑体的加载策略。
+    ///
+    /// 内嵌子集常驻内存与加载耗时均远低于系统 CJK 字体 (见模块文档)。
     pub fn load() -> Self {
-        if let Some(font) = Self::system_cjk() {
-            log::info!("字体加载:使用 {}", font.source);
-            return font;
-        }
-        log::info!("字体加载:未找到系统中文字体,使用内嵌黑体");
-        match Self::from_bytes(EMBEDDED_SANS_BYTES, "embedded Noto Sans SC subset (OFL)") {
-            Ok(font) => font,
+        match Self::try_embedded_sans() {
+            Ok(font) => {
+                log::info!("字体加载:使用 {}", font.source);
+                font
+            }
             Err(e) => {
-                log::error!("内嵌黑体解析失败({e}),末位回退 XiaoWei");
-                Self::fallback()
+                log::error!("内嵌黑体解析失败({e}),回退系统黑体");
+                Self::system_cjk().expect("内嵌黑体损坏且无可用系统 CJK 字体")
             }
         }
     }
@@ -139,21 +137,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fallback_parses_and_covers_cjk() {
-        let font = Font::fallback();
-        assert_ne!(
-            font.inner.lookup_glyph_index('你'),
-            0,
-            "回退字体必须覆盖中文"
-        );
-        assert_ne!(
-            font.inner.lookup_glyph_index('A'),
-            0,
-            "回退字体必须覆盖拉丁"
-        );
-    }
-
-    #[test]
     fn embedded_sans_parses_and_covers_cjk_latin_punctuation() {
         let font = Font::embedded_sans();
         for ch in [
@@ -172,16 +155,6 @@ mod tests {
         let font = Font::embedded_sans();
         let (metrics, bitmap) = font.inner.rasterize('你', 16.0);
         assert!(metrics.width > 0 && metrics.height > 0);
-        assert!(bitmap.iter().any(|&a| a > 0), "位图必须非空");
-        assert!(metrics.advance_width > 0.0);
-    }
-
-    #[test]
-    fn fallback_rasterizes_cjk_glyph() {
-        let font = Font::fallback();
-        let (metrics, bitmap) = font.inner.rasterize('你', 16.0);
-        assert!(metrics.width > 0 && metrics.height > 0);
-        assert_eq!(bitmap.len(), metrics.width * metrics.height);
         assert!(bitmap.iter().any(|&a| a > 0), "位图必须非空");
         assert!(metrics.advance_width > 0.0);
     }

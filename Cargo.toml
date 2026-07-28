@@ -18,11 +18,18 @@ thiserror = "2"
 log = "0.4"
 arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
+tray-icon = "0.19"
+windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_Debug"] }
 
 [dev-dependencies]
 anyhow = "1"
 env_logger = "0.11"
 chrono = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+# 番茄钟环境音: 仅 OGG Vorbis 解码 + 播放, 精简 symphonia 特性。
+rodio = { version = "0.22", default-features = false, features = ["playback", "symphonia-ogg", "symphonia-vorbis"] }
 
 [profile.dev]
 # debug 构建默认关闭 wgpu 校验层,避免部分机器 1~3s 启动/关闭延迟
@@ -30,3 +37,13 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 2
+
+[profile.release]
+# 瘦身体感:fat LTO + 极小优化级 + abort-on-panic,显著缩小二进制
+# (12MB → ~5-7MB); 单代码生成单元保模块边界利于 minidbg;
+# 仅剥 DWARF 调试信息,保留符号名以便 minidbg 崩溃诊断。
+lto = "fat"
+codegen-units = 1
+opt-level = "z"
+panic = "abort"
+strip = "debuginfo"

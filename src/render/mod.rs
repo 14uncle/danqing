@@ -10,7 +10,7 @@ mod background;
 mod rect;
 mod text;
 
-pub use background::{BackgroundConfig, BackgroundPipeline, ScaleMode};
+pub use background::{BackgroundConfig, BackgroundFrame, BackgroundPipeline, ScaleMode};
 pub use rect::{DrawTarget, RectBatch, RectPipeline};
 pub use text::{TextBatch, TextPipeline};
 
@@ -22,8 +22,12 @@ use winit::window::Window as WinitWindow;
 use crate::Color;
 
 /// 根据平台选择单一主 backend，避免实例创建时扫描多个后端。
+///
+/// Windows 固定走 DX12：`Backends::PRIMARY` 会同时拉起 Vulkan 与 DX12
+/// 两套后端加载器（各自的驱动 DLL 与分配），常驻内存更高；DX12 在
+/// Win10+ 全平台可用、核显驱动最省，单后端与本注释意图一致。
 #[cfg(target_os = "windows")]
-const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::PRIMARY;
+const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::DX12;
 #[cfg(target_os = "macos")]
 const DEFAULT_BACKENDS: wgpu::Backends = wgpu::Backends::METAL;
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -86,6 +90,10 @@ pub struct Context {
 
 impl Context {
     /// 在指定窗口上初始化 wgpu,surface 尺寸取窗口当前物理尺寸。
+    ///
+    /// 同步入口:内部 `pollster::block_on` 跑 async 初始化。请求适配器时
+    /// 传 `compatible_surface: Some(&surface)` —— DX12 后端据此优化 device
+    /// 创建(presentation engine 初始化与 format 选择一步到位),省 ~200ms 启动。
     pub fn new(
         window: Arc<WinitWindow>,
         clear_color: Color,
@@ -100,25 +108,45 @@ impl Context {
         background: &BackgroundConfig,
     ) -> Result<Self, RenderError> {
         let size = window.inner_size();
+        let flags = instance_flags();
+        log::info!("创建 wgpu instance：backends={DEFAULT_BACKENDS:?}, flags={flags:?}");
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: DEFAULT_BACKENDS,
-            flags: instance_flags(),
+            flags,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let surface = instance.create_surface(window)?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 compatible_surface: Some(&surface),
+                // 低功耗优先: 避免混合显卡机器唤醒独显的 1~2s 抖动,
+                // 且对常驻陪伴类工具更省电; 本框架渲染负载对核显无压力。
+                power_preference: wgpu::PowerPreference::LowPower,
                 ..Default::default()
             })
             .await?;
-        log::info!("GPU 适配器：{}", adapter.get_info().name);
+        let adapter_info = adapter.get_info();
+        log::info!(
+            "GPU 适配器：name={}, type={:?}, backend={:?}, vendor=0x{:04x}, device=0x{:04x}, driver={}, driver_info={}",
+            adapter_info.name,
+            adapter_info.device_type,
+            adapter_info.backend,
+            adapter_info.vendor,
+            adapter_info.device,
+            adapter_info.driver,
+            adapter_info.driver_info
+        );
+        log::info!("开始请求 GPU device");
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("danqing device"),
+                // 常驻内存优先: 让分配器减少预留 slack, 换取更低占用;
+                // 本框架渲染负载轻, 性能损失可忽略 (核显场景尤甚)。
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
                 ..Default::default()
             })
             .await?;
+        log::info!("GPU device 创建成功");
 
         let caps = surface.get_capabilities(&adapter);
         let format = caps
@@ -170,6 +198,15 @@ impl Context {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
         log::debug!("surface 重建：{width}x{height}");
+    }
+
+    /// 写入应用层产出的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
+    ///
+    /// 由 `App::background_frame` 的返回值驱动;未提供时保持配置初始化时的静态背景。
+    pub fn set_background_frame(&mut self, frame: BackgroundFrame) {
+        if let Some(bg) = self.background_pipeline.as_mut() {
+            bg.set_frame(frame);
+        }
     }
 
     /// 渲染一帧：背景图 (如有) → 矩形 pass → 文本 pass。

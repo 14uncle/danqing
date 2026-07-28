@@ -87,12 +87,24 @@ pub fn break_lines(text: &str, max_width: f32, measure: &mut dyn FnMut(char) -> 
         }
     }
 
-    // 最后一行。
-    if line_start < text.chars().count() || lines.is_empty() {
+    // 最后一行。三种情形需要落一行:
+    // - 仍有未结束的内容(行已开启但循环未关闭)
+    // - 空文本(必须有一行占位)
+    // - 文本以 '\n' 结尾(光标需要落在换行后的新行,故追加空行占位)
+    let has_unfinished = line_start < text.chars().count();
+    let ends_with_newline = text.ends_with('\n');
+    if has_unfinished || lines.is_empty() || ends_with_newline {
+        // 占位空行(start == end, width = 0)用于文本以 '\n' 结尾或全空场景;
+        // 否则取循环结束时的累计 end/width。
+        let (end, width) = if has_unfinished {
+            (text.chars().count(), line_width)
+        } else {
+            (line_start, 0.0)
+        };
         lines.push(Line {
             start: line_start,
-            end: text.chars().count(),
-            width: line_width,
+            end,
+            width,
         });
     }
 
@@ -183,5 +195,38 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].end, 6);
         assert_eq!(lines[0].width, 60.0);
+    }
+
+    #[test]
+    fn trailing_newline_emits_placeholder_line() {
+        // 文本以 '\n' 结尾时,必须追加一行占位空行,
+        // 否则光标落在末尾 '\n' 之后找不到归属行,
+        // 会 fallback 到最后一行(== 第一行),造成 caret 视觉跑回首行。
+        let lines = break_lines("ab\n", 100.0, &mut fixed_width);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].start, 0);
+        assert_eq!(lines[0].end, 2);
+        assert_eq!(lines[0].width, 20.0);
+        assert_eq!(lines[1].start, 3);
+        assert_eq!(lines[1].end, 3);
+        assert!(lines[1].is_empty());
+        assert_eq!(lines[1].width, 0.0);
+    }
+
+    #[test]
+    fn only_newline_yields_two_empty_lines() {
+        let lines = break_lines("\n", 100.0, &mut fixed_width);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].is_empty());
+        assert!(lines[1].is_empty());
+    }
+
+    #[test]
+    fn trailing_newline_after_blank_line_keeps_blank_placeholder() {
+        let lines = break_lines("ab\n\n", 100.0, &mut fixed_width);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].end, 2);
+        assert!(lines[1].is_empty());
+        assert!(lines[2].is_empty());
     }
 }

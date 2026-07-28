@@ -1,204 +1,46 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! 窗口与事件循环封装 (winit 平台适配层)。
+//! winit 应用处理器：驱动窗口生命周期与事件分发。
 //!
-//! 本模块是唯一允许接触 OS 窗口 API 的地方：负责窗口创建、
-//! 事件循环驱动，并把 winit 事件转换为平台无关的内部事件。
+//! 由 `run_app` 构造，通过 `event_loop.run_app(&mut handler)` 启动。
+//! 持有应用本体 (`&mut A`)、组件树、GPU 上下文、事件通道，协调：
+//! - 窗口创建 (resumed)
+//! - 事件分发 (window_event)
+//! - 消息消费 (downcast 到 `WindowAction` 或 `App::Msg`)
+//! - 每帧渲染 (RedrawRequested)
+//! - 心跳驱动 (about_to_wait, 隐藏态推进 app.tick + 60fps 主动重绘)
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::sync::mpsc::Receiver;
+use std::time::{Duration, Instant};
 
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
-    event::{ElementState, Ime as WinitIme, MouseButton as WinitMouseButton, WindowEvent},
-    event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{Key as WinitKey, ModifiersState, NamedKey as WinitNamedKey},
-    window::{Icon, Window as WinitWindow, WindowAttributes, WindowId},
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, ControlFlow},
+    keyboard::ModifiersState,
+    window::{Window as WinitWindow, WindowAttributes, WindowId},
 };
 
 use crate::app::{AnimationCtx, App};
-use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey, WindowAction};
-use crate::render::{BackgroundConfig, Context, RectBatch, TextBatch};
+use crate::event::{Event, ImeEvent, Key, NamedKey, WindowAction};
+use crate::render::{Context, RectBatch, TextBatch};
 use crate::widget::{
     FocusManager, MsgQueue, Node, event_at_path, ime_area_at_path, selected_text_at_path,
     wants_ime_at_path,
 };
-use crate::{Color, Point, Rect, Size};
+use crate::{Point, Rect, Size};
 
-/// 窗口 / 事件循环相关错误。
-#[derive(Debug, thiserror::Error)]
-pub enum WindowError {
-    /// 事件循环创建或运行失败。
-    #[error("事件循环错误：{0}")]
-    EventLoop(#[from] winit::error::EventLoopError),
-    /// 窗口创建失败。
-    #[error("创建窗口失败：{0}")]
-    Os(#[from] winit::error::OsError),
-}
-
-/// 窗口初始配置。
-#[derive(Debug, Clone)]
-pub struct WindowConfig {
-    /// 窗口标题。
-    pub title: String,
-    /// 初始逻辑尺寸。
-    pub size: Size,
-    /// 清屏颜色。
-    pub clear_color: Color,
-    /// 背景图配置。
-    pub background: BackgroundConfig,
-    /// 窗口边框颜色 (无边框窗口时自绘)。
-    pub border_color: Color,
-    /// 窗口边框圆角半径 (配合自绘边框与 DWM 圆角)。
-    pub border_radius: f32,
-    /// 窗口边框粗细。
-    pub border_thickness: f32,
-}
-
-impl Default for WindowConfig {
-    fn default() -> Self {
-        Self {
-            title: "danqing showcase".into(),
-            size: Size::new(1280.0, 800.0),
-            // 深蓝灰：非常量黑 / 白，用于验证颜色参数通路
-            clear_color: Color::rgb(0.10, 0.16, 0.24),
-            background: BackgroundConfig::default(),
-            // 浅灰边框，与浅色毛玻璃主题协调
-            border_color: Color::rgba(0.0, 0.0, 0.0, 0.12),
-            border_radius: 12.0,
-            border_thickness: 1.0,
-        }
-    }
-}
-
-/// 把 winit 窗口事件转换为内部事件; 无关事件返回 None。
-fn convert_event(event: &WindowEvent, cursor: Point, modifiers: ModifiersState) -> Option<Event> {
-    match event {
-        WindowEvent::CursorMoved { position, .. } => Some(Event::CursorMoved(Point::new(
-            position.x as f32,
-            position.y as f32,
-        ))),
-        WindowEvent::CursorLeft { .. } => Some(Event::CursorLeft),
-        WindowEvent::MouseInput { state, button, .. } => {
-            let button = match button {
-                WinitMouseButton::Left => MouseButton::Left,
-                WinitMouseButton::Right => MouseButton::Right,
-                WinitMouseButton::Middle => MouseButton::Middle,
-                WinitMouseButton::Back => MouseButton::Back,
-                WinitMouseButton::Forward => MouseButton::Forward,
-                WinitMouseButton::Other(v) => MouseButton::Other(*v),
-            };
-            Some(Event::MouseInput {
-                button,
-                pressed: *state == ElementState::Pressed,
-                position: cursor,
-            })
-        }
-        WindowEvent::MouseWheel { delta, .. } => {
-            let d = match delta {
-                winit::event::MouseScrollDelta::LineDelta(x, y) => (*x, *y),
-                winit::event::MouseScrollDelta::PixelDelta(p) => (p.x as f32, p.y as f32),
-            };
-            Some(Event::MouseWheel {
-                delta: d,
-                position: cursor,
-            })
-        }
-        WindowEvent::KeyboardInput { event, .. } => {
-            let key = match &event.logical_key {
-                WinitKey::Character(s) => Key::Character(s.to_string()),
-                WinitKey::Named(named) => {
-                    let named = match named {
-                        WinitNamedKey::ArrowUp => NamedKey::ArrowUp,
-                        WinitNamedKey::ArrowDown => NamedKey::ArrowDown,
-                        WinitNamedKey::ArrowLeft => NamedKey::ArrowLeft,
-                        WinitNamedKey::ArrowRight => NamedKey::ArrowRight,
-                        WinitNamedKey::Space => NamedKey::Space,
-                        WinitNamedKey::Enter => NamedKey::Enter,
-                        WinitNamedKey::Escape => NamedKey::Escape,
-                        WinitNamedKey::Tab => NamedKey::Tab,
-                        WinitNamedKey::Backspace => NamedKey::Backspace,
-                        WinitNamedKey::Delete => NamedKey::Delete,
-                        WinitNamedKey::Home => NamedKey::Home,
-                        WinitNamedKey::End => NamedKey::End,
-                        WinitNamedKey::Shift => NamedKey::Shift,
-                        WinitNamedKey::Control => NamedKey::Control,
-                        WinitNamedKey::Alt => NamedKey::Alt,
-                        _ => return None,
-                    };
-                    Key::Named(named)
-                }
-                _ => return None,
-            };
-            Some(Event::Key {
-                key,
-                pressed: event.state == ElementState::Pressed,
-                shift: modifiers.shift_key(),
-                ctrl: modifiers.control_key(),
-            })
-        }
-        WindowEvent::Ime(ime) => match ime {
-            WinitIme::Enabled => Some(Event::Ime(ImeEvent::Enabled)),
-            WinitIme::Disabled => Some(Event::Ime(ImeEvent::Disabled)),
-            WinitIme::Preedit(value, cursor) => Some(Event::Ime(ImeEvent::Preedit {
-                value: value.clone(),
-                cursor: *cursor,
-            })),
-            WinitIme::Commit(value) => Some(Event::Ime(ImeEvent::Commit {
-                value: value.clone(),
-            })),
-        },
-        _ => None,
-    }
-}
-
-/// 从 PNG 文件加载 winit 图标。
-///
-/// 将 PNG 解码为 RGBA 后，通过 [`Icon::from_rgba`] 创建图标。
-/// 返回 `Err` 时调用方可选择回退到默认图标。
-fn load_icon_from_png(path: &std::path::Path) -> Result<Icon, Box<dyn std::error::Error>> {
-    let img = image::open(path)?.into_rgba8();
-    let (width, height) = img.dimensions();
-    Icon::from_rgba(img.into_raw(), width, height).map_err(Into::into)
-}
-
-/// Windows 下为无边框窗口恢复圆角与阴影。
-///
-/// 使用 winit 公开的平台扩展 API, 避免手写 unsafe DWM 调用。
-/// 若设置失败仅记录警告，不影响窗口功能。
-#[cfg(target_os = "windows")]
-fn apply_windows_undecorated_style(window: &WinitWindow) {
-    use winit::platform::windows::{CornerPreference, WindowExtWindows};
-
-    if let Err(err) = std::panic::catch_unwind(|| {
-        window.set_undecorated_shadow(true);
-        window.set_corner_preference(CornerPreference::Round);
-    }) {
-        log::warn!("设置 Windows 无边框窗口样式失败：{err:?}");
-    }
-}
-
-/// 加载应用窗口图标。
-///
-/// 尝试读取 `assets/logo/logo_256.png`;
-/// 失败时记录警告并返回 `None`, 避免窗口创建因图标问题而 panic。
-fn load_window_icon() -> Option<Icon> {
-    let path = std::path::Path::new("assets")
-        .join("logo")
-        .join("logo_256.png");
-    match load_icon_from_png(&path) {
-        Ok(icon) => Some(icon),
-        Err(err) => {
-            log::warn!("加载窗口图标失败：{err}");
-            None
-        }
-    }
-}
+use super::event::{WindowAppEvent, convert_event};
+use super::icon::{apply_windows_undecorated_style, load_window_icon};
 
 /// winit 应用处理器，驱动窗口生命周期与事件分发。
-struct Handler<'a, A: App> {
+///
+/// 字段全部私有：外部通过 [`Handler::new`] 构造，通过 trait 方法 (resumed /
+/// window_event / about_to_wait) 操作。
+pub(super) struct Handler<'a, A: App> {
     config: WindowConfig,
     window: Option<Arc<WinitWindow>>,
     context: Option<Context>,
@@ -216,7 +58,6 @@ struct Handler<'a, A: App> {
     msgs: MsgQueue,
     /// 根矩形 (事件命中用，每帧布局后更新)。
     root_area: Rect,
-    /// 焦点管理器。
     focus: FocusManager,
     /// 应用启动时间 (用于动画)。
     start: Instant,
@@ -224,7 +65,64 @@ struct Handler<'a, A: App> {
     clipboard: Option<arboard::Clipboard>,
     /// 是否已完成首帧渲染 (用于一次性诊断计时)。
     first_frame_done: bool,
+    /// 进程入口时间 (run_app 起点，用于启动总耗时基准)。
+    boot: Instant,
+    /// 全局热键接收器 (来自热键线程，`None` 表示未启用或平台不支持)。
+    hotkey_rx: Option<Receiver<u8>>,
+    /// 托盘生命周期句柄 (持有期间托盘图标可见; Drop 时移除)。
+    /// 仅靠 Drop 副作用保活，字段本身不读; `dead_code` 抑制。
+    #[allow(dead_code)]
+    tray: Option<super::tray::TrayHandle>,
+    /// 窗口事件接收器 (App 主动发出：显隐 / 退出)。
+    window_event_rx: Receiver<WindowAppEvent>,
+    /// 当前窗口可见性 (热键 ToggleVisible 状态记录，与 Handler 同步)。
+    is_visible: bool,
 }
+
+impl<'a, A: App> Handler<'a, A> {
+    /// 构造 Handler。仅接收调用方真正提供的值，其他字段用合理默认值
+    /// (None / empty / new / Instant::now()) 就地初始化。
+    /// `tree` 应为 `app.view()` 的结果 (在调用方先求值，以满足借用检查)。
+    ///
+    /// 9 个参数是必要的 (每个子系统一个入口：配置 / App / 组件树 / 文本 /
+    /// 热键通道 / 托盘 / 窗口事件 / 启动基准 / GPU 线程), 单点构造不接受
+    /// 拆 sub-config (各子系统生命周期独立，强耦合反而失真)。
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new(
+        config: WindowConfig,
+        app: &'a mut A,
+        tree: Node,
+        texts: TextBatch,
+        hotkey_rx: Option<Receiver<u8>>,
+        tray: Option<super::tray::TrayHandle>,
+        window_event_rx: Receiver<WindowAppEvent>,
+        boot: Instant,
+    ) -> Self {
+        Self {
+            config,
+            window: None,
+            context: None,
+            texts,
+            cursor: Point::ZERO,
+            modifiers: ModifiersState::empty(),
+            app,
+            tree,
+            msgs: MsgQueue::new(),
+            root_area: Rect::default(),
+            focus: FocusManager::new(),
+            start: Instant::now(),
+            clipboard: None,
+            first_frame_done: false,
+            boot,
+            hotkey_rx,
+            tray,
+            window_event_rx,
+            is_visible: true,
+        }
+    }
+}
+
+use super::{CloseBehavior, WindowConfig};
 
 impl<A: App> Handler<'_, A> {
     /// 记录一条窗口事件到日志。
@@ -423,15 +321,16 @@ impl<A: App> Handler<'_, A> {
 
     /// 处理自绘标题栏等组件产出的窗口控制动作。
     fn handle_window_action(&mut self, action: WindowAction, event_loop: &ActiveEventLoop) {
+        // 关闭按钮遵循 close_behavior 策略 (隐藏 / 退出), 与 Alt+F4 一致。
+        if let WindowAction::Close = action {
+            self.handle_close_request(event_loop, "标题栏关闭窗口");
+            return;
+        }
         let Some(window) = self.window.as_ref() else {
             return;
         };
         match action {
-            WindowAction::Close => {
-                log::info!("标题栏关闭窗口");
-                window.set_visible(false);
-                event_loop.exit();
-            }
+            WindowAction::Close => {} // 已在上面处理
             WindowAction::Minimize => {
                 log::info!("标题栏最小化窗口");
                 window.set_minimized(true);
@@ -479,6 +378,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         if self.window.is_some() {
             return;
         }
+        // 持久化恢复：用 app 的 boot_elapsed_offset 重置 start, 使得
+        // AnimationCtx::elapsed 从 effective_now 起算，而不是 0。
+        self.start = Instant::now() - self.app.boot_elapsed_offset();
         let attrs = WindowAttributes::default()
             .with_title(&self.config.title)
             .with_visible(false)
@@ -493,7 +395,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         let window = match event_loop.create_window(attrs) {
             Ok(window) => Arc::new(window),
             Err(err) => {
-                log::error!("创建窗口失败：{err}");
+                super::log_error_chain("创建窗口失败", &err);
                 event_loop.exit();
                 return;
             }
@@ -503,6 +405,10 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         #[cfg(target_os = "windows")]
         apply_windows_undecorated_style(&window);
 
+        // 同步 inline 初始化 GPU 上下文 (实例 + surface + 适配器 + 设备 + 管线)。
+        // request_adapter 传 `compatible_surface: Some(&surface)` 让 DX12 后端
+        // 一步优化 device / presentation engine 创建，比传 None 省 ~200ms。
+        // 这里没有用后台线程预建 GpuDevice:实测 DX12 上 inline 比 join 快。
         let ctx_start = Instant::now();
         match Context::new(
             Arc::clone(&window),
@@ -514,13 +420,15 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 log::info!("渲染上下文初始化耗时：{:?}", ctx_start.elapsed());
             }
             Err(err) => {
-                log::error!("初始化渲染上下文失败：{err}");
+                super::log_error_chain("初始化渲染上下文失败", &err);
                 event_loop.exit();
                 return;
             }
         }
         window.set_visible(true);
         log::info!("窗口已显示");
+        // 机器可读启动基准 (ASCII, 供 tools/benchmark.ps1 解析)。
+        log::info!("perf startup_to_visible {:?}", self.boot.elapsed());
         self.window = Some(window);
         // 持续渲染模式：请求首帧，之后每帧结束再请求下一帧
         if let Some(window) = &self.window {
@@ -589,12 +497,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
 
         match event {
             WindowEvent::CloseRequested => {
-                log::info!("收到关闭请求，退出事件循环");
-                // 立即隐藏窗口，让关闭感觉更快 (资源释放仍在后台完成)。
-                if let Some(window) = &self.window {
-                    window.set_visible(false);
-                }
-                event_loop.exit();
+                self.handle_close_request(event_loop, "收到关闭请求");
             }
             WindowEvent::Resized(size) => {
                 log::info!("窗口尺寸变化：{}x{}", size.width, size.height);
@@ -611,8 +514,10 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     Size::new(size.width as f32, size.height as f32)
                 });
                 if let Some(screen) = screen {
-                    self.tree.sync(self.app);
                     let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
+                    // 每帧心跳先行：计时 / 过渡动画推进后，绑定闭包在 sync 中读到新状态。
+                    self.app.tick(&ctx);
+                    self.tree.sync(self.app);
                     self.tree.animate(&ctx);
                     self.focus.rebuild(&self.tree);
                     let prev = self.focus.previous().map(|p| p.to_vec());
@@ -635,11 +540,15 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     }
                     self.update_ime();
                 }
-                if let Some(context) = &mut self.context
-                    && !context.render(&rects, &mut self.texts)
-                {
-                    event_loop.exit();
-                    return;
+                if let Some(context) = &mut self.context {
+                    // 应用层提供的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
+                    if let Some(frame) = self.app.background_frame() {
+                        context.set_background_frame(frame);
+                    }
+                    if !context.render(&rects, &mut self.texts) {
+                        event_loop.exit();
+                        return;
+                    }
                 }
                 if !self.first_frame_done {
                     self.first_frame_done = true;
@@ -652,79 +561,118 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             _ => {}
         }
     }
-}
 
-/// 打开窗口并运行应用：事件分发、消息驱动、每帧重绘，直到窗口关闭。
-pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowError> {
-    let event_loop = EventLoop::new()?;
-    let texts_start = Instant::now();
-    let texts = TextBatch::new();
-    log::info!(
-        "文本批次初始化 (含字体加载) 耗时：{:?}",
-        texts_start.elapsed()
-    );
-    let mut handler = Handler {
-        tree: app.view(),
-        config,
-        window: None,
-        context: None,
-        texts,
-        cursor: Point::ZERO,
-        modifiers: ModifiersState::empty(),
-        app,
-        msgs: MsgQueue::new(),
-        root_area: Rect::default(),
-        focus: FocusManager::new(),
-        start: Instant::now(),
-        clipboard: None,
-        first_frame_done: false,
-    };
-    let run_start = Instant::now();
-    event_loop.run_app(&mut handler)?;
-    log::info!("事件循环运行耗时：{:?}", run_start.elapsed());
-    log::info!("事件循环已退出");
-    Ok(())
-}
-
-/// 打开窗口并运行事件循环 (无应用), 直到用户关闭窗口。
-pub fn run(config: WindowConfig) -> Result<(), WindowError> {
-    struct NoopApp;
-    impl App for NoopApp {
-        type Msg = ();
-        fn update(&mut self, _msg: ()) {}
-        fn view(&self) -> Node {
-            crate::widget::node(crate::widget::Text::new(""))
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        log::debug!("[about_to_wait] tick");
+        // 隐藏态时主动 tick: RedrawRequested 不会发火 (窗口隐藏), 必须自己驱动
+        // app.tick, 否则计时器冻结，阶段流转 / 持久化 / flash / beep 全停。
+        // ControlFlow::Poll 已保证循环持续转，此处 tick 每帧推进。
+        if !self.is_visible {
+            let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
+            self.app.tick(&ctx);
+        }
+        // 全局热键通道轮询
+        if let Some(rx) = &self.hotkey_rx {
+            while let Ok(id) = rx.try_recv() {
+                if let Some(msg) = self.app.hotkey(id) {
+                    self.app.update(msg);
+                }
+            }
+        }
+        // 托盘菜单事件轮询 (muda 内部维护的全局通道)。每个 MenuId 是字符串
+        // 包装 (`MenuId(pub String)`); 我们约定菜单项 id 用 ASCII 数字 ("1"/"2"/"3"),
+        // 解析成 u8 后转交 `app.tray_action`。非法 id 静默忽略。
+        let tray_rx = tray_icon::menu::MenuEvent::receiver();
+        while let Ok(event) = tray_rx.try_recv() {
+            if let Ok(id) = event.id.0.parse::<u8>() {
+                if let Some(msg) = self.app.tray_action(id) {
+                    self.app.update(msg);
+                }
+            }
+        }
+        // 窗口事件通道轮询
+        while let Ok(event) = self.window_event_rx.try_recv() {
+            self.apply_window_event(event, event_loop);
+        }
+        // 控制流：
+        // 可见时：主动 request_redraw + WaitUntil(16ms), 等效 60fps 重绘。
+        //   WaitUntil 比 Poll 显著省 CPU (空载时 Poll 一秒跑几千次，WaitUntil 仅
+        //   ~60 次), 同时 OS 调度超时 / 外部事件 / 模态菜单 close 仍能及时唤醒
+        //   winit, 行为等价。
+        //   关键：muda 托盘菜单的 TrackPopupMenu 是 Windows 阻塞 API, 会在主线程
+        //         跑模态消息循环，期间 winit 事件循环被冻结; 菜单关闭后必须主动
+        //         重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
+        //         过滤/丢弃, UI 卡在旧值不更新 (读秒停止、按钮 label 不切)。
+        // 隐藏时：Poll 驱动 app.tick (RedrawRequested 不会发，因为窗口不可见)。
+        if self.is_visible {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Poll);
         }
     }
-    run_app(config, &mut NoopApp)
 }
 
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::*;
-
-    /// 冒烟测试：仅创建事件循环 (链接触发 shim 生成的导入库)。
-    /// 若导入库损坏，本测试会以访问违规崩溃。
-    #[test]
-    fn event_loop_creation_smoke() {
-        use winit::platform::windows::EventLoopBuilderExtWindows;
-        let event_loop = EventLoop::builder().with_any_thread(true).build();
-        drop(event_loop.expect("创建事件循环失败"));
+impl<A: App> Handler<'_, A> {
+    /// 关闭请求 (Alt+F4 / 标题栏关闭按钮) 的统一策略：
+    /// `CloseBehavior::Hide` 常驻型应用只隐藏窗口; `CloseBehavior::Exit` 退出进程。
+    fn handle_close_request(&mut self, event_loop: &ActiveEventLoop, source: &str) {
+        match self.config.close_behavior {
+            CloseBehavior::Hide => {
+                log::info!("{source} → 隐藏");
+                self.hide_window();
+            }
+            CloseBehavior::Exit => {
+                log::info!("{source} → 退出进程");
+                event_loop.exit();
+            }
+        }
     }
 
-    #[test]
-    fn load_icon_from_valid_png_succeeds() {
-        let path = PathBuf::from("assets").join("logo").join("logo_256.png");
-        let icon = load_icon_from_png(&path);
-        assert!(icon.is_ok(), "应能加载有效 PNG 图标：{icon:?}");
+    /// 隐藏窗口：应用层 `is_visible` 与 OS 状态同步翻转。
+    /// 状态切换的"动作"统一收口在此，减少 toggle / close / min 等路径的复制。
+    fn hide_window(&mut self) {
+        if let Some(window) = &self.window {
+            window.set_visible(false);
+        }
+        self.is_visible = false;
     }
 
-    #[test]
-    fn load_icon_from_missing_path_returns_error() {
-        let path = PathBuf::from("assets").join("logo").join("nonexistent.png");
-        let icon = load_icon_from_png(&path);
-        assert!(icon.is_err());
+    /// 显示窗口 + 抢焦点 + 重绘。winit 的 SW_SHOW 默认不抢焦点，
+    /// 显式 focus_window 防止"已显示但被遮" (尤其在另一 app 后台时)。
+    fn show_window(&self) {
+        if let Some(window) = &self.window {
+            window.set_visible(true);
+            window.request_redraw();
+            window.focus_window();
+        }
+    }
+
+    /// 处理 App 经 WindowEventSender 主动发来的事件。
+    fn apply_window_event(&mut self, event: WindowAppEvent, event_loop: &ActiveEventLoop) {
+        match event {
+            WindowAppEvent::ToggleVisible => {
+                // Handler 是 is_visible 唯一事实源：翻转后立即应用到 winit 窗口。
+                self.is_visible = !self.is_visible;
+                if self.is_visible {
+                    self.show_window();
+                } else {
+                    self.hide_window();
+                }
+            }
+            WindowAppEvent::Quit => event_loop.exit(),
+            WindowAppEvent::PhaseAdvanced => {
+                // 隐藏态时阶段流转 → 自动呼出 (用户可能没在电脑前，或在另一 app)
+                if !self.is_visible {
+                    self.is_visible = true;
+                    log::info!("阶段流转，自动呼出窗口");
+                    self.show_window();
+                }
+            }
+        }
     }
 }

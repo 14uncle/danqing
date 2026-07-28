@@ -8,16 +8,18 @@ use crate::render::{RectBatch, TextBatch};
 use crate::widget::{EventResult, MsgQueue, Node, Widget};
 use crate::{Constraints, Point, Rect, Size};
 
-/// 居中容器:自身占满约束上限,子组件按内容尺寸居中。
+/// 居中容器:自身占满 tight 轴的约束上限,子组件按内容尺寸沿该轴居中。
 ///
-/// 注意:仅在 tight 约束(如 Fill 子项分得的空间,或父容器开启
-/// `cross_stretch` 后的交叉轴)下才真正占满并居中;loose 约束下
-/// 退化为包裹子组件内容尺寸,居中效果消失(避免独占父约束上限、
-/// 把后续兄弟挤出屏幕)。
+/// 逐轴独立判定:tight 轴 (如 Fill 子项分得的主轴,或父容器开启
+/// `cross_stretch` 后的交叉轴) 占满并居中;loose 轴按子组件内容自然尺寸,
+/// 避免独占父约束上限、把后续兄弟挤出屏幕。需要在宽松轴上同样占满时
+/// (如 Flow Fill 子项要求内容在全宽内居中) 使用 [`Center::fill_max`]。
 pub struct Center {
     child: Node,
     /// layout 缓存:子组件尺寸。
     child_size: Size,
+    /// 是否占满父组件提供的全部空间 (含宽松轴) 并在其中居中。
+    fill_max: bool,
 }
 
 impl Center {
@@ -26,7 +28,18 @@ impl Center {
         Self {
             child: std::boxed::Box::new(child),
             child_size: Size::ZERO,
+            fill_max: false,
         }
+    }
+
+    /// 占满父组件提供的全部空间并在其中居中。
+    ///
+    /// 默认 Center 在宽松轴上包裹内容 (避免独占父约束、挤出后续兄弟);
+    /// 开启后即使约束宽松也占满上限, 适合作为 Flow 的 Fill 子项
+    /// (Fill 子项的交叉轴约束是宽松的, 默认行为会让内容贴边而非居中)。
+    pub fn fill_max(mut self) -> Self {
+        self.fill_max = true;
+        self
     }
 }
 
@@ -40,20 +53,29 @@ impl Widget for Center {
     }
 
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
-        // Center 在 tight 约束(如 Fill 子项分得的空间)下占满该空间;
-        // 在 loose 约束(如 Column/Row 中按内容布局的 child)下按内容自然尺寸,
-        // 避免把后续兄弟组件挤出父容器。
-        let is_tight = constraints.min_width == constraints.max_width
-            && constraints.min_height == constraints.max_height;
-        if is_tight {
-            self.child_size = self
-                .child
-                .layout(Constraints::loose(constraints.max()), texts);
-            constraints.constrain(constraints.max())
-        } else {
-            self.child_size = self.child.layout(constraints, texts);
-            constraints.constrain(self.child_size)
+        // 逐轴判定:tight 轴占满 (paint/event 沿该轴居中),loose 轴包裹内容。
+        // 子组件一律按 loose 约束测自然尺寸;fill_max 时自身占满全部约束上限。
+        let tight_w = constraints.min_width == constraints.max_width;
+        let tight_h = constraints.min_height == constraints.max_height;
+        self.child_size = self
+            .child
+            .layout(Constraints::loose(constraints.max()), texts);
+        if self.fill_max {
+            return constraints.constrain(constraints.max());
         }
+        let size = Size::new(
+            if tight_w {
+                constraints.max_width
+            } else {
+                self.child_size.width
+            },
+            if tight_h {
+                constraints.max_height
+            } else {
+                self.child_size.height
+            },
+        );
+        constraints.constrain(size)
     }
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
