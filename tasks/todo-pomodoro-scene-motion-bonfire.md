@@ -10,7 +10,7 @@ Spec: `docs/specs/pomodoro-scene-motion-bonfire.md` / Plan: `tasks/plan-pomodoro
   - Acceptance: `BONFIRE_SCENE = 0` 名称锁定;`scene_weight` helper 提取;`fire_intensity` 权重合成;雨效测试零回归
   - Verify: `cargo test --example pomodoro` + `cargo clippy --example pomodoro -- -D warnings`
   - Files: `examples/pomodoro/motion.rs`
-- [ ] T3: main.rs 接线
+- [x] T3: main.rs 接线
   - Acceptance: `background_frame` 携带火强度;运行 1.0 / 暂停 500ms 沉降 / 非火恒 0 单测;T2 过渡期 allow(dead_code) 移除
   - Verify: `cargo test --example pomodoro` + `cargo clippy --example pomodoro -- -D warnings`
   - Files: `examples/pomodoro/main.rs`, `examples/pomodoro/motion.rs`

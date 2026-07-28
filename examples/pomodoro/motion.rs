@@ -12,9 +12,6 @@
 //! 雨与火是并存标量而非互斥选择子: 交叉淡化期间两端可同时非零
 //! (spec: docs/specs/pomodoro-scene-motion-bonfire.md)。
 
-// TODO(T3): 接线后移除 — fire_intensity/BONFIRE_SCENE 在 T3 前无调用方。
-#![allow(dead_code)]
-
 use std::time::Duration;
 
 /// 雨场景在 `SCENES` 中的索引 (单测锁定名称, 防生成器重排静默错位)。
