@@ -188,22 +188,15 @@ impl AmbientPlayer {
     /// 为场景构建循环播放槽: 打开文件 + 流式解码 + 无限循环。
     fn build_player(stream: &rodio::MixerDeviceSink, scene: usize) -> Option<rodio::Player> {
         let path = SCENE_AUDIO[scene];
-        let file = match File::open(path) {
-            Ok(file) => file,
-            Err(err) => {
-                log::warn!("环境音文件打开失败 ({path}): {err}");
-                return None;
-            }
-        };
-        let decoder = match rodio::Decoder::new(BufReader::new(file)) {
-            Ok(decoder) => decoder,
-            Err(err) => {
-                log::warn!("环境音解码失败 ({path}): {err}");
+        let source = match LoopingDecoder::new(path) {
+            Some(source) => source,
+            None => {
+                log::warn!("环境音打开/解码失败 ({path})");
                 return None;
             }
         };
         let player = rodio::Player::connect_new(stream.mixer());
-        player.append(decoder.repeat_infinite());
+        player.append(source);
         Some(player)
     }
 }
@@ -219,6 +212,84 @@ impl AmbientPlayer {
     /// 测试辅助: 强制永久降级, 避免 tick 路径触碰真实音频设备。
     pub fn disable_for_test(&mut self) {
         self.disabled = true;
+    }
+}
+
+/// 无限循环的流式解码源: 当前解码器耗尽时原地 seek 回起点 (失败则重开文件) 续播。
+///
+/// 存在理由: rodio 0.22 的 `repeat_infinite` 内部走 `buffered()`, 建缓冲时
+/// 把 symphonia 解码器初始空包 (`current_span_len() == Some(0)`) 误判为流结束,
+/// 追加后整源秒空、无声。此处自实现循环绕开该环节;
+/// 文件首尾已做 50ms 微 crossfade, seek 回卷无接缝爆音。
+struct LoopingDecoder {
+    /// 音源路径 (重开文件兜底用)。
+    path: &'static str,
+    /// 当前解码器; None 表示已永久失败 (静默降级, 后续 next 一律 None)。
+    current: Option<rodio::Decoder<BufReader<File>>>,
+    /// 声道数 (自首帧捕获, 循环不变)。
+    channels: rodio::ChannelCount,
+    /// 采样率 (自首帧捕获, 循环不变)。
+    sample_rate: rodio::SampleRate,
+}
+
+impl LoopingDecoder {
+    /// 打开并解码首轮; 失败返回 None (调用方记 failed_scenes)。
+    fn new(path: &'static str) -> Option<Self> {
+        let decoder = Self::decode(path)?;
+        Some(Self {
+            path,
+            channels: decoder.channels(),
+            sample_rate: decoder.sample_rate(),
+            current: Some(decoder),
+        })
+    }
+
+    /// 打开文件并创建解码器; 任一步失败返回 None。
+    fn decode(path: &str) -> Option<rodio::Decoder<BufReader<File>>> {
+        let file = File::open(path).ok()?;
+        rodio::Decoder::new(BufReader::new(file)).ok()
+    }
+}
+
+impl Iterator for LoopingDecoder {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        // 最多两轮: 当前解码器取流 → 耗尽则回卷/重开再取; 仍无采样视为永久失败。
+        for _ in 0..2 {
+            let decoder = self.current.as_mut()?;
+            if let Some(sample) = decoder.next() {
+                return Some(sample);
+            }
+            // 耗尽: 优先 seek 回起点 (cheap); 不支持 seek 则重开文件。
+            let mut decoder = self.current.take().expect("上面已确认 Some");
+            self.current = if decoder.try_seek(Duration::ZERO).is_ok() {
+                Some(decoder)
+            } else {
+                Self::decode(self.path)
+            };
+        }
+        // 回卷后仍取不到采样 (文件损坏等): 永久关闭, 防音频线程空转。
+        self.current = None;
+        None
+    }
+}
+
+impl rodio::Source for LoopingDecoder {
+    fn current_span_len(&self) -> Option<usize> {
+        None // 无限流
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        None // 无限循环
     }
 }
 
@@ -366,5 +437,33 @@ mod tests {
             let total = decoder.take(4096).count();
             assert!(total > 0, "{path} 应能解出采样");
         }
+    }
+
+    #[test]
+    fn looping_decoder_keeps_producing_beyond_single_pass() {
+        // 回归: rodio 0.22 repeat_infinite 对 symphonia 解码器秒空的 bug。
+        // bonfire.ogg 单遍约 12.5s; 拉 300 万采样 (≈2.7 遍) 必须全部有值。
+        let source = LoopingDecoder::new(SCENE_AUDIO[0]).expect("bonfire.ogg 应可解码");
+        const PULL: usize = 3_000_000;
+        let produced = source.take(PULL).count();
+        assert_eq!(produced, PULL, "循环源应在单遍耗尽后无缝回卷续播");
+    }
+
+    #[test]
+    fn looping_decoder_preserves_format() {
+        let fresh = {
+            let file = std::fs::File::open(SCENE_AUDIO[0]).unwrap();
+            rodio::Decoder::new(std::io::BufReader::new(file)).unwrap()
+        };
+        let source = LoopingDecoder::new(SCENE_AUDIO[0]).unwrap();
+        assert_eq!(source.channels(), fresh.channels());
+        assert_eq!(source.sample_rate(), fresh.sample_rate());
+        assert_eq!(source.total_duration(), None, "无限循环不报时长");
+        assert_eq!(source.current_span_len(), None, "无限流不报 span 长度");
+    }
+
+    #[test]
+    fn looping_decoder_missing_file_degrades_to_none() {
+        assert!(LoopingDecoder::new("assets/audio/does-not-exist.ogg").is_none());
     }
 }
