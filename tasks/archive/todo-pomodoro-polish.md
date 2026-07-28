@@ -9,7 +9,7 @@
 
 ### ⏸ Checkpoint 1: 长休息 + 轮次就绪
 - [x] `cargo test --example pomodoro` 全绿; fmt + clippy 零警告
-- [ ] 手动验: skip 连按 7 次走一遍 4 轮相位流转, 副标轮次正确
+- [x] 手动验: skip 连按 7 次走一遍 4 轮相位流转, 副标轮次正确 (2026-07-28 通过)
 - [x] 提交 Phase 1
 
 ## Phase 2: WS3 今日完成计数
@@ -18,7 +18,7 @@
 
 ### ⏸ Checkpoint 2: 今日计数就绪
 - [x] `cargo test --example pomodoro` 全绿; fmt + clippy 零警告
-- [ ] 手动验: 完成一个 Focus (或构造 state), 副标显示「今日 1」
+- [x] 手动验: 完成一个 Focus (或构造 state), 副标显示「今日 1」 (2026-07-28 通过)
 - [x] 提交 Phase 2
 
 ## Phase 3: WS1 场景环境音(重头戏)
@@ -27,15 +27,15 @@
 - [x] **Task 7** rodio 接入 — dev-dep rodio (0.22: `DeviceSinkBuilder`/`Player`, 精简特性 ogg+vorbis); 2 槽 Player (from/to, 对齐视觉 LRU) + `repeat_infinite`; 懒初始化 + 静默降级; `tick` 一行接线 (依赖 5, 6)
 
 ### ⏸ Checkpoint 3: 环境音就绪
-- [ ] 5 场景音景人工听感验收 (循环接缝 / 交叉淡化 / 暂停沉降)
-- [ ] 降级路径 (设备占用 / 文件缺失) 不 panic
+- [x] 5 场景音景人工听感验收 (循环接缝 / 交叉淡化 / 暂停沉降) (2026-07-28 通过)
+- [x] 降级路径 (设备占用 / 文件缺失) 不 panic (2026-07-28 通过)
 - [x] 提交 Phase 3
 
 ## Phase 4: 终验与收口
 - [x] **Task 8** benchmark 双门槛 (2026-07-28: 693.8ms / 177.5MB PASS) + spec 勾选 + 归档 + CLAUDE.md 更新 (依赖 1-7; 人工终审项待用户)
 
 ### ✅ Checkpoint Complete: 三件套封档
-- [ ] 三个 WS 全部人工验收通过
+- [x] 三个 WS 全部人工验收通过 (2026-07-28 用户确认)
 - [x] 全部命令绿: `cargo fmt --check` + `cargo clippy -- -D warnings` + `cargo test --lib --tests` + `cargo test --example pomodoro` + `cargo build --release`
 - [x] benchmark 双门槛达标
 - [x] 文档归档完成, CLAUDE.md 指向下一候选 (第二 POC 剪贴板历史管理器或用户指定)
