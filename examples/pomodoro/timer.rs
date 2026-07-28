@@ -8,8 +8,8 @@
 //! - 专注 25:00 / 短休息 5:00, 每自然完成 4 轮专注进入长休息 15:00,
 //!   阶段结束自动流转并自动开始下一阶段;
 //! - `toggle` 在开始 / 暂停间切换 (开始即恢复);
-//! - `reset` 回到专注 25:00 停止态, 轮次计数清零;
-//! - `skip` 手动跳阶段: 不算完成, 不推进轮次计数;
+//! - `reset` 回到专注 25:00 停止态，轮次计数清零;
+//! - `skip` 手动跳阶段：不算完成，不推进轮次计数;
 //! - tick 越过终点时余量带入下一阶段 (晚到的帧不吃时间)。
 
 use std::time::Duration;
@@ -31,7 +31,7 @@ pub enum Phase {
     Focus,
     /// 短休息 (5 分钟)。
     Break,
-    /// 长休息 (15 分钟, 每 4 轮专注后)。
+    /// 长休息 (15 分钟，每 4 轮专注后)。
     LongBreak,
 }
 
@@ -45,8 +45,8 @@ impl Phase {
         }
     }
 
-    /// 下一阶段 (自然完成语义): 返回 (新阶段, 新轮次计数)。
-    /// Focus 完成计一次专注: 满 `CYCLE_LENGTH` 进 `LongBreak` 且轮次清零,
+    /// 下一阶段 (自然完成语义): 返回 (新阶段，新轮次计数)。
+    /// Focus 完成计一次专注：满 `CYCLE_LENGTH` 进 `LongBreak` 且轮次清零，
     /// 否则进 `Break`; 两类休息完成都回 `Focus`, 轮次计数不变。
     pub fn next(self, completed_focus: u8) -> (Self, u8) {
         match self {
@@ -62,7 +62,7 @@ impl Phase {
         }
     }
 
-    /// 手动跳过的目标相位: skip 不算完成, 不推进轮次计数。
+    /// 手动跳过的目标相位：skip 不算完成，不推进轮次计数。
     fn skip_target(self) -> Self {
         match self {
             Self::Focus => Self::Break,
@@ -91,7 +91,7 @@ pub enum Run {
     Paused,
 }
 
-/// `tick` 报告: 阶段是否流转 + 本帧自然完成的专注数。
+/// `tick` 报告：阶段是否流转 + 本帧自然完成的专注数。
 /// `focus_completions` 是轮次计数与今日计数的统一数据源; skip 不经过它。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TickReport {
@@ -183,8 +183,8 @@ impl Pomodoro {
         *self = Self::new();
     }
 
-    /// 立即跳过当前阶段剩余时间, 进入下一阶段。
-    /// skip 不算完成: 不推进轮次计数 (Focus 被跳过一律去 `Break`)。
+    /// 立即跳过当前阶段剩余时间，进入下一阶段。
+    /// skip 不算完成：不推进轮次计数 (Focus 被跳过一律去 `Break`)。
     /// - Running: `deadline = now + next_phase.duration` (从满量重新开始)
     /// - Paused / Idle: `remaining = next_phase.duration`, `deadline = None`
     ///
@@ -335,7 +335,7 @@ mod tests {
     fn overshoot_carries_into_next_phase() {
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
-        // 帧晚到 3 秒: 下一阶段从原终点顺延, 余量不亏。
+        // 帧晚到 3 秒：下一阶段从原终点顺延，余量不亏。
         let overshoot = 3u64;
         let tick_at = FOCUS_DURATION_SECS + overshoot;
         assert!(p.tick(secs(tick_at)).advanced);
@@ -437,7 +437,7 @@ mod tests {
         assert!(p.skip(secs(skip_at)));
         assert_eq!(p.phase(), Phase::Break);
         assert!(p.is_running());
-        // 新阶段从 now 起算, 满量 BREAK_DURATION_SECS
+        // 新阶段从 now 起算，满量 BREAK_DURATION_SECS
         assert_eq!(p.remaining(secs(skip_at)), secs(BREAK_DURATION_SECS));
     }
 
@@ -478,7 +478,7 @@ mod tests {
 
     const LONG_BREAK_DURATION_SECS: u64 = 15 * 60; // 15 分钟
 
-    /// 测试辅助: 从当前时刻推进一个 Focus + Break 短周期 (各在终点 tick 一次)。
+    /// 测试辅助：从当前时刻推进一个 Focus + Break 短周期 (各在终点 tick 一次)。
     fn run_short_cycle(p: &mut Pomodoro, now: &mut u64) {
         *now += FOCUS_DURATION_SECS;
         p.tick(secs(*now));
@@ -491,7 +491,7 @@ mod tests {
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
         let mut now = 0u64;
-        // 前三轮: Focus 完成 → Break
+        // 前三轮：Focus 完成 → Break
         for _ in 0..3 {
             run_short_cycle(&mut p, &mut now);
             assert_eq!(p.phase(), Phase::Focus);
@@ -515,13 +515,13 @@ mod tests {
         now += FOCUS_DURATION_SECS;
         p.tick(secs(now));
         assert_eq!(p.phase(), Phase::LongBreak);
-        // 长休息完成: 回 Focus, 不算专注完成, 轮次已清零
+        // 长休息完成：回 Focus, 不算专注完成，轮次已清零
         now += LONG_BREAK_DURATION_SECS;
         let report = p.tick(secs(now));
         assert_eq!(report.focus_completions, 0);
         assert_eq!(p.phase(), Phase::Focus);
         assert_eq!(p.completed_focus(), 0);
-        // 新一轮从第 1 轮计起: 再次完成 Focus 应去 Break 而非 LongBreak
+        // 新一轮从第 1 轮计起：再次完成 Focus 应去 Break 而非 LongBreak
         now += FOCUS_DURATION_SECS;
         p.tick(secs(now));
         assert_eq!(p.phase(), Phase::Break);
