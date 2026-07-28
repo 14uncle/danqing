@@ -108,7 +108,7 @@ impl Default for AmbientMixer {
 ///
 /// - 懒初始化：首次出现非零音量才打开输出设备，启动路径 (Idle 静音) 不触音频。
 /// - 双槽：槽位绑定场景，与视觉 `(from, to)` 纹理 LRU 同构;
-///   淡化结束后旧场景槽自动释放，新场景槽按需重建 (整段解码入内存 + 游标回绕)。
+///   淡化结束后旧场景槽自动释放，新场景槽按需重建 (`Decoder` 流式 + 无限循环)。
 /// - 静默降级：打开设备失败永久降级 (`disabled`); 单条音源打不开记入
 ///   `failed_scenes` 不再重试。所有失败仅 `log::warn`, 不 panic。
 pub struct AmbientPlayer {
@@ -198,10 +198,10 @@ impl AmbientPlayer {
         }
     }
 
-    /// 为场景构建循环播放槽：打开文件 + 整段解码入内存 + 无限循环。
+    /// 为场景构建循环播放槽：打开文件 + 流式解码 + 无限循环。
     fn build_player(stream: &rodio::MixerDeviceSink, scene: usize) -> Option<rodio::Player> {
         let path = SCENE_AUDIO[scene];
-        let source = match LoopingBuffer::new(path) {
+        let source = match LoopingDecoder::new(path) {
             Some(source) => source,
             None => {
                 log::warn!("环境音打开/解码失败 ({path})");
@@ -228,64 +228,68 @@ impl AmbientPlayer {
     }
 }
 
-/// 无限循环的环境音源：建槽时整段解码入内存，之后纯游标回绕。
+/// 无限循环的流式解码源：当前解码器耗尽时重开文件从头解码续播。
 ///
-/// 存在理由 (rodio 0.22 循环播放三连坑):
-/// - `repeat_infinite` 内部走 `buffered()`, 建缓冲时把 symphonia 解码器初始
-///   空包 (`current_span_len() == Some(0)`) 误判为流结束，追加后整源秒空、无声;
-/// - 流式 + `try_seek(0)` 回卷：symphonia 粗粒度 seek 跳过首个 Vorbis 包
-///   (mountain 实测少 1156 采样 ≈ 24ms), 每次循环接缝爆音;
-/// - 流式 + 重开文件回卷：回卷点在音频回调线程上同步 open+probe+首包解码，
-///   I/O 尖峰造成欠载 pop (循环越短越明显)。
+/// 存在理由：rodio 0.22 的 `repeat_infinite` 内部走 `buffered()`, 建缓冲时
+/// 把 symphonia 解码器初始空包 (`current_span_len() == Some(0)`) 误判为流结束，
+/// 追加后整源秒空、无声。此处自实现循环绕开该环节;
+/// 文件首尾已做 50ms 微 crossfade, 回卷无接缝爆音。
 ///
-/// 整段入内存后回卷零 I/O 零解码，数学上无缝 (文件首尾已做 50ms 微 crossfade)。
-/// 内存代价：双槽最坏组合 (雨 ~79s + 海 ~59s, 48kHz 立体声 f32) ≈ 53MB,
-/// 远低于 360MB 门槛; 槽位随场景 LRU 释放，不会 5 条同时驻留。
-struct LoopingBuffer {
-    /// 单遍全部采样 (交错); 建槽时一次性解码，之后只读。
-    samples: Vec<f32>,
-    /// 播放下标; 到尾回绕 0。
-    cursor: usize,
+/// 回卷不用 `try_seek`: symphonia 粗粒度 seek 回 0 会跳过首个 Vorbis 包
+/// (mountain 实测少 1156 采样 ≈ 24ms), 每循环一次接缝就爆音一声;
+/// 重开文件从头解码才是逐位一致的真回卷 (小文件 probe 开销可忽略)。
+struct LoopingDecoder {
+    /// 音源路径 (重开文件兜底用)。
+    path: &'static str,
+    /// 当前解码器; None 表示已永久失败 (静默降级，后续 next 一律 None)。
+    current: Option<rodio::Decoder<BufReader<File>>>,
     /// 声道数 (自首帧捕获，循环不变)。
     channels: rodio::ChannelCount,
     /// 采样率 (自首帧捕获，循环不变)。
     sample_rate: rodio::SampleRate,
 }
 
-impl LoopingBuffer {
-    /// 打开文件并整段解码; 打不开/解码失败/空流返回 None (调用方记 failed_scenes)。
+impl LoopingDecoder {
+    /// 打开并解码首轮; 失败返回 None (调用方记 failed_scenes)。
     fn new(path: &'static str) -> Option<Self> {
-        let file = File::open(path).ok()?;
-        let decoder = rodio::Decoder::new(BufReader::new(file)).ok()?;
-        let channels = decoder.channels();
-        let sample_rate = decoder.sample_rate();
-        let samples: Vec<f32> = decoder.collect();
-        if samples.is_empty() {
-            return None;
-        }
+        let decoder = Self::decode(path)?;
         Some(Self {
-            samples,
-            cursor: 0,
-            channels,
-            sample_rate,
+            path,
+            channels: decoder.channels(),
+            sample_rate: decoder.sample_rate(),
+            current: Some(decoder),
         })
+    }
+
+    /// 打开文件并创建解码器; 任一步失败返回 None。
+    fn decode(path: &str) -> Option<rodio::Decoder<BufReader<File>>> {
+        let file = File::open(path).ok()?;
+        rodio::Decoder::new(BufReader::new(file)).ok()
     }
 }
 
-impl Iterator for LoopingBuffer {
+impl Iterator for LoopingDecoder {
     type Item = f32;
 
     fn next(&mut self) -> Option<f32> {
-        let sample = *self.samples.get(self.cursor)?;
-        self.cursor += 1;
-        if self.cursor == self.samples.len() {
-            self.cursor = 0;
+        // 最多两轮：当前解码器取流 → 耗尽则重开文件回卷再取; 仍无采样视为永久失败。
+        for _ in 0..2 {
+            let mut decoder = self.current.take()?;
+            if let Some(sample) = decoder.next() {
+                self.current = Some(decoder);
+                return Some(sample);
+            }
+            // 耗尽：重开文件回卷 (不用 try_seek, 见结构体文档)。
+            self.current = Self::decode(self.path);
         }
-        Some(sample)
+        // 回卷后仍取不到采样 (文件损坏等): 永久关闭，防音频线程空转。
+        log::warn!("环境音循环源永久关闭 ({})", self.path);
+        self.current = None;
+        None
     }
 }
 
-impl Source for LoopingBuffer {
+impl Source for LoopingDecoder {
     fn current_span_len(&self) -> Option<usize> {
         None // 无限流
     }
@@ -499,22 +503,22 @@ mod tests {
     }
 
     #[test]
-    fn looping_buffer_keeps_producing_beyond_single_pass() {
+    fn looping_decoder_keeps_producing_beyond_single_pass() {
         // 回归：rodio 0.22 repeat_infinite 对 symphonia 解码器秒空的 bug。
         // bonfire.ogg 单遍约 12.5s; 拉 300 万采样 (≈2.7 遍) 必须全部有值。
-        let source = LoopingBuffer::new(SCENE_AUDIO[0]).expect("bonfire.ogg 应可解码");
+        let source = LoopingDecoder::new(SCENE_AUDIO[0]).expect("bonfire.ogg 应可解码");
         const PULL: usize = 3_000_000;
         let produced = source.take(PULL).count();
         assert_eq!(produced, PULL, "循环源应在单遍耗尽后无缝回卷续播");
     }
 
     #[test]
-    fn looping_buffer_preserves_format() {
+    fn looping_decoder_preserves_format() {
         let fresh = {
             let file = File::open(SCENE_AUDIO[0]).unwrap();
             rodio::Decoder::new(BufReader::new(file)).unwrap()
         };
-        let source = LoopingBuffer::new(SCENE_AUDIO[0]).unwrap();
+        let source = LoopingDecoder::new(SCENE_AUDIO[0]).unwrap();
         assert_eq!(source.channels(), fresh.channels());
         assert_eq!(source.sample_rate(), fresh.sample_rate());
         assert_eq!(source.total_duration(), None, "无限循环不报时长");
@@ -522,22 +526,24 @@ mod tests {
     }
 
     #[test]
-    fn looping_buffer_restart_is_sample_accurate() {
-        // 回归: 回卷必须落在流的第 0 采样。流式方案的两种回卷都踩过坑:
-        // try_seek(0) 跳过首个 Vorbis 包 (1156 采样), 重开文件在音频线程 I/O 欠载。
-        // 内存游标回绕后, 回卷点之后应与流头逐位一致。
-        let mut source = LoopingBuffer::new(SCENE_AUDIO[3]).expect("mountain.ogg 应可解码");
-        let pass = source.samples.len();
-        let wrapped: Vec<f32> = source.by_ref().skip(pass).take(64).collect();
-        let head: Vec<f32> = LoopingBuffer::new(SCENE_AUDIO[3])
+    fn looping_decoder_restart_is_sample_accurate() {
+        // 回归: 回卷必须落在流的第 0 采样。symphonia 粗粒度 try_seek(0) 会跳过
+        // 首个 Vorbis 包 (mountain 实测 1156 采样 ≈ 24ms), 每循环一次接缝爆音。
+        // 单遍采样数动态测量 (symphonia 与 ffmpeg 端点修剪略有差异, 不硬编码)。
+        let pass = LoopingDecoder::decode(SCENE_AUDIO[3])
             .expect("mountain.ogg 应可解码")
-            .take(64)
+            .count();
+        let all: Vec<f32> = LoopingDecoder::new(SCENE_AUDIO[3])
+            .expect("mountain.ogg 应可解码")
+            .take(pass * 2)
             .collect();
-        assert_eq!(wrapped, head, "回卷后应与流头逐位一致 (回卷位置准确)");
+        assert_eq!(all.len(), pass * 2, "应能拉满两遍");
+        let first_diff = (0..pass).find(|&i| all[i] != all[pass + i]);
+        assert_eq!(first_diff, None, "第二遍应与第一遍逐位一致 (回卷位置准确)");
     }
 
     #[test]
-    fn looping_buffer_missing_file_degrades_to_none() {
-        assert!(LoopingBuffer::new("assets/audio/does-not-exist.ogg").is_none());
+    fn looping_decoder_missing_file_degrades_to_none() {
+        assert!(LoopingDecoder::new("assets/audio/does-not-exist.ogg").is_none());
     }
 }
