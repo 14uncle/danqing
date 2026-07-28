@@ -18,7 +18,7 @@
   - Verify: `cargo run --example pomodoro` 人工目检 + `tools/print-window.ps1` 连拍对比
   - Files: `examples/pomodoro/main.rs`(调参含 `src/render/background.wgsl` 常量);同时移除 `motion.rs` 顶部的 `#![allow(dead_code)]` 过渡行
 
-- [ ] **T4: 门槛 + 人工终审**
+- [x] **T4: 门槛 + 人工终审**
   - Acceptance: spec Success Criteria 1~8 全过(benchmark 双门槛、三绿、隐藏零渲染回归、帧差佐证、用户终审);终审不过 → `git revert` T1~T3
   - Verify: `tools/benchmark.ps1 -Example pomodoro` + 全量测试 + 用户人工终审
   - Files: `tasks/todo-pomodoro-scene-motion.md`、必要时 `CLAUDE.md`
