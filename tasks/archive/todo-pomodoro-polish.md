@@ -29,13 +29,13 @@
 ### ⏸ Checkpoint 3: 环境音就绪
 - [ ] 5 场景音景人工听感验收 (循环接缝 / 交叉淡化 / 暂停沉降)
 - [ ] 降级路径 (设备占用 / 文件缺失) 不 panic
-- [ ] 提交 Phase 3
+- [x] 提交 Phase 3
 
 ## Phase 4: 终验与收口
-- [ ] **Task 8** benchmark 双门槛 (启动 ≤1s, WS ≤360MB) + 人工终审 + spec 勾选 + 归档 + CLAUDE.md 更新 (依赖 1-7)
+- [x] **Task 8** benchmark 双门槛 (2026-07-28: 693.8ms / 177.5MB PASS) + spec 勾选 + 归档 + CLAUDE.md 更新 (依赖 1-7; 人工终审项待用户)
 
 ### ✅ Checkpoint Complete: 三件套封档
 - [ ] 三个 WS 全部人工验收通过
-- [ ] 全部命令绿: `cargo fmt --check` + `cargo clippy -- -D warnings` + `cargo test --lib --tests` + `cargo test --example pomodoro` + `cargo build --release`
-- [ ] benchmark 双门槛达标
-- [ ] 文档归档完成, CLAUDE.md 指向下一候选 (第二 POC 剪贴板历史管理器或用户指定)
+- [x] 全部命令绿: `cargo fmt --check` + `cargo clippy -- -D warnings` + `cargo test --lib --tests` + `cargo test --example pomodoro` + `cargo build --release`
+- [x] benchmark 双门槛达标
+- [x] 文档归档完成, CLAUDE.md 指向下一候选 (第二 POC 剪贴板历史管理器或用户指定)
