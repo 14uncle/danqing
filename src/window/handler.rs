@@ -122,7 +122,7 @@ impl<'a, A: App> Handler<'a, A> {
     }
 }
 
-use super::WindowConfig;
+use super::{CloseBehavior, WindowConfig};
 
 impl<A: App> Handler<'_, A> {
     /// 记录一条窗口事件到日志。
@@ -320,20 +320,17 @@ impl<A: App> Handler<'_, A> {
     }
 
     /// 处理自绘标题栏等组件产出的窗口控制动作。
-    fn handle_window_action(&mut self, action: WindowAction, _event_loop: &ActiveEventLoop) {
+    fn handle_window_action(&mut self, action: WindowAction, event_loop: &ActiveEventLoop) {
+        // 关闭按钮遵循 close_behavior 策略 (隐藏 / 退出), 与 Alt+F4 一致。
+        if let WindowAction::Close = action {
+            self.handle_close_request(event_loop, "标题栏关闭窗口");
+            return;
+        }
         let Some(window) = self.window.as_ref() else {
             return;
         };
         match action {
-            WindowAction::Close => {
-                // 标题栏关闭按钮 = 隐藏 (与 Alt+F4 一致); 进程由 Ctrl+Shift+Q 退出
-                log::info!("标题栏关闭窗口 → 隐藏");
-                // set_visible(false) 由 self.hide_window 负责; 这里只改 self.is_visible
-                if let Some(window) = self.window.as_ref() {
-                    window.set_visible(false);
-                }
-                self.is_visible = false;
-            }
+            WindowAction::Close => {} // 已在上面处理
             WindowAction::Minimize => {
                 log::info!("标题栏最小化窗口");
                 window.set_minimized(true);
@@ -500,9 +497,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
 
         match event {
             WindowEvent::CloseRequested => {
-                // 关闭按钮 = 隐藏 (不退出进程); 进程由 Quit 显式退出。
-                log::info!("收到关闭请求，隐藏");
-                self.hide_window();
+                self.handle_close_request(event_loop, "收到关闭请求");
             }
             WindowEvent::Resized(size) => {
                 log::info!("窗口尺寸变化：{}x{}", size.width, size.height);
@@ -623,6 +618,21 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
 }
 
 impl<A: App> Handler<'_, A> {
+    /// 关闭请求 (Alt+F4 / 标题栏关闭按钮) 的统一策略：
+    /// `CloseBehavior::Hide` 常驻型应用只隐藏窗口; `CloseBehavior::Exit` 退出进程。
+    fn handle_close_request(&mut self, event_loop: &ActiveEventLoop, source: &str) {
+        match self.config.close_behavior {
+            CloseBehavior::Hide => {
+                log::info!("{source} → 隐藏");
+                self.hide_window();
+            }
+            CloseBehavior::Exit => {
+                log::info!("{source} → 退出进程");
+                event_loop.exit();
+            }
+        }
+    }
+
     /// 隐藏窗口：应用层 `is_visible` 与 OS 状态同步翻转。
     /// 状态切换的"动作"统一收口在此，减少 toggle / close / min 等路径的复制。
     fn hide_window(&mut self) {

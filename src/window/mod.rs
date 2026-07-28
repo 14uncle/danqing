@@ -64,6 +64,17 @@ fn log_error_chain(label: &str, error: &(dyn std::error::Error + 'static)) {
     }
 }
 
+/// 关闭请求 (Alt+F4 / 标题栏关闭按钮) 的响应策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CloseBehavior {
+    /// 退出进程 (默认): 普通工具窗口关掉即结束。
+    #[default]
+    Exit,
+    /// 隐藏窗口不退出进程：常驻型应用 (番茄钟) 关闭后继续在后台
+    /// 计时 / 响应全局热键，进程由托盘菜单或全局热键显式退出。
+    Hide,
+}
+
 /// 窗口初始配置。
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
@@ -81,6 +92,8 @@ pub struct WindowConfig {
     pub border_radius: f32,
     /// 窗口边框粗细。
     pub border_thickness: f32,
+    /// 关闭请求策略：默认 [`CloseBehavior::Exit`] (关闭即退出进程)。
+    pub close_behavior: CloseBehavior,
 }
 
 impl Default for WindowConfig {
@@ -95,6 +108,7 @@ impl Default for WindowConfig {
             border_color: Color::rgba(0.0, 0.0, 0.0, 0.12),
             border_radius: 12.0,
             border_thickness: 1.0,
+            close_behavior: CloseBehavior::Exit,
         }
     }
 }

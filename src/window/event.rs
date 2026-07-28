@@ -3,10 +3,10 @@
 
 //! 应用 → Handler 的事件通道 + winit 事件 → 内部事件的适配。
 //!
-//! `WindowAppEvent` 是 App 主动发给窗口的事件(显隐 / 退出 / 阶段流转通知),
-//! 通过 mpsc 通道(`WindowEventSender`)发到主线程,Handler 在 `about_to_wait` 轮询。
+//! `WindowAppEvent` 是 App 主动发给窗口的事件 (显隐 / 退出 / 阶段流转通知),
+//! 通过 mpsc 通道 (`WindowEventSender`) 发到主线程，Handler 在 `about_to_wait` 轮询。
 //!
-//! `convert_event` 是 winit 原生事件 → 丹青平台无关事件的适配器,无相关事件返 None。
+//! `convert_event` 是 winit 原生事件 → 丹青平台无关事件的适配器，无相关事件返 None。
 
 use std::sync::mpsc::Sender;
 
@@ -18,7 +18,7 @@ use winit::{
 use crate::Point;
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 
-/// 应用主动发给窗口的事件 (用于全局热键配套: 显隐 / 退出等)。
+/// 应用主动发给窗口的事件 (用于全局热键配套：显隐 / 退出等)。
 #[derive(Debug, Clone, Copy)]
 pub enum WindowAppEvent {
     /// 切换窗口可见性 (Handler 翻转内部状态后应用到 winit)。
@@ -26,7 +26,7 @@ pub enum WindowAppEvent {
     ToggleVisible,
     /// 退出应用 (事件循环收到后 `event_loop.exit()`)。
     Quit,
-    /// 阶段流转通知: 隐藏态时 Handler 自动呼出窗口 + 抢焦点。
+    /// 阶段流转通知：隐藏态时 Handler 自动呼出窗口 + 抢焦点。
     PhaseAdvanced,
 }
 
