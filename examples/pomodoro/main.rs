@@ -74,6 +74,8 @@ struct PomodoroApp {
     state_dirty: bool,
     /// 最近一次成功落盘的 now 值 (节流基准)。
     last_save_at: Duration,
+    /// 最近一次跨日检查的 now 值 (1Hz 节流基准)。
+    last_date_check: Duration,
     /// 完成反馈视觉脉冲 (阶段流转触发)。
     flash: FlashOverlay,
     /// 首次启动快捷键提示 (一过性 fade-in/hold/fade-out 状态机)。
@@ -121,6 +123,7 @@ impl PomodoroApp {
             now_offset: Duration::ZERO,
             state_dirty: true,
             last_save_at: Duration::ZERO,
+            last_date_check: Duration::ZERO,
             flash: FlashOverlay::new(FLASH_DURATION),
             // 全新会话：触发一次性快捷键提示，同时标记为已见 (节流落盘后 JSON 持久化)。
             hint: ShortcutHintOverlay::triggered_at(Duration::ZERO),
@@ -162,6 +165,7 @@ impl PomodoroApp {
             now_offset,
             state_dirty: true,
             last_save_at: now_offset,
+            last_date_check: now_offset,
             flash: FlashOverlay::new(FLASH_DURATION),
             hint: if should_show_hint {
                 ShortcutHintOverlay::triggered_at(now_offset)
@@ -294,6 +298,16 @@ impl App for PomodoroApp {
                     + u32::from(report.focus_completions);
             self.today_date = today;
             self.state_dirty = true;
+        }
+        // 跨日归零 (1Hz 节流): 常驻应用过午夜后, 不等下次完成即刷新副标「今日 N」。
+        if self.now.saturating_sub(self.last_date_check) >= SAVE_THROTTLE {
+            self.last_date_check = self.now;
+            let today = today::today_string();
+            if today != self.today_date {
+                self.today_date = today;
+                self.today_count = 0;
+                self.state_dirty = true;
+            }
         }
         // 1Hz 节流落盘：状态变更后，距上次保存 ≥ 1s 才写。
         if self.state_dirty && self.now.saturating_sub(self.last_save_at) >= SAVE_THROTTLE {
@@ -685,5 +699,30 @@ mod tests {
         let state = app.snapshot_state();
         let restored = PomodoroApp::from_state(state);
         assert_eq!(restored.today_count, 0, "过期日期恢复时应归零");
+    }
+
+    #[test]
+    fn midnight_rollover_resets_today_count_without_completion() {
+        // 常驻应用跨午夜且无完成: tick 的 1Hz 日期检查应主动归零,
+        // 不等下次自然完成 (评审发现: 副标曾会显示昨天的「今日 N」)。
+        let mut app = PomodoroApp::new_default();
+        app.today_date = "2020-01-01".into();
+        app.today_count = 5;
+        app.last_save_at = Duration::from_secs(25 * 60); // 防测试触发真实落盘
+        app.ambient_player.disable_for_test(); // 防测试触碰音频设备
+        // 首次 tick (now=0) 距 last_date_check=0 不足 1s, 不触发检查。
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::ZERO);
+        app.tick(&ctx);
+        assert_eq!(app.today_count, 5, "1s 节流未到, 不应检查");
+        // 1s 后: 触发跨日归零。
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_secs(1));
+        app.tick(&ctx);
+        assert_eq!(app.today_count, 0, "跨午夜应主动归零");
+        assert_eq!(app.today_date, today::today_string());
+        // 同日不再误清: 有计数后保持。
+        app.today_count = 2;
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_secs(2));
+        app.tick(&ctx);
+        assert_eq!(app.today_count, 2, "同日不得误清");
     }
 }

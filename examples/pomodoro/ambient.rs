@@ -178,8 +178,15 @@ impl AmbientPlayer {
             }
         }
         // 音量每帧直写 (300ms 包络 / 800ms 淡化都由 mixer 算好)。
+        // 全零音量时暂停槽位: 常驻应用的支配状态是暂停, 不空转解码/重采样。
+        // play/pause 仅写 AtomicBool, 每帧调用无负担; 音量回正即续播 (位置保持)。
         for (scene, volume) in frame {
             if let Some((_, player)) = self.slots.iter().flatten().find(|(s, _)| *s == scene) {
+                if volume > 0.0 {
+                    player.play();
+                } else {
+                    player.pause();
+                }
                 player.set_volume(volume);
             }
         }
@@ -270,6 +277,7 @@ impl Iterator for LoopingDecoder {
             };
         }
         // 回卷后仍取不到采样 (文件损坏等): 永久关闭, 防音频线程空转。
+        log::warn!("环境音循环源永久关闭 ({})", self.path);
         self.current = None;
         None
     }
