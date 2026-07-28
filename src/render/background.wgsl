@@ -4,14 +4,19 @@
 // 场景切换时绑定 from/to 两张场景图, 按 fade 交叉淡化;
 // 单图与叠加层 (光晕/噪声) 把同一张图绑到两个槽位, fade 恒 0。
 //
-// uniform 后两个浮点位携带场景动效参数 (雨丝强度 + 动效时间);
-// 雨丝强度为 0 时零贡献, 输出与静态逐像素一致。
+// uniform 携带场景动效参数 (雨丝强度 + 动效时间 + 篝火强度);
+// 各效果强度为 0 时零贡献, 输出与静态逐像素一致。
+// 雨与火是并存标量而非互斥选择子: 交叉淡化期间两端可同时非零。
 
 struct Uniforms {
     opacity: f32,
     fade: f32,
     rain_intensity: f32,
     time: f32,
+    fire_intensity: f32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
 }
 
 // ---- 雨丝动效 (雨场景试点) ----
@@ -75,6 +80,63 @@ fn rain_overlay(uv: vec2<f32>, t: f32) -> f32 {
     return min(acc, 1.0) * RAIN_GAIN;
 }
 
+// ---- 篝火动效 (篝火场景) ----
+// 光晕呼吸 (乘性, 只起伏已有辉光) + 火星余烬上浮 (暖色 additive 圆点,
+// 形态对齐静态图已有火星点)。参数集中于本段, 调参只动这里。
+// 所有频率/速度取 1/8 Hz 整数倍, 与雨共用 8s 公共周期 (Rust 侧 MOTION_WRAP_SECS)。
+const FIRE_W: f32 = 0.7853982;         // 2π/8: 动效基频角速度 (1/8 Hz)
+
+// 呼吸: 3 个正弦叠加 (2/8、3/8、5/8 Hz → 周期 4/2.67/1.6s) 叠出有机起伏。
+const FIRE_CENTER: vec2<f32> = vec2<f32>(0.5, 0.95); // 光晕锚点 (下中央, 对齐静态图辉光)
+const FIRE_MASK_RADIUS: f32 = 0.55;    // 呼吸径向衰减半径 (uv)
+const FIRE_BREATH_GAIN: f32 = 0.04;    // 呼吸幅度上限 (乘性, ±4% 量级)
+
+// 余烬: 分列 hash, 每列一颗, 相位随机、速度全列一致 (保公共周期)。
+const EMBER_DENSITY: f32 = 160.0;      // 列密度 (960px 窗 ≈ 6px/列)
+const EMBER_SPEED: f32 = 0.25;         // 上浮速度 (循环/秒, 2/8; 一趟 ~4s)
+const EMBER_SPAN: f32 = 0.65;          // 行程: 自底部 (y=1) 升至 y≈0.35 折返
+const EMBER_RADIUS: f32 = 0.002;       // 点半径 (纵向 uv; 960px 窗 ≈ 2~3px 直径)
+const EMBER_ASPECT: f32 = 1.5;         // 场景画布宽高比 (1536×1024), 圆点修正
+const EMBER_SWAY: f32 = 0.006;         // 横摆幅度 (uv ≈ 6px)
+const EMBER_BRIGHT: f32 = 0.5;         // 点亮度上限 (线性空间 additive)
+const EMBER_ON: f32 = 0.85;            // hash > 此值的列才有余烬 (~24 列, 带内 ~15-20 颗)
+const EMBER_COLOR: vec3<f32> = vec3<f32>(1.0, 0.62, 0.28); // 暖橙 (对齐场景 accent)
+
+fn fire_flicker(t: f32) -> f32 {
+    return 0.6 * sin(t * FIRE_W * 2.0)
+        + 0.3 * sin(t * FIRE_W * 3.0 + 1.7)
+        + 0.2 * sin(t * FIRE_W * 5.0 + 4.1);
+}
+
+// 光晕呼吸: 径向 mask × 低频起伏, 返回值域约 ±BREATH_GAIN。
+fn fire_breath(uv: vec2<f32>, t: f32) -> f32 {
+    let d = distance(uv, FIRE_CENTER);
+    let mask = 1.0 - smoothstep(FIRE_MASK_RADIUS * 0.4, FIRE_MASK_RADIUS, d);
+    return fire_flicker(t) * mask * FIRE_BREATH_GAIN;
+}
+
+// 余烬层: 自底部升起, 横向轻摆, 随行程 (life) 淡出。
+fn ember_layer(uv: vec2<f32>, t: f32) -> f32 {
+    let col = floor(uv.x * EMBER_DENSITY);
+    let rnd = rain_hash(col * 1.37 + 53.0); // 与雨不同种子, 避免位置相关
+    let on = step(EMBER_ON, rain_hash(col * 3.1 + 71.0));
+    // 横摆频率取档位 {1,2,3}/8 Hz (整数倍, 保 8s 公共周期)。
+    let k = 1.0 + floor(rnd * 3.0);
+    let cx = (col + 0.5) / EMBER_DENSITY + sin(t * FIRE_W * k + rnd * 6.2831853) * EMBER_SWAY;
+    let life = fract(t * EMBER_SPEED + rnd * 7.0); // 0=点燃(底部) → 1=熄灭(顶端)
+    let cy = 1.0 - life * EMBER_SPAN;
+    // 发射带收窄: 对齐静态图火星散布带 (中部偏右), 带外软裁。
+    let band = smoothstep(0.20, 0.35, cx) * (1.0 - smoothstep(0.75, 0.90, cx));
+    // 圆点 (宽高比修正); 亮度随行程衰减 + 低频闪烁 (4/8 Hz, 整数倍)。
+    let d = distance(
+        vec2<f32>(uv.x * EMBER_ASPECT, uv.y),
+        vec2<f32>(cx * EMBER_ASPECT, cy),
+    );
+    let spot = 1.0 - smoothstep(EMBER_RADIUS * 0.5, EMBER_RADIUS, d);
+    let fade = (1.0 - life) * (0.7 + 0.3 * sin(t * FIRE_W * 4.0 + rnd * 9.0));
+    return spot * on * band * fade * EMBER_BRIGHT;
+}
+
 @group(0) @binding(0)
 var<uniform> u: Uniforms;
 
@@ -122,6 +184,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // 线性空间 additive 亮度叠加 (sRGB 纹理采样已转线性)。
         color = vec4<f32>(
             color.rgb + vec3<f32>(rain_overlay(in.uv, u.time) * u.rain_intensity),
+            color.a,
+        );
+    }
+    if (u.fire_intensity > 0.0) {
+        // 呼吸乘性起伏已有辉光 (不改色相) + 余烬暖色 additive (线性空间)。
+        color = vec4<f32>(
+            color.rgb * (1.0 + fire_breath(in.uv, u.time) * u.fire_intensity)
+                + EMBER_COLOR * ember_layer(in.uv, u.time) * u.fire_intensity,
             color.a,
         );
     }

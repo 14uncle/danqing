@@ -64,6 +64,8 @@ pub struct BackgroundFrame {
     pub time: f32,
     /// 雨丝动效强度 (0.0 ..= 1.0; 默认 0 = 无动效, shader 输出与静态一致)。
     pub rain_intensity: f32,
+    /// 篝火动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨并存, 交叉淡化期间可同时非零)。
+    pub fire_intensity: f32,
 }
 
 impl BackgroundFrame {
@@ -76,6 +78,7 @@ impl BackgroundFrame {
             clear_color,
             time: 0.0,
             rain_intensity: 0.0,
+            fire_intensity: 0.0,
         }
     }
 
@@ -85,16 +88,22 @@ impl BackgroundFrame {
         self.rain_intensity = rain_intensity.clamp(0.0, 1.0);
         self
     }
+
+    /// 设置篝火动效强度; 强度夹到 0..1。
+    pub fn with_fire(mut self, fire_intensity: f32) -> Self {
+        self.fire_intensity = fire_intensity.clamp(0.0, 1.0);
+        self
+    }
 }
 
-/// 雨效时间取模周期 (秒): 与 background.wgsl 三层雨丝速度的公共周期一致
-/// (0.125 / 0.25 / 0.375 周期/秒 → 公共周期 8s)。上传 uniform 前取模,
-/// 避免常驻数小时后 f32 时间精度退化导致雨丝相位抖动。
-const RAIN_WRAP_SECS: f32 = 8.0;
+/// 场景动效时间取模周期 (秒): 与 background.wgsl 雨/火效果频率的公共周期一致
+/// (雨丝速度 0.125/0.25/0.375、火效频率取 1/8 Hz 整数倍 → 公共周期 8s)。
+/// 上传 uniform 前取模, 避免常驻数小时后 f32 时间精度退化导致相位抖动。
+const MOTION_WRAP_SECS: f32 = 8.0;
 
-/// 雨效时间取模 (纯逻辑): 折回 `[0, RAIN_WRAP_SECS)`; 负值按欧几里得余数处理。
+/// 动效时间取模 (纯逻辑): 折回 `[0, MOTION_WRAP_SECS)`; 负值按欧几里得余数处理。
 fn wrap_motion_time(time: f32) -> f32 {
-    time.rem_euclid(RAIN_WRAP_SECS)
+    time.rem_euclid(MOTION_WRAP_SECS)
 }
 
 /// 将每帧背景状态解析为合法的场景索引对 (纯逻辑, 便于测试)。
@@ -244,7 +253,7 @@ impl BackgroundPipeline {
         let uniform_bufs: [wgpu::Buffer; LAYER_COUNT] = std::array::from_fn(|_| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("background uniform buffer"),
-                size: 16,
+                size: 32,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
@@ -535,12 +544,17 @@ impl BackgroundPipeline {
             clear_color: target.clear_color,
             time: 0.0,
             rain_intensity: 0.0,
+            fire_intensity: 0.0,
         });
         let Some((from, to, fade)) = resolve_frame(frame, self.scene_bytes.len()) else {
             return;
         };
-        // 场景层动效参数 (雨丝强度 + 取模后的时间); 叠加层无动效恒 0。
-        let motion = [frame.rain_intensity, wrap_motion_time(frame.time)];
+        // 场景层动效参数 (雨/火强度 + 取模后的时间); 叠加层无动效恒 0。
+        let motion = [
+            frame.rain_intensity,
+            wrap_motion_time(frame.time),
+            frame.fire_intensity,
+        ];
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("background pass"),
@@ -593,7 +607,7 @@ impl BackgroundPipeline {
                 ScaleMode::Cover,
                 self.glow_opacity,
                 0.0,
-                [0.0, 0.0],
+                [0.0; 3],
             );
         }
         if let Some(noise) = &self.noise {
@@ -607,13 +621,13 @@ impl BackgroundPipeline {
                 ScaleMode::Stretch,
                 self.noise_opacity,
                 0.0,
-                [0.0, 0.0],
+                [0.0; 3],
             );
         }
     }
 
     /// 绘制单个叠加层: 上传该层顶点与 uniform, 绑定资源后绘制。
-    /// `motion` = [雨丝强度, 取模后的动效时间], 仅场景层 (层 0) 非零。
+    /// `motion` = [雨丝强度, 取模后的动效时间, 篝火强度], 仅场景层 (层 0) 非零。
     #[allow(clippy::too_many_arguments)]
     fn draw_layer(
         &self,
@@ -626,7 +640,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
-        motion: [f32; 2],
+        motion: [f32; 3],
     ) {
         // 淡化要求 from/to 同尺寸 (场景生成管线保证统一画布);
         // UV 按 from 纹理计算, 尺寸不一致时退回只画 from。
@@ -656,7 +670,7 @@ impl BackgroundPipeline {
     }
 
     /// 按缩放模式计算顶点与 UV, 写入指定层的顶点区段与 uniform buffer。
-    /// uniform 布局: [opacity, fade, 雨丝强度, 动效时间] (复用 16B 的两个 pad 位)。
+    /// uniform 布局 (32B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, pad×3]。
     #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
@@ -668,7 +682,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
-        motion: [f32; 2],
+        motion: [f32; 3],
     ) {
         let screen_w = target.width;
         let screen_h = target.height;
@@ -735,7 +749,9 @@ impl BackgroundPipeline {
         queue.write_buffer(
             &self.uniform_bufs[layer],
             0,
-            bytemuck::cast_slice(&[opacity, fade, motion[0], motion[1]]),
+            bytemuck::cast_slice(&[
+                opacity, fade, motion[0], motion[1], motion[2], 0.0, 0.0, 0.0,
+            ]),
         );
     }
 }
@@ -905,6 +921,7 @@ mod tests {
         let f = BackgroundFrame::new(0, 1, 0.5, crate::Color::BLACK);
         assert_eq!(f.time, 0.0);
         assert_eq!(f.rain_intensity, 0.0);
+        assert_eq!(f.fire_intensity, 0.0);
     }
 
     #[test]
@@ -919,13 +936,38 @@ mod tests {
     }
 
     #[test]
+    fn with_fire_sets_and_clamps_intensity() {
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_fire(0.8);
+        assert!((f.fire_intensity - 0.8).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_fire(1.7);
+        assert!((f.fire_intensity - 1.0).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_fire(-0.2);
+        assert_eq!(f.fire_intensity, 0.0);
+    }
+
+    #[test]
+    fn with_motion_and_with_fire_are_independent() {
+        // 雨/火是两个并存标量 (交叉淡化期间可同时非零), 链式设置互不覆盖。
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c)
+            .with_motion(2.5, 0.4)
+            .with_fire(0.6);
+        assert!((f.time - 2.5).abs() < f32::EPSILON);
+        assert!((f.rain_intensity - 0.4).abs() < f32::EPSILON);
+        assert!((f.fire_intensity - 0.6).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn wrap_motion_time_wraps_and_stays_positive() {
         assert!(wrap_motion_time(0.0).abs() < f32::EPSILON);
-        assert!(wrap_motion_time(RAIN_WRAP_SECS).abs() < f32::EPSILON);
+        assert!(wrap_motion_time(MOTION_WRAP_SECS).abs() < f32::EPSILON);
         assert!((wrap_motion_time(9.5) - 1.5).abs() < 1e-6);
-        assert!((wrap_motion_time(-0.5) - (RAIN_WRAP_SECS - 0.5)).abs() < 1e-6);
+        assert!((wrap_motion_time(-0.5) - (MOTION_WRAP_SECS - 0.5)).abs() < 1e-6);
         // 常驻数小时的大时间值仍折回周期内 (f32 精度护栏)。
-        assert!(wrap_motion_time(36000.0) < RAIN_WRAP_SECS);
+        assert!(wrap_motion_time(36000.0) < MOTION_WRAP_SECS);
     }
 
     #[test]
