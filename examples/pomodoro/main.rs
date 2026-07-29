@@ -355,10 +355,12 @@ impl App for PomodoroApp {
         let (from, to, fade) = self.fader.frame(self.now, |t| FADE_EASING.eval(t));
         let rain = motion::rain_intensity(from, to, fade, self.motion_gain);
         let fire = motion::fire_intensity(from, to, fade, self.motion_gain);
+        let sea = motion::sea_intensity(from, to, fade, self.motion_gain);
         Some(
             BackgroundFrame::new(from, to, fade, self.palette().base)
                 .with_motion(self.now.as_secs_f32(), rain)
-                .with_fire(fire),
+                .with_fire(fire)
+                .with_sea(sea),
         )
     }
 
@@ -879,6 +881,81 @@ mod tests {
         app.tick(&ctx);
         let frame = app.background_frame().expect("应有背景帧");
         assert_eq!(frame.fire_intensity, 0.0, "非篝火场景火效恒 0");
+    }
+
+    #[test]
+    fn background_frame_carries_sea_motion_when_running_on_sea_scene() {
+        let mut app = PomodoroApp::new_default();
+        app.last_save_at = Duration::from_secs(25 * 60); // 防测试触发真实落盘
+        app.ambient_player.disable_for_test(); // 防测试触碰音频设备
+        app.fader.switch_to(motion::SEA_SCENE, app.now);
+        app.timer.toggle(app.now); // 开始计时
+        // 场景淡化 (800ms) 完成后包络才开始走 (首次 tick 边沿), 再走满 500ms。
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
+        app.tick(&ctx);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
+        app.tick(&ctx);
+        let frame = app.background_frame().expect("应有背景帧");
+        assert!(
+            (frame.sea_intensity - 1.0).abs() < 1e-6,
+            "海场景运行中海效应全量: {}",
+            frame.sea_intensity
+        );
+        assert_eq!(frame.rain_intensity, 0.0, "海场景雨效恒 0");
+        assert_eq!(frame.fire_intensity, 0.0, "海场景火效恒 0");
+    }
+
+    #[test]
+    fn background_frame_sea_settles_on_pause() {
+        let mut app = PomodoroApp::new_default();
+        app.last_save_at = Duration::from_secs(25 * 60);
+        app.ambient_player.disable_for_test();
+        app.fader.switch_to(motion::SEA_SCENE, app.now);
+        app.timer.toggle(app.now);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
+        app.tick(&ctx);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
+        app.tick(&ctx);
+        // 暂停: 边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
+        app.timer.toggle(app.now);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1650));
+        app.tick(&ctx);
+        let frame = app.background_frame().expect("应有背景帧");
+        assert!(
+            (frame.sea_intensity - 1.0).abs() < 1e-6,
+            "暂停边沿帧应连续: {}",
+            frame.sea_intensity
+        );
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
+        app.tick(&ctx);
+        let frame = app.background_frame().expect("应有背景帧");
+        assert!(
+            (frame.sea_intensity - 0.5).abs() < 1e-6,
+            "暂停沉降中点: {}",
+            frame.sea_intensity
+        );
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2150));
+        app.tick(&ctx);
+        let frame = app.background_frame().expect("应有背景帧");
+        assert!(
+            frame.sea_intensity.abs() < 1e-6,
+            "暂停 500ms 后海效应消失: {}",
+            frame.sea_intensity
+        );
+    }
+
+    #[test]
+    fn background_frame_sea_stays_zero_on_non_sea_scene() {
+        let mut app = PomodoroApp::new_default();
+        app.last_save_at = Duration::from_secs(25 * 60);
+        app.ambient_player.disable_for_test(); // 默认场景即篝火 (非海)
+        app.timer.toggle(app.now);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
+        app.tick(&ctx);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
+        app.tick(&ctx);
+        let frame = app.background_frame().expect("应有背景帧");
+        assert_eq!(frame.sea_intensity, 0.0, "非海场景海效恒 0");
     }
 
     #[test]
