@@ -77,6 +77,13 @@ pub(super) struct Handler<'a, A: App> {
     window_event_rx: Receiver<WindowAppEvent>,
     /// 当前窗口可见性 (热键 ToggleVisible 状态记录，与 Handler 同步)。
     is_visible: bool,
+    /// 窗口当前是否持有 OS 焦点 (由 WindowEvent::Focused 维护)。
+    ///
+    /// Alt+Tab 激活本窗口时，若用户先松 Alt、后松 Tab, Windows 会把迟到的
+    /// Tab 投递进队列——实测它排在 Focused(true) 之前 (同毫秒、序在前),
+    /// 且此时 winit 已清零修饰键状态，无法靠 Alt 识别。唯一可靠的判据是
+    /// 到达时窗口尚未持有 OS 焦点 (见 [`dispatch_focused_event`] 的 Tab 守卫)。
+    has_os_focus: bool,
 }
 
 impl<'a, A: App> Handler<'a, A> {
@@ -118,11 +125,20 @@ impl<'a, A: App> Handler<'a, A> {
             tray,
             window_event_rx,
             is_visible: true,
+            has_os_focus: false,
         }
     }
 }
 
 use super::{CloseBehavior, WindowConfig};
+
+/// Tab 焦点遍历是否放行：仅当窗口持有 OS 焦点。
+///
+/// Alt+Tab 激活本窗口时泄漏的 Tab 排在 Focused(true) 之前到达
+/// (此时 `has_os_focus == false`); 用户主动遍历只发生在持有 OS 焦点期间。
+fn tab_traverse_allowed(has_os_focus: bool) -> bool {
+    has_os_focus
+}
 
 impl<A: App> Handler<'_, A> {
     /// 记录一条窗口事件到日志。
@@ -146,12 +162,19 @@ impl<A: App> Handler<'_, A> {
             WindowEvent::ModifiersChanged(mods) => {
                 log::debug!("修饰键：{mods:?}");
             }
+            WindowEvent::Focused(gained) => {
+                log::info!("OS 焦点：{gained}");
+            }
             _ => {}
         }
     }
 
     /// 发送焦点进 / 出事件。
     fn dispatch_focus_changes(&mut self, previous: Option<&[usize]>, current: Option<&[usize]>) {
+        // 焦点迁移是稀有且高价值的诊断信号 (Alt+Tab 泄漏类排查), 值得常驻。
+        if previous != current {
+            log::info!("焦点变化：{previous:?} -> {current:?}");
+        }
         if let Some(path) = previous {
             if current.map(|c| c != path).unwrap_or(true) {
                 event_at_path(
@@ -186,10 +209,17 @@ impl<A: App> Handler<'_, A> {
             ..
         } = event
         {
-            if self.modifiers.shift_key() {
-                self.focus.prev();
-            } else {
-                self.focus.next();
+            // Alt+Tab 切回本窗口时，先松 Alt、后松 Tab 的指法会让 Windows 把
+            // 迟到的 Tab 投递进队列——实测它排在 Focused(true) 之前到达，
+            // 且修饰键已被清零，无法靠 Alt 状态识别。唯一可靠的判据：
+            // 窗口未持有 OS 焦点时到达的 Tab 必是泄漏，不做焦点遍历。
+            // 合法 Tab 遍历只会发生在持有 OS 焦点期间，零误伤。
+            if tab_traverse_allowed(self.has_os_focus) {
+                if self.modifiers.shift_key() {
+                    self.focus.prev();
+                } else {
+                    self.focus.next();
+                }
             }
             return;
         }
@@ -446,6 +476,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             self.modifiers = mods.state();
             return;
         }
+        if let WindowEvent::Focused(gained) = event {
+            self.has_os_focus = gained;
+        }
 
         // 鼠标事件经组件树命中分发，分发后可能更新焦点
         if matches!(
@@ -675,5 +708,23 @@ impl<A: App> Handler<'_, A> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tab_traverse_allowed;
+
+    #[test]
+    fn tab_without_os_focus_is_suppressed() {
+        // Alt+Tab 泄漏的 Tab 在 Focused(true) 之前到达 (has_os_focus=false),
+        // 必须拦截, 否则焦点被切到下一个组件 (2026-07-29 实测回归)。
+        assert!(!tab_traverse_allowed(false));
+    }
+
+    #[test]
+    fn tab_with_os_focus_traverses() {
+        // 持有 OS 焦点期间的 Tab 是用户主动遍历, 必须放行。
+        assert!(tab_traverse_allowed(true));
     }
 }
