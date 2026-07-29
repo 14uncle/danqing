@@ -138,17 +138,19 @@ fn ember_layer(uv: vec2<f32>, t: f32) -> f32 {
 }
 
 // ---- 海动效 (海场景) ----
-// 波带涌动 (乘性, 水平行进的亮度波, 只起伏已有波带) + 波光碎点
-// (乘性提亮软圆点, 原地明灭不漂移)。海是亮场景: additive 会被近白底
-// 吃掉, 故两组件均走乘性路径 (与篝火的 additive 余烬不同, spec 裁定)。
+// 波带涌动 (UV 纵向位移: 采样坐标本身起伏, 波带剪影随波行进 — 用户终审
+// 裁定: 亮度调制读作"光沿静态波形移动的车", 路没动; 要路自己动) +
+// 波光碎点 (乘性提亮软圆点, 原地明灭不漂移)。
+// 位移随 sea_intensity 缩放: 暂停沉降逐像素回静态, 暗启动纪律不破。
 // 参数集中于本段, 调参只动这里。所有频率取 1/8 Hz 整数倍,
 // 与雨/火共用 8s 公共周期 (Rust 侧 MOTION_WRAP_SECS)。
 const SEA_W: f32 = 0.7853982;          // 2π/8: 动效基频角速度 (1/8 Hz)
 
-// 涌动: 2 层空间频率错开的行进正弦叠加, 反向漂移叠出有机感。
-const SEA_MASK_TOP: f32 = 0.60;        // 波带区纵向软入起点 (uv.y, 对齐静态图波带上缘)
-const SEA_MASK_FULL: f32 = 0.75;       // 软入终点 (以下全量)
-const SEA_SWELL_GAIN: f32 = 0.04;      // 涌动幅度上限 (乘性, ±4% 起步)
+// 涌动: 2 层空间频率错开的同向行进正弦叠加成纵向位移场;
+// 天空区 mask 为 0 不动, 越靠下的水层位移越大 (近水透视感)。
+const SEA_MASK_TOP: f32 = 0.55;        // 位移区纵向软入起点 (uv.y, 波带上缘略上方)
+const SEA_MASK_FULL: f32 = 0.72;       // 软入终点 (以下全量)
+const SEA_SWELL_GAIN: f32 = 0.015;     // 位移幅度上限 (纵向 uv; 960x640 窗 ≈ ±9.6px)
 
 // 碎点: 分列 hash, 位置基本不动, 亮度低频明灭 (频率档位 {1,2}/8 Hz, 整数倍)。
 const GLINT_DENSITY: f32 = 120.0;      // 列密度 (960px 窗 ≈ 8px/列)
@@ -156,15 +158,18 @@ const GLINT_RADIUS: f32 = 0.004;       // 点半径 (纵向 uv; 960px 窗 ≈ 5p
 const GLINT_ASPECT: f32 = 1.5;         // 场景画布宽高比 (1536×1024), 圆点修正
 const GLINT_BAND_TOP: f32 = 0.72;      // 散布带上缘 (uv.y, 对齐静态图第一叠波带)
 const GLINT_BAND_SPAN: f32 = 0.26;     // 散布带纵向跨度 (至 uv.y ≈ 0.98)
-const GLINT_GAIN: f32 = 0.30;          // 点亮度上限 (乘性提亮)
-const GLINT_ON: f32 = 0.82;            // hash > 此值的列才有碎点 (~21 颗)
+const GLINT_GAIN: f32 = 0.14;          // 点亮度上限 (乘性提亮; 0.30 目测突兀, 调参轮 1)
+const GLINT_ON: f32 = 0.88;            // hash > 此值的列才有碎点 (~14 颗)
 
-// 波带涌动: 纵向 mask × 双层行进正弦, 返回值域约 ±SWELL_GAIN。
+// 波带涌动位移场: 返回纵向采样偏移 (uv 单位, 值域约 ±SWELL_GAIN)。
+// 同一偏移施加于 from/to 两张场景图, 交叉淡化两端一致无跳变。
 fn sea_swell(uv: vec2<f32>, t: f32) -> f32 {
     let mask = smoothstep(SEA_MASK_TOP, SEA_MASK_FULL, uv.y);
-    let w1 = sin(6.2831853 * (3.0 * uv.x + 0.5 * uv.y) - t * SEA_W * 1.0);
-    let w2 = sin(6.2831853 * (5.0 * uv.x - 0.8 * uv.y) + t * SEA_W * 2.0 + 2.3);
-    return (0.6 * w1 + 0.4 * w2) * mask * SEA_SWELL_GAIN;
+    let depth = smoothstep(SEA_MASK_TOP, 1.0, uv.y); // 0 天空 → 1 底部, 近水动得多
+    // 相位含小 y 项: 相邻行位移不同步, 波峰不成直线 (水面感); 同向行进 (调参轮 2)。
+    let w1 = sin(6.2831853 * (2.0 * uv.x + 0.5 * uv.y) - t * SEA_W * 2.0);
+    let w2 = sin(6.2831853 * (3.5 * uv.x - 0.8 * uv.y) - t * SEA_W * 3.0 + 2.3);
+    return (0.6 * w1 + 0.4 * w2) * mask * (0.4 + 0.6 * depth) * SEA_SWELL_GAIN;
 }
 
 // 波光碎点层: 波带内原地明灭的软圆点 (乘性提亮)。
@@ -175,16 +180,16 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
     // 列内 x 抖动避免网格感; y 落在散布带内 (常量, 不漂移)。
     let cx = (col + 0.3 + 0.4 * rnd) / GLINT_DENSITY;
     let cy = GLINT_BAND_TOP + GLINT_BAND_SPAN * rain_hash(col * 3.1 + 113.0);
-    // 明灭频率取档位 {1,2}/8 Hz (整数倍, 保 8s 公共周期); 平方压暗占空比。
+    // 明灭频率取档位 {1,2}/8 Hz (整数倍, 保 8s 公共周期); smoothstep 缓起缓落。
     let k = 1.0 + floor(rnd * 2.0);
     let s = 0.5 + 0.5 * sin(t * SEA_W * k + rnd * 6.2831853);
-    let twinkle = s * s;
-    // 软圆点 (宽高比修正, 同余烬范式)。
+    let twinkle = s * s * (3.0 - 2.0 * s);
+    // 软圆点 (宽高比修正, 同余烬范式); 宽羽化边缘 (0.15R 起软) 避免硬点突兀感。
     let d = distance(
         vec2<f32>(uv.x * GLINT_ASPECT, uv.y),
         vec2<f32>(cx * GLINT_ASPECT, cy),
     );
-    let spot = 1.0 - smoothstep(GLINT_RADIUS * 0.5, GLINT_RADIUS, d);
+    let spot = 1.0 - smoothstep(GLINT_RADIUS * 0.15, GLINT_RADIUS, d);
     return spot * on * twinkle * GLINT_GAIN;
 }
 
@@ -228,8 +233,14 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let c_from = textureSample(tex_from, samp_from, in.uv);
-    let c_to = textureSample(tex_to, samp_to, in.uv);
+    // 海效涌动: 纵向 UV 位移作用于采样坐标本身 (波带剪影起伏);
+    // 位移随强度缩放, 强度 0 时采样原坐标, 输出与静态逐像素一致。
+    var sample_uv = in.uv;
+    if (u.sea_intensity > 0.0) {
+        sample_uv = vec2<f32>(in.uv.x, in.uv.y + sea_swell(in.uv, u.time) * u.sea_intensity);
+    }
+    let c_from = textureSample(tex_from, samp_from, sample_uv);
+    let c_to = textureSample(tex_to, samp_to, sample_uv);
     var color = mix(c_from, c_to, u.fade);
     if (u.rain_intensity > 0.0) {
         // 线性空间 additive 亮度叠加 (sRGB 纹理采样已转线性)。
@@ -247,9 +258,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         );
     }
     if (u.sea_intensity > 0.0) {
-        // 亮场景两组件均乘性: 涌动静伏已有波带 + 碎点提亮 (不改色相)。
+        // 亮场景乘性碎点提亮 (不改色相); 涌动已在上方采样坐标中体现。
         color = vec4<f32>(
-            color.rgb * (1.0 + (sea_swell(in.uv, u.time) + sea_glints(in.uv, u.time)) * u.sea_intensity),
+            color.rgb * (1.0 + sea_glints(in.uv, u.time) * u.sea_intensity),
             color.a,
         );
     }
