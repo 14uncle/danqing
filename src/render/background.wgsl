@@ -90,14 +90,14 @@ fn rain_overlay(uv: vec2<f32>, t: f32) -> f32 {
 const FIRE_W: f32 = 0.7853982;         // 2π/8: 动效基频角速度 (1/8 Hz)
 
 // 呼吸: 3 个正弦叠加 (2/8、3/8、5/8 Hz → 周期 4/2.67/1.6s) 叠出有机起伏。
-const FIRE_CENTER: vec2<f32> = vec2<f32>(0.5, 0.95); // 光晕锚点 (下中央, 对齐静态图辉光)
-const FIRE_MASK_RADIUS: f32 = 0.55;    // 呼吸径向衰减半径 (uv)
+const FIRE_CENTER: vec2<f32> = vec2<f32>(0.5, 0.86); // 光晕锚点 (下部火床, 对齐静态图辉光)
+const FIRE_MASK_RADIUS: f32 = 0.48;    // 呼吸径向衰减半径 (uv)
 const FIRE_BREATH_GAIN: f32 = 0.08;    // 呼吸幅度上限 (乘性; 4% 实测不可读, 翻倍)
 
 // 余烬: 分列 hash, 每列一颗, 相位随机、速度全列一致 (保公共周期)。
 const EMBER_DENSITY: f32 = 160.0;      // 列密度 (960px 窗 ≈ 6px/列)
 const EMBER_SPEED: f32 = 0.25;         // 上浮速度 (循环/秒, 2/8; 一趟 ~4s)
-const EMBER_SPAN: f32 = 0.65;          // 行程: 自底部 (y=1) 升至 y≈0.35 折返
+const EMBER_SPAN: f32 = 0.52;          // 行程: 自火床 (y≈0.86) 升至 y≈0.34 折返
 const EMBER_RADIUS: f32 = 0.0055;      // 点半径 (纵向 uv; 960px 窗 ≈ 7px 直径, 终审裁定)
 const EMBER_ASPECT: f32 = 1.5;         // 场景画布宽高比 (1536×1024), 圆点修正
 const EMBER_SWAY: f32 = 0.006;         // 横摆幅度 (uv ≈ 6px)
@@ -127,7 +127,7 @@ fn ember_layer(uv: vec2<f32>, t: f32) -> f32 {
     let k = 1.0 + floor(rnd * 3.0);
     let cx = (col + 0.5) / EMBER_DENSITY + sin(t * FIRE_W * k + rnd * 6.2831853) * EMBER_SWAY;
     let life = fract(t * EMBER_SPEED + rnd * 7.0); // 0=点燃(底部) → 1=熄灭(顶端)
-    let cy = 1.0 - life * EMBER_SPAN;
+    let cy = FIRE_CENTER.y - life * EMBER_SPAN;
     // 发射带收窄: 对齐静态图火星散布带 (中部偏右), 带外软裁。
     let band = smoothstep(0.20, 0.35, cx) * (1.0 - smoothstep(0.75, 0.90, cx));
     // 圆点 (宽高比修正); 亮度随行程衰减 + 低频闪烁 (4/8 Hz, 整数倍)。

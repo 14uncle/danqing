@@ -282,7 +282,7 @@ def build_embers(count: int, color: tuple, seed: int) -> Image.Image:
 
     for _ in range(count):
         x = w * (0.30 + rnd() * 0.40)
-        y = h * (0.35 + rnd() * 0.35)
+        y = h * (0.55 + rnd() * 0.33)
         r = (1 + rnd() * 2.2) * SS
         a = int(60 + rnd() * 140)
         draw.ellipse([x - r, y - r, x + r, y + r], fill=(*color, a))
@@ -321,7 +321,7 @@ SCENES = [
             (0.75, (48, 24, 12)),
             (1.00, (24, 12, 8)),
         ],
-        "glow": {"color": (255, 159, 67), "center": (0.5, 0.74), "radius": 0.52, "peak": 120},
+        "glow": {"color": (255, 159, 67), "center": (0.5, 0.86), "radius": 0.48, "peak": 120},
         "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 60},
         "embers": {"count": 42, "color": (255, 190, 110), "seed": 0xB0E1},
         "palette": {
