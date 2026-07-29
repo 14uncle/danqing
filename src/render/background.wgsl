@@ -4,9 +4,9 @@
 // 场景切换时绑定 from/to 两张场景图, 按 fade 交叉淡化;
 // 单图与叠加层 (光晕/噪声) 把同一张图绑到两个槽位, fade 恒 0。
 //
-// uniform 携带场景动效参数 (雨丝强度 + 动效时间 + 篝火强度);
+// uniform 携带场景动效参数 (雨丝强度 + 动效时间 + 篝火强度 + 海强度);
 // 各效果强度为 0 时零贡献, 输出与静态逐像素一致。
-// 雨与火是并存标量而非互斥选择子: 交叉淡化期间两端可同时非零。
+// 雨、火、海是并存标量而非互斥选择子: 交叉淡化期间两端可同时非零。
 
 struct Uniforms {
     opacity: f32,
@@ -14,9 +14,9 @@ struct Uniforms {
     rain_intensity: f32,
     time: f32,
     fire_intensity: f32,
+    sea_intensity: f32,
     pad0: f32,
     pad1: f32,
-    pad2: f32,
 }
 
 // ---- 雨丝动效 (雨场景试点) ----
@@ -137,6 +137,57 @@ fn ember_layer(uv: vec2<f32>, t: f32) -> f32 {
     return spot * on * band * fade * EMBER_BRIGHT;
 }
 
+// ---- 海动效 (海场景) ----
+// 波带涌动 (乘性, 水平行进的亮度波, 只起伏已有波带) + 波光碎点
+// (乘性提亮软圆点, 原地明灭不漂移)。海是亮场景: additive 会被近白底
+// 吃掉, 故两组件均走乘性路径 (与篝火的 additive 余烬不同, spec 裁定)。
+// 参数集中于本段, 调参只动这里。所有频率取 1/8 Hz 整数倍,
+// 与雨/火共用 8s 公共周期 (Rust 侧 MOTION_WRAP_SECS)。
+const SEA_W: f32 = 0.7853982;          // 2π/8: 动效基频角速度 (1/8 Hz)
+
+// 涌动: 2 层空间频率错开的行进正弦叠加, 反向漂移叠出有机感。
+const SEA_MASK_TOP: f32 = 0.60;        // 波带区纵向软入起点 (uv.y, 对齐静态图波带上缘)
+const SEA_MASK_FULL: f32 = 0.75;       // 软入终点 (以下全量)
+const SEA_SWELL_GAIN: f32 = 0.04;      // 涌动幅度上限 (乘性, ±4% 起步)
+
+// 碎点: 分列 hash, 位置基本不动, 亮度低频明灭 (频率档位 {1,2}/8 Hz, 整数倍)。
+const GLINT_DENSITY: f32 = 120.0;      // 列密度 (960px 窗 ≈ 8px/列)
+const GLINT_RADIUS: f32 = 0.004;       // 点半径 (纵向 uv; 960px 窗 ≈ 5px 直径)
+const GLINT_ASPECT: f32 = 1.5;         // 场景画布宽高比 (1536×1024), 圆点修正
+const GLINT_BAND_TOP: f32 = 0.72;      // 散布带上缘 (uv.y, 对齐静态图第一叠波带)
+const GLINT_BAND_SPAN: f32 = 0.26;     // 散布带纵向跨度 (至 uv.y ≈ 0.98)
+const GLINT_GAIN: f32 = 0.30;          // 点亮度上限 (乘性提亮)
+const GLINT_ON: f32 = 0.82;            // hash > 此值的列才有碎点 (~21 颗)
+
+// 波带涌动: 纵向 mask × 双层行进正弦, 返回值域约 ±SWELL_GAIN。
+fn sea_swell(uv: vec2<f32>, t: f32) -> f32 {
+    let mask = smoothstep(SEA_MASK_TOP, SEA_MASK_FULL, uv.y);
+    let w1 = sin(6.2831853 * (3.0 * uv.x + 0.5 * uv.y) - t * SEA_W * 1.0);
+    let w2 = sin(6.2831853 * (5.0 * uv.x - 0.8 * uv.y) + t * SEA_W * 2.0 + 2.3);
+    return (0.6 * w1 + 0.4 * w2) * mask * SEA_SWELL_GAIN;
+}
+
+// 波光碎点层: 波带内原地明灭的软圆点 (乘性提亮)。
+fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
+    let col = floor(uv.x * GLINT_DENSITY);
+    let rnd = rain_hash(col * 1.37 + 97.0);  // 与雨/余烬不同种子, 避免位置相关
+    let on = step(GLINT_ON, rain_hash(col * 3.1 + 131.0));
+    // 列内 x 抖动避免网格感; y 落在散布带内 (常量, 不漂移)。
+    let cx = (col + 0.3 + 0.4 * rnd) / GLINT_DENSITY;
+    let cy = GLINT_BAND_TOP + GLINT_BAND_SPAN * rain_hash(col * 3.1 + 113.0);
+    // 明灭频率取档位 {1,2}/8 Hz (整数倍, 保 8s 公共周期); 平方压暗占空比。
+    let k = 1.0 + floor(rnd * 2.0);
+    let s = 0.5 + 0.5 * sin(t * SEA_W * k + rnd * 6.2831853);
+    let twinkle = s * s;
+    // 软圆点 (宽高比修正, 同余烬范式)。
+    let d = distance(
+        vec2<f32>(uv.x * GLINT_ASPECT, uv.y),
+        vec2<f32>(cx * GLINT_ASPECT, cy),
+    );
+    let spot = 1.0 - smoothstep(GLINT_RADIUS * 0.5, GLINT_RADIUS, d);
+    return spot * on * twinkle * GLINT_GAIN;
+}
+
 @group(0) @binding(0)
 var<uniform> u: Uniforms;
 
@@ -192,6 +243,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         color = vec4<f32>(
             color.rgb * (1.0 + fire_breath(in.uv, u.time) * u.fire_intensity)
                 + EMBER_COLOR * ember_layer(in.uv, u.time) * u.fire_intensity,
+            color.a,
+        );
+    }
+    if (u.sea_intensity > 0.0) {
+        // 亮场景两组件均乘性: 涌动静伏已有波带 + 碎点提亮 (不改色相)。
+        color = vec4<f32>(
+            color.rgb * (1.0 + (sea_swell(in.uv, u.time) + sea_glints(in.uv, u.time)) * u.sea_intensity),
             color.a,
         );
     }
