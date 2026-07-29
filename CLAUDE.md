@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current State
 
-- **里程碑状态**: M1~M3(渲染/焦点/滚动)+ 阶段 1(设计系统与品牌视觉)+ 阶段 2(番茄钟 POC,场景沉浸美学)+ 阶段 2 补完(5 个真缺全部修复)+ 番茄钟打磨三件套(场景环境音 / 长休息+轮次 / 今日完成计数,2026-07-28 人工终审全过)+ 托盘与提示(2026-07-28 人工终审关闭)+ 雨场景动效试点(2026-07-28 人工终审关闭)均已关闭并归档到 `tasks/archive/`。番茄钟现已可日常使用:最小化到任务栏常驻,全局热键呼出/暂停,关闭再开状态完整恢复,阶段流转有视觉+听觉反馈,5 场景 CC0 环境音随画面交叉淡化、暂停 300ms 沉降(rodio 懒初始化 + 静默降级,响度统一 -28 LUFS),雨场景程序化雨丝随计时下落、暂停 500ms 沉降(shader additive,零新资产)。
+- **里程碑状态**: M1~M3(渲染/焦点/滚动)+ 阶段 1(设计系统与品牌视觉)+ 阶段 2(番茄钟 POC,场景沉浸美学)+ 阶段 2 补完(5 个真缺全部修复)+ 番茄钟打磨三件套(场景环境音 / 长休息+轮次 / 今日完成计数,2026-07-28 人工终审全过)+ 托盘与提示(2026-07-28 人工终审关闭)+ 雨场景动效试点(2026-07-28 人工终审关闭)+ 篝火场景动效(2026-07-29 人工终审关闭)均已关闭并归档到 `tasks/archive/`。番茄钟现已可日常使用:最小化到任务栏常驻,全局热键呼出/暂停,关闭再开状态完整恢复,阶段流转有视觉+听觉反馈,5 场景 CC0 环境音随画面交叉淡化、暂停 300ms 沉降(rodio 懒初始化 + 静默降级,响度统一 -28 LUFS),雨场景程序化雨丝随计时下落、篝火场景光晕呼吸 + 余烬上浮,均暂停 500ms 沉降(shader additive,零新资产,uniform 每效果一标量)。
 - **当前分支**: `dev`(主分支 `master`);便携包诊断日志已落地,规格见 `docs/specs/portable-diagnostics-logging.md`。
 - **下一步**: 未定。候选为第二 POC 剪贴板历史管理器(效率工具族,美学剂量低于专注陪伴族),或用户另行指定。**未获用户指示时不要启动新 POC**。
 - **性能门槛**: 启动 ≤1s、常驻内存 WS ≤360MB(核显记账);测量用 `tools/benchmark.ps1`。
@@ -90,7 +90,7 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
   - `src/text/{atlas,font}.rs` — 图集分配 + 字体加载(运行时读取 `assets/`)
 - **组件库**: `src/widget/base/`(Button/Text)、`src/widget/layout/`(Box/Column/Row/Padding/Center/Stack,共享 `flow.rs`)、`src/widget/form/`(TextInput/TextArea,共享 `text_editor.rs`)、`src/widget/view/`(Scrollable/Switcher)、`src/widget/focus.rs`、`src/widget/title_bar.rs`
 - **集成测试**: `tests/{event_dispatch,focus_input,widget_tree,switcher,title_bar_window,assets,design_system,hover_debug}.rs`
-- **示例**: `examples/showcase.rs`(持续生长,以用代测);`examples/pomodoro/`(`timer.rs`/`scenes.rs`/`fader.rs`/`flash.rs`/`audio.rs`/`state.rs`/`ambient.rs`/`motion.rs`/`today.rs`/`hint.rs`/`tray.rs`/`main.rs`,阶段 2 POC + 补完 + 打磨三件套 + 托盘与提示 + 雨场景动效);`examples/common/log.rs`(共享 `init_log`);`examples/minimal.rs`(最小骨架);`examples/mem_probe.rs`(内存探针)
+- **示例**: `examples/showcase.rs`(持续生长,以用代测);`examples/pomodoro/`(`timer.rs`/`scenes.rs`/`fader.rs`/`flash.rs`/`audio.rs`/`state.rs`/`ambient.rs`/`motion.rs`/`today.rs`/`hint.rs`/`tray.rs`/`main.rs`,阶段 2 POC + 补完 + 打磨三件套 + 托盘与提示 + 雨/篝火场景动效);`examples/common/log.rs`(共享 `init_log`);`examples/minimal.rs`(最小骨架);`examples/mem_probe.rs`(内存探针)
 - **资产**: `assets/fonts/`(内嵌 OFL 黑体优先);`assets/logo/`;`assets/background/`(渐变 + 噪声);`assets/scenes/`(5 场景 PNG:篝火/海/雨/山/森林);`assets/audio/`(5 场景 CC0 环境音 OGG + `ATTRIBUTION.md`)
 - **文档**: `docs/specs/`(规格);`docs/ideas/`(灵感/one-pager);`tasks/`(计划/进度);`tasks/archive/`(已关闭里程碑)
 

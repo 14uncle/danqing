@@ -14,7 +14,7 @@ Spec: `docs/specs/pomodoro-scene-motion-bonfire.md` / Plan: `tasks/plan-pomodoro
   - Acceptance: `background_frame` 携带火强度;运行 1.0 / 暂停 500ms 沉降 / 非火恒 0 单测;T2 过渡期 allow(dead_code) 移除
   - Verify: `cargo test --example pomodoro` + `cargo clippy --example pomodoro -- -D warnings`
   - Files: `examples/pomodoro/main.rs`, `examples/pomodoro/motion.rs`
-- [ ] T4: 调参 + 门槛 + 终审
+- [x] T4: 调参 + 门槛 + 终审
   - Acceptance: 帧差证据(篝火 >0 / 山 ≈0);用户目测 ≤2 轮;benchmark 双门槛 PASS;提交门槛全绿 + 五轴评审;CLAUDE.md 同步;plan/todo 归档;memory 更新;spec 8 条验收勾选
   - Verify: `tools/benchmark.ps1 -Example pomodoro -Runs 3` + 全部提交门槛 + 用户终审
   - Files: `background.wgsl`(常量段)、`CLAUDE.md`、`tasks/`、memory
