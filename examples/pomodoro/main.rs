@@ -95,6 +95,9 @@ struct PomodoroApp {
     motion_envelope: motion::MotionEnvelope,
     /// 最近 tick 算出的动效包络值 (`background_frame` 只读)。
     motion_gain: f32,
+    /// 雨钟 (秒): 雨丝下落时间轴。暂停时定格可见 (不随包络沉降),
+    /// 包络只推进本钟 — 暂停 500ms 减速冻结, 恢复 500ms 加速续走。
+    rain_clock: f32,
     /// 窗口事件发送器 (run_app 启动时注入，App 借此控制窗口显隐 / 退出)。
     window_sender: Option<WindowEventSender>,
 }
@@ -139,6 +142,7 @@ impl PomodoroApp {
             ambient_player: ambient::AmbientPlayer::new(),
             motion_envelope: motion::MotionEnvelope::new(),
             motion_gain: 0.0,
+            rain_clock: 0.0,
             window_sender: None,
         }
     }
@@ -186,6 +190,7 @@ impl PomodoroApp {
             ambient_player: ambient::AmbientPlayer::new(),
             motion_envelope: motion::MotionEnvelope::new(),
             motion_gain: 0.0,
+            rain_clock: 0.0,
             window_sender: None,
         }
     }
@@ -287,6 +292,7 @@ impl App for PomodoroApp {
     }
 
     fn tick(&mut self, ctx: &AnimationCtx) {
+        let dt = ctx.elapsed.saturating_sub(self.now);
         self.now = ctx.elapsed;
         let report = self.timer.tick(ctx.elapsed);
         if report.advanced {
@@ -349,18 +355,22 @@ impl App for PomodoroApp {
         self.ambient_player.apply(frame);
         // 场景动效: 与音频同潮汐契约 — 运行全量, 暂停 500ms 沉降 (视觉独立时长)。
         self.motion_gain = self.motion_envelope.gain(self.timer.is_running(), self.now);
+        // 雨钟: 雨丝定格可见 (2026-07-29 用户裁定: 暂停显示雨丝, 不随包络沉降);
+        // 包络只推进下落时间 — 暂停 500ms 减速冻结, 恢复 500ms 加速续走, 无跳变。
+        self.rain_clock += dt.as_secs_f32() * self.motion_gain;
     }
 
     fn background_frame(&self) -> Option<BackgroundFrame> {
         let (from, to, fade) = self.fader.frame(self.now, |t| FADE_EASING.eval(t));
-        let rain = motion::rain_intensity(from, to, fade, self.motion_gain);
+        let rain = motion::rain_intensity(from, to, fade);
         let fire = motion::fire_intensity(from, to, fade, self.motion_gain);
         let sea = motion::sea_intensity(from, to, fade, self.motion_gain);
         Some(
             BackgroundFrame::new(from, to, fade, self.palette().base)
                 .with_motion(self.now.as_secs_f32(), rain)
                 .with_fire(fire)
-                .with_sea(sea),
+                .with_sea(sea)
+                .with_rain_time(self.rain_clock),
         )
     }
 
@@ -753,10 +763,15 @@ mod tests {
             "动效时间应注入: {}",
             frame.time
         );
+        assert!(
+            frame.rain_time > 0.0,
+            "运行中雨钟应推进: {}",
+            frame.rain_time
+        );
     }
 
     #[test]
-    fn background_frame_rain_settles_on_pause() {
+    fn background_frame_rain_freezes_visible_on_pause() {
         let mut app = PomodoroApp::new_default();
         app.last_save_at = Duration::from_secs(25 * 60);
         app.ambient_player.disable_for_test();
@@ -766,31 +781,48 @@ mod tests {
         app.tick(&ctx);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
         app.tick(&ctx);
-        // 暂停: 边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
+        // 暂停 (2026-07-29 用户裁定): 雨丝定格可见 — 强度不沉降, 雨钟 500ms 内减速冻结。
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1650));
         app.tick(&ctx);
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.rain_intensity - 1.0).abs() < 1e-6,
-            "暂停边沿帧应连续: {}",
+            "暂停边沿雨丝应全量可见: {}",
             frame.rain_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
         app.tick(&ctx);
+        let frozen = app.background_frame().expect("应有背景帧").rain_time;
+        assert!(frozen > 0.0, "雨钟应已推进过: {frozen}");
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
-            (frame.rain_intensity - 0.5).abs() < 1e-6,
-            "暂停沉降中点: {}",
+            (frame.rain_intensity - 1.0).abs() < 1e-6,
+            "暂停 500ms 后雨丝仍全量可见: {}",
             frame.rain_intensity
         );
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2150));
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2400));
         app.tick(&ctx);
-        let frame = app.background_frame().expect("应有背景帧");
+        let later = app.background_frame().expect("应有背景帧").rain_time;
         assert!(
-            frame.rain_intensity.abs() < 1e-6,
-            "暂停 500ms 后雨效应消失: {}",
-            frame.rain_intensity
+            (later - frozen).abs() < 1e-6,
+            "暂停后雨钟应冻结: {frozen} -> {later}"
+        );
+        // 恢复: 雨钟从冻结点续走, 无跳变 (边沿帧包络为 0, 次帧起升)。
+        app.timer.toggle(app.now);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2900));
+        app.tick(&ctx);
+        let edge = app.background_frame().expect("应有背景帧").rain_time;
+        assert!(
+            (edge - frozen).abs() < 1e-6,
+            "恢复边沿帧应连续: {frozen} -> {edge}"
+        );
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(3400));
+        app.tick(&ctx);
+        let resumed = app.background_frame().expect("应有背景帧").rain_time;
+        assert!(
+            resumed > frozen,
+            "恢复后雨钟应从冻结点续走: {frozen} -> {resumed}"
         );
     }
 

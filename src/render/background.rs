@@ -68,6 +68,9 @@ pub struct BackgroundFrame {
     pub fire_intensity: f32,
     /// 海动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火并存, 交叉淡化期间可同时非零)。
     pub sea_intensity: f32,
+    /// 雨钟 (秒): 雨丝下落时间轴, 暂停时冻结 — 雨丝定格可见 (2026-07-29 用户裁定)。
+    /// 默认 0, 经 [`BackgroundFrame::with_rain_time`] 设置, 上传 uniform 前取模。
+    pub rain_time: f32,
 }
 
 impl BackgroundFrame {
@@ -82,6 +85,7 @@ impl BackgroundFrame {
             rain_intensity: 0.0,
             fire_intensity: 0.0,
             sea_intensity: 0.0,
+            rain_time: 0.0,
         }
     }
 
@@ -101,6 +105,12 @@ impl BackgroundFrame {
     /// 设置海动效强度; 强度夹到 0..1。
     pub fn with_sea(mut self, sea_intensity: f32) -> Self {
         self.sea_intensity = sea_intensity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 设置雨钟 (雨丝下落时间轴, 秒); 推进/冻结节奏由调用方控制。
+    pub fn with_rain_time(mut self, rain_time: f32) -> Self {
+        self.rain_time = rain_time;
         self
     }
 }
@@ -555,16 +565,18 @@ impl BackgroundPipeline {
             rain_intensity: 0.0,
             fire_intensity: 0.0,
             sea_intensity: 0.0,
+            rain_time: 0.0,
         });
         let Some((from, to, fade)) = resolve_frame(frame, self.scene_bytes.len()) else {
             return;
         };
-        // 场景层动效参数 (雨/火/海强度 + 取模后的时间); 叠加层无动效恒 0。
+        // 场景层动效参数 (雨/火/海强度 + 取模后的时间与雨钟); 叠加层无动效恒 0。
         let motion = [
             frame.rain_intensity,
             wrap_motion_time(frame.time),
             frame.fire_intensity,
             frame.sea_intensity,
+            wrap_motion_time(frame.rain_time),
         ];
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -618,7 +630,7 @@ impl BackgroundPipeline {
                 ScaleMode::Cover,
                 self.glow_opacity,
                 0.0,
-                [0.0; 4],
+                [0.0; 5],
             );
         }
         if let Some(noise) = &self.noise {
@@ -632,13 +644,13 @@ impl BackgroundPipeline {
                 ScaleMode::Stretch,
                 self.noise_opacity,
                 0.0,
-                [0.0; 4],
+                [0.0; 5],
             );
         }
     }
 
     /// 绘制单个叠加层: 上传该层顶点与 uniform, 绑定资源后绘制。
-    /// `motion` = [雨丝强度, 取模后的动效时间, 篝火强度, 海强度], 仅场景层 (层 0) 非零。
+    /// `motion` = [雨丝强度, 取模后的动效时间, 篝火强度, 海强度, 取模后的雨钟], 仅场景层 (层 0) 非零。
     #[allow(clippy::too_many_arguments)]
     fn draw_layer(
         &self,
@@ -651,7 +663,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
-        motion: [f32; 4],
+        motion: [f32; 5],
     ) {
         // 淡化要求 from/to 同尺寸 (场景生成管线保证统一画布);
         // UV 按 from 纹理计算, 尺寸不一致时退回只画 from。
@@ -681,7 +693,7 @@ impl BackgroundPipeline {
     }
 
     /// 按缩放模式计算顶点与 UV, 写入指定层的顶点区段与 uniform buffer。
-    /// uniform 布局 (32B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, pad×2]。
+    /// uniform 布局 (32B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, pad]。
     #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
@@ -693,7 +705,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
-        motion: [f32; 4],
+        motion: [f32; 5],
     ) {
         let screen_w = target.width;
         let screen_h = target.height;
@@ -761,7 +773,7 @@ impl BackgroundPipeline {
             &self.uniform_bufs[layer],
             0,
             bytemuck::cast_slice(&[
-                opacity, fade, motion[0], motion[1], motion[2], motion[3], 0.0, 0.0,
+                opacity, fade, motion[0], motion[1], motion[2], motion[3], motion[4], 0.0,
             ]),
         );
     }
@@ -997,6 +1009,17 @@ mod tests {
         assert!((f.rain_intensity - 0.4).abs() < f32::EPSILON);
         assert!((f.fire_intensity - 0.6).abs() < f32::EPSILON);
         assert!((f.sea_intensity - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn with_rain_time_sets_clock_and_defaults_zero() {
+        // 雨钟独立于动效时间 (雨丝暂停定格可见, 走自己的冻结时间轴)。
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c);
+        assert_eq!(f.rain_time, 0.0, "雨钟默认 0 (静态一致)");
+        let f = f.with_motion(2.5, 0.4).with_rain_time(1.75);
+        assert!((f.time - 2.5).abs() < f32::EPSILON);
+        assert!((f.rain_time - 1.75).abs() < f32::EPSILON);
     }
 
     #[test]

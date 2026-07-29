@@ -4,8 +4,10 @@
 //! 场景动效策略 (纯逻辑): 哪个场景下雨/烧火/涌动、暂停沉降包络、强度权重合成。
 //!
 //! 与环境音同一美学契约 (潮汐式): 计时运行时世界环绕, 暂停/空闲时
-//! 世界退远 —— 雨/火/海效包络以 `timer.is_running()` 为目标, 500ms 滑动
+//! 世界退远 —— 火/海效包络以 `timer.is_running()` 为目标, 500ms 滑动
 //! (2026-07-28 spec 裁定: 视觉沉降独立时长, 不复用音频 300ms)。
+//! 雨例外 (2026-07-29 用户裁定): 雨丝暂停时定格可见, 强度不含包络;
+//! 包络只推进雨钟 (main.rs `rain_clock`, 暂停 500ms 减速冻结 / 恢复加速续走)。
 //! 时间由外部注入 (`AnimationCtx.elapsed` 累计值), 不读 wall-clock,
 //! 可完整单元测试。
 //!
@@ -84,9 +86,11 @@ fn scene_weight(scene: usize, from: usize, to: usize, fade: f32) -> f32 {
     w(from) * (1.0 - fade) + w(to) * fade
 }
 
-/// 雨效强度合成: 包络 × 雨场景淡化权重。
-pub fn rain_intensity(from: usize, to: usize, fade: f32, envelope: f32) -> f32 {
-    envelope * scene_weight(RAIN_SCENE, from, to, fade)
+/// 雨效强度合成: 雨场景淡化权重 (不含包络)。
+/// 2026-07-29 用户裁定: 暂停时雨丝定格可见 — 包络不再决定雨的有无,
+/// 只推进雨钟 (main.rs `rain_clock`, 暂停 500ms 减速冻结 / 恢复加速续走)。
+pub fn rain_intensity(from: usize, to: usize, fade: f32) -> f32 {
+    scene_weight(RAIN_SCENE, from, to, fade)
 }
 
 /// 火效强度合成: 包络 × 篝火场景淡化权重。
@@ -147,7 +151,7 @@ mod tests {
     fn sea_coexists_with_rain_and_fire_on_crossfade() {
         // 海↔雨、海↔火交叉淡化中点: 两效果各 0.5 并存 (标量并存, 非互斥选择子)。
         assert!((sea_intensity(SEA_SCENE, RAIN_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
-        assert!((rain_intensity(SEA_SCENE, RAIN_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        assert!((rain_intensity(SEA_SCENE, RAIN_SCENE, 0.5) - 0.5).abs() < 1e-6);
         assert!((sea_intensity(BONFIRE_SCENE, SEA_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
         assert!((fire_intensity(BONFIRE_SCENE, SEA_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
     }
@@ -169,7 +173,7 @@ mod tests {
     #[test]
     fn rain_and_fire_coexist_on_crossfade() {
         // 雨→篝火交叉淡化中点: 两效果各 0.5 并存 (spec: 标量并存, 非互斥选择子)。
-        assert!((rain_intensity(RAIN_SCENE, BONFIRE_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        assert!((rain_intensity(RAIN_SCENE, BONFIRE_SCENE, 0.5) - 0.5).abs() < 1e-6);
         assert!((fire_intensity(RAIN_SCENE, BONFIRE_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
     }
 
@@ -208,14 +212,14 @@ mod tests {
     #[test]
     fn rain_intensity_weights_by_scene_and_fade() {
         // 雨为 from: 随 fade 淡出。
-        assert!((rain_intensity(RAIN_SCENE, 0, 0.0, 1.0) - 1.0).abs() < 1e-6);
-        assert!((rain_intensity(RAIN_SCENE, 0, 0.5, 1.0) - 0.5).abs() < 1e-6);
-        assert!(rain_intensity(RAIN_SCENE, 0, 1.0, 1.0).abs() < 1e-6);
+        assert!((rain_intensity(RAIN_SCENE, 0, 0.0) - 1.0).abs() < 1e-6);
+        assert!((rain_intensity(RAIN_SCENE, 0, 0.5) - 0.5).abs() < 1e-6);
+        assert!(rain_intensity(RAIN_SCENE, 0, 1.0).abs() < 1e-6);
         // 雨为 to: 随 fade 淡入。
-        assert!((rain_intensity(0, RAIN_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        assert!((rain_intensity(0, RAIN_SCENE, 0.5) - 0.5).abs() < 1e-6);
         // 双非雨: 恒 0。
-        assert_eq!(rain_intensity(0, 1, 0.5, 1.0), 0.0);
-        // 静止于雨 (from == to): 权重恒 1, 只随包络缩放。
-        assert!((rain_intensity(RAIN_SCENE, RAIN_SCENE, 1.0, 0.5) - 0.5).abs() < 1e-6);
+        assert_eq!(rain_intensity(0, 1, 0.5), 0.0);
+        // 静止于雨 (from == to): 权重恒 1, 不随包络缩放 (暂停雨丝定格可见)。
+        assert!((rain_intensity(RAIN_SCENE, RAIN_SCENE, 1.0) - 1.0).abs() < 1e-6);
     }
 }

@@ -397,7 +397,8 @@ SCENES = [
         ],
         "glow": {"color": (210, 224, 235), "center": (0.32, 0.22), "radius": 0.5, "peak": 50},
         "veil": {"color": (10, 14, 18), "center": (0.5, 0.48), "radius": 0.55, "peak": 45},
-        "streaks": {"count": 320, "color": (215, 228, 238), "alpha": 52, "seed": 0x9A17},
+        # 雨丝不烘焙: 2026-07-29 用户裁定静态图去丝, 雨全部由运行时程序化
+        # 雨幕渲染 (background.wgsl rain_overlay; 暂停雨钟冻结、雨丝定格可见)。
         "palette": {
             "base": (82, 95, 107),
             "accent": (127, 179, 217),

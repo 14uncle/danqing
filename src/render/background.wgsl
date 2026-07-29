@@ -15,36 +15,39 @@ struct Uniforms {
     time: f32,
     fire_intensity: f32,
     sea_intensity: f32,
-    pad0: f32,
+    rain_time: f32,
     pad1: f32,
 }
 
-// ---- 雨丝动效 (雨场景试点) ----
+// ---- 雨幕 (雨场景; 静态图已去丝, 雨全部由本段程序化渲染) ----
+// 2026-07-29 用户裁定: 静态背景图不烘焙雨丝 (export-scenes.py 雨配置去 streaks),
+// 运行时本段三层雨丝即全部雨效 — 计时运行下落, 暂停雨钟冻结、雨丝定格可见。
 // 参数集中于本段, 调参只动这里。三层速度取整数比 (0.125/0.25/0.375 周期/秒),
 // 公共周期 8s, 与 Rust 侧 `RAIN_WRAP_SECS` 一致 (上传前取模, 保 f32 精度)。
-const RAIN_SLANT: f32 = 0.12;        // 斜率: 雨落朝右下 (\ 形), 与静态雨图一致
+const RAIN_SLANT: f32 = 0.12;        // 斜率: 雨落朝右下 (\ 形), 与原静态雨图一致
 const RAIN_YSCALE: f32 = 0.5;        // 纵向压缩: 同屏每列最多一段雨丝
 const RAIN_GAIN: f32 = 0.20;         // 总亮度上限 (线性空间 additive)
 
 // 丝宽为 y 循环空间单位, 屏高占比 ≈ 丝宽 × 2.5 (尾羽) / YSCALE。
-// 列密度对照: 静态雨图丝宽 ~2px; 960px 窗下 480/360/320 列 ≈ 2.0/2.7/3.0px。
+// 密度与有雨列门槛对照 (去丝后雨幕独挑, 列数对齐原静态图 ~300 丝的观感密度,
+// 丝宽保终审裁定 2~3px: 列密度 480/360/320 ≈ 2.0/2.7/3.0px @960px 窗)。
 const RAIN_DENSITY_FAR: f32 = 480.0; // 远层: 密、细、慢、淡
 const RAIN_SPEED_FAR: f32 = 0.125;
 const RAIN_WIDTH_FAR: f32 = 0.02;    // 尾羽占屏高 ~10%
 const RAIN_BRIGHT_FAR: f32 = 0.16;
-const RAIN_ON_FAR: f32 = 0.93;       // hash > 此值的列才有雨 (~34 列有雨)
+const RAIN_ON_FAR: f32 = 0.70;       // hash > 此值的列才有雨 (~144 列有雨)
 
 const RAIN_DENSITY_MID: f32 = 360.0; // 中层
 const RAIN_SPEED_MID: f32 = 0.25;
 const RAIN_WIDTH_MID: f32 = 0.025;   // 尾羽占屏高 ~12%
 const RAIN_BRIGHT_MID: f32 = 0.22;
-const RAIN_ON_MID: f32 = 0.91;       // ~32 列
+const RAIN_ON_MID: f32 = 0.72;       // ~100 列
 
 const RAIN_DENSITY_NEAR: f32 = 320.0; // 近层: 疏、粗、快、亮
 const RAIN_SPEED_NEAR: f32 = 0.375;
 const RAIN_WIDTH_NEAR: f32 = 0.03;   // 尾羽占屏高 ~15%
 const RAIN_BRIGHT_NEAR: f32 = 0.30;
-const RAIN_ON_NEAR: f32 = 0.95;      // ~16 列
+const RAIN_ON_NEAR: f32 = 0.85;      // ~48 列
 
 fn rain_hash(p: f32) -> f32 {
     return fract(sin(p * 127.1) * 43758.5453);
@@ -233,19 +236,21 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    // 海效涌动: 纵向 UV 位移作用于采样坐标本身 (波带剪影起伏);
-    // 位移随强度缩放, 强度 0 时采样原坐标, 输出与静态逐像素一致。
+    // 场景 UV 位移: 海波涌动 (纵向) 作用于采样坐标本身; 位移随强度缩放,
+    // 强度 0 时采样原坐标, 输出与静态逐像素一致。
     var sample_uv = in.uv;
     if (u.sea_intensity > 0.0) {
-        sample_uv = vec2<f32>(in.uv.x, in.uv.y + sea_swell(in.uv, u.time) * u.sea_intensity);
+        sample_uv += vec2<f32>(0.0, sea_swell(in.uv, u.time) * u.sea_intensity);
     }
     let c_from = textureSample(tex_from, samp_from, sample_uv);
     let c_to = textureSample(tex_to, samp_to, sample_uv);
     var color = mix(c_from, c_to, u.fade);
     if (u.rain_intensity > 0.0) {
         // 线性空间 additive 亮度叠加 (sRGB 纹理采样已转线性)。
+        // 雨丝走独立雨钟: 暂停时雨钟冻结, 雨丝定格可见 (2026-07-29 用户裁定,
+        // 不再随包络沉降); 强度常驻场景权重, 冻结/推进节奏由 Rust 侧控制。
         color = vec4<f32>(
-            color.rgb + vec3<f32>(rain_overlay(in.uv, u.time) * u.rain_intensity),
+            color.rgb + vec3<f32>(rain_overlay(in.uv, u.rain_time) * u.rain_intensity),
             color.a,
         );
     }
