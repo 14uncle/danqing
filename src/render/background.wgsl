@@ -89,18 +89,18 @@ const FIRE_W: f32 = 0.7853982;         // 2π/8: 动效基频角速度 (1/8 Hz)
 // 呼吸: 3 个正弦叠加 (2/8、3/8、5/8 Hz → 周期 4/2.67/1.6s) 叠出有机起伏。
 const FIRE_CENTER: vec2<f32> = vec2<f32>(0.5, 0.95); // 光晕锚点 (下中央, 对齐静态图辉光)
 const FIRE_MASK_RADIUS: f32 = 0.55;    // 呼吸径向衰减半径 (uv)
-const FIRE_BREATH_GAIN: f32 = 0.04;    // 呼吸幅度上限 (乘性, ±4% 量级)
+const FIRE_BREATH_GAIN: f32 = 0.08;    // 呼吸幅度上限 (乘性; 4% 实测不可读, 翻倍)
 
 // 余烬: 分列 hash, 每列一颗, 相位随机、速度全列一致 (保公共周期)。
 const EMBER_DENSITY: f32 = 160.0;      // 列密度 (960px 窗 ≈ 6px/列)
 const EMBER_SPEED: f32 = 0.25;         // 上浮速度 (循环/秒, 2/8; 一趟 ~4s)
 const EMBER_SPAN: f32 = 0.65;          // 行程: 自底部 (y=1) 升至 y≈0.35 折返
-const EMBER_RADIUS: f32 = 0.002;       // 点半径 (纵向 uv; 960px 窗 ≈ 2~3px 直径)
+const EMBER_RADIUS: f32 = 0.0055;      // 点半径 (纵向 uv; 960px 窗 ≈ 7px 直径, 终审裁定)
 const EMBER_ASPECT: f32 = 1.5;         // 场景画布宽高比 (1536×1024), 圆点修正
 const EMBER_SWAY: f32 = 0.006;         // 横摆幅度 (uv ≈ 6px)
-const EMBER_BRIGHT: f32 = 0.5;         // 点亮度上限 (线性空间 additive)
-const EMBER_ON: f32 = 0.85;            // hash > 此值的列才有余烬 (~24 列, 带内 ~15-20 颗)
-const EMBER_COLOR: vec3<f32> = vec3<f32>(1.0, 0.62, 0.28); // 暖橙 (对齐场景 accent)
+const EMBER_BRIGHT: f32 = 0.85;        // 点亮度上限 (additive; 0.5 在亮橙辉光上对比不足)
+const EMBER_ON: f32 = 0.80;            // hash > 此值的列才有余烬 (~32 列, 带内 ~22-25 颗)
+const EMBER_COLOR: vec3<f32> = vec3<f32>(1.0, 0.78, 0.45); // 热黄 (对齐静态火星点的淡黄)
 
 fn fire_flicker(t: f32) -> f32 {
     return 0.6 * sin(t * FIRE_W * 2.0)
