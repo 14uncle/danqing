@@ -4,7 +4,7 @@
 Five procedural scenes spanning dark/bright families:
     bonfire  篝火 (dark, warm fire glow)
     sea      海   (bright, cyan)
-    rain     雨   (gray-blue, streaks)
+    rain     雨   (gray-blue)
     mountain 山   (neutral dusk, ridgelines)
     forest   森林 (misty conifer green, treelines + fog bands)
 
@@ -41,7 +41,7 @@ SCENES_RS = REPO_ROOT / "examples" / "pomodoro" / "scenes.rs"
 WIDTH, HEIGHT = 1536, 1024
 SIZE = (WIDTH, HEIGHT)
 
-# Hard-edged elements (ridges/streaks/embers) render at SS x and LANCZOS
+# Hard-edged elements (ridges/embers) render at SS x and LANCZOS
 # downsample back: cheap SSAA — Pillow ImageDraw has no anti-aliasing,
 # and window Cover upscale (e.g. 1920x1080 maximized) makes baked-in
 # staircase edges painfully visible. Smooth elements (gradient/glow/veil)
@@ -268,28 +268,6 @@ def build_mist(bands: list[dict]) -> Image.Image:
     return overlay.filter(ImageFilter.GaussianBlur(radius=18))
 
 
-def build_streaks(count: int, color: tuple, alpha: int, seed: int) -> Image.Image:
-    """Rain streaks: faint short diagonal lines. SS x + downsample for AA."""
-    w, h = WIDTH * SS, HEIGHT * SS
-    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    state = seed
-
-    def rnd() -> float:
-        nonlocal state
-        state = (state * 1103515245 + 12345) & 0x7FFFFFFF
-        return (state >> 16) / 32768.0
-
-    for _ in range(count):
-        x = rnd() * w
-        y = rnd() * h
-        length = (24 + rnd() * 48) * SS
-        dx = length * 0.18
-        draw.line([(x, y), (x + dx, y + length)], fill=(*color, alpha), width=2 * SS)
-    overlay = overlay.resize(SIZE, Image.LANCZOS)
-    return overlay.filter(ImageFilter.GaussianBlur(radius=1.0))
-
-
 def build_embers(count: int, color: tuple, seed: int) -> Image.Image:
     """Bonfire embers: tiny bright dots rising above the glow. SS x for AA."""
     w, h = WIDTH * SS, HEIGHT * SS
@@ -490,9 +468,6 @@ def build_scene(cfg: dict) -> Image.Image:
         img = Image.alpha_composite(img, build_trees(cfg["trees"]))
     if "mist" in cfg:
         img = Image.alpha_composite(img, build_mist(cfg["mist"]))
-    if "streaks" in cfg:
-        s = cfg["streaks"]
-        img = Image.alpha_composite(img, build_streaks(s["count"], s["color"], s["alpha"], s["seed"]))
     if "embers" in cfg:
         e = cfg["embers"]
         img = Image.alpha_composite(img, build_embers(e["count"], e["color"], e["seed"]))

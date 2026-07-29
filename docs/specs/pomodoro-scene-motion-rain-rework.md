@@ -36,7 +36,7 @@ powershell -NoProfile -File tools/benchmark.ps1 -Example pomodoro -Runs 3  # 性
 
 ### 资产(生成器)
 
-- `tools/export-scenes.py` 雨配置删除 `streaks` 键(注释记录裁定);`build_streaks` 函数暂留(生成器能力件,是否删除待用户裁定)。
+- `tools/export-scenes.py` 雨配置删除 `streaks` 键(注释记录裁定);`build_streaks` 函数及其调用点已删除(2026-07-29 用户裁定删死代码,git 历史可恢复)。
 - 重新生成: 仅 `rain.png` 变更(206KB→89KB),其余 4 场景字节不变(管线确定性);`scenes.rs` 重出无 diff(中央采样区丝太淡,不影响极值采样)。
 
 ### 雨幕独挑(background.wgsl 雨段,参数集中可调)
@@ -53,7 +53,7 @@ powershell -NoProfile -File tools/benchmark.ps1 -Example pomodoro -Runs 3  # 性
 ## Boundaries
 
 - **Always**: 提交前 `cargo fmt --check` + 两个 clippy + 全部测试绿 + 五轴评审;雨幕参数集中在 wgsl 雨段常量区;策略层在 example 侧纯逻辑;场景资产只经生成器改,不手改 PNG/`scenes.rs`。
-- **Ask first**: 新增依赖;改性能门槛;篝火 UV 位移化(下一里程碑,另行开工);删 `build_streaks` 生成器能力件。
+- **Ask first**: 新增依赖;改性能门槛;篝火 UV 位移化(下一里程碑,另行开工)。
 - **Never**: 手改 `scenes.rs`;为动效引入新资产文件;改变重绘频率(可见 60fps / 隐藏零渲染);在 widget/layout/event/text 引入平台依赖。
 
 ## Success Criteria
