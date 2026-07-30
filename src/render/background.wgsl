@@ -256,10 +256,12 @@ fn mist_noise(uv: vec2<f32>, t: f32, speed: f32, scale: f32) -> f32 {
 const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.40;
 const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.75;
 const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 0.95;
-const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.30;
-// 雾色 (240, 200, 195) sRGB→linear: 暖粉, 接近暮色 (199, 172, 178) 但更亮,
-// additive 叠加在暮色上读作"暮色加深", 不像"冷云覆盖"。
-const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.870, 0.604, 0.572);
+const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.45;
+// 雾色 (240, 205, 195) sRGB→linear: 暖粉, 接近暮色 (199, 172, 178) 但更亮,
+// additive 叠加在暮色上读作"暮色加深", 不像"冷云覆盖"。 用户 2026-07-30
+// 反馈 "还是不太清楚" 后, 雾色从 (0.87, 0.60, 0.57) 提至 (0.92, 0.65, 0.62),
+// 在暮色背景上对比更明显。
+const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.920, 0.650, 0.620);
 
 fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
     // y mask: 0.40 软入 (暮色天区中部) → 0.75 满 (山脊上空) → 0.95 软出 (山脊)。
