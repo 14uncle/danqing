@@ -323,18 +323,28 @@ fn forest_mist_layer_noise(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, spee
 }
 
 fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    // 2 层雾带 (主 B + 副 B2) — 用户 2026-07-30 反馈 "周期性"。
-    // 用 2D value noise (非周期) 替代 sum-of-sines (周期) — value noise
-    // 每个 cell 是独立 hash 值, 无 LCM, 漂移永远不"传送带"。
+    // 2 层雾带 (主 B + 副 B2), 用户 2026-07-30 反馈 "加 1 层 subtle 副雾"。
     // 主层: y=0.691, half=0.159, alpha=0.25, scale=2.0, speed 时间起伏。
-    // 副层: y=0.60, half=0.10, alpha=0.08, scale=3.0, speed=-0.035。
-    // 副层不同 scale + 反向漂, 与主层组合成无周期 (主副 hash 各自独立,
-    // 组合无 LCM)。 mist_noise 函数 (value noise) 替代 mist_pattern
-    // (sum-of-sines)。
-    // 无时间脉动 — 用户 2026-07-30 反馈 "去掉呼吸效果, 又不是篝火"。
+    // 副层: y=0.60, half=0.10, alpha=0.08 (主 1/3, subtle), scale=3.0
+    //   (主 2.0, 空间周期错开破 LCM), speed=-0.035 (反向, 破单向传送带),
+    //   phase=2.3 (错相)。
+    // 副层不同 scale + 反向漂 + 错相, 与主层干涉成无周期 (主副各自 LCM
+    // 都不在, 组合 pattern 永不严格重复), 视觉重置感消失。
+    // 无时间脉动 — 用户 2026-07-30 反馈 "去掉呼吸效果, 又不是篝火",
+    // 雾是风驱(空间漂移, 持续), 不是火(中心辐射, 时间脉动)。
+    //
+    // 速度随时间起伏 ±30% (用户 2026-07-30 反馈 "波形重置"): 单层 sum-of-sines
+    // pattern 在 x 有 LCM 周期 ~125 px (k=16/2/scale), 8s 漂 0.5 uv ≈ 480 px
+    // = 3.85 个周期, 每个 wisp 用 8s 跨屏然后新 wisp 从左出现, 读作"重置"。
+    // 解决: speed_t 让漂移速度慢周期起伏 (0.4 rad/s + 0.27 rad/s, 准周期 15.7s +
+    // 23.3s, 不可公度永不严格重复), wisp 时快时慢, 视觉周期性打散。
+    //
+    // 注: 用户 2026-07-30 ed91cad 改 value noise 但反馈"撤回到上一步",
+    // 退回 sum-of-sines (本函数)。 mist_hash_2d / mist_noise / forest_mist_layer_noise
+    // 保留 (留作未来选项), 不调用。
     let speed_t = FOREST_MIST_B_SPEED * (1.0 + 0.3 * sin(t * 0.4) + 0.2 * cos(t * 0.27));
-    let b = forest_mist_layer_noise(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, speed_t, 2.0, FOREST_MIST_B_ALPHA);
-    let b2 = forest_mist_layer_noise(uv, t, FOREST_MIST_B2_Y, FOREST_MIST_B2_HALF, FOREST_MIST_B2_SPEED, 3.0, FOREST_MIST_B2_ALPHA);
+    let b = forest_mist_layer(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, speed_t, 2.0, 1.7, FOREST_MIST_B_ALPHA);
+    let b2 = forest_mist_layer(uv, t, FOREST_MIST_B2_Y, FOREST_MIST_B2_HALF, FOREST_MIST_B2_SPEED, 3.0, 2.3, FOREST_MIST_B2_ALPHA);
     return FOREST_MIST_COLOR * (b + b2);
 }
 
