@@ -26,6 +26,12 @@ pub const BONFIRE_SCENE: usize = 0;
 /// 海场景在 `SCENES` 中的索引 (单测锁定名称, 防生成器重排静默错位)。
 pub const SEA_SCENE: usize = 1;
 
+/// 山场景在 `SCENES` 中的索引 (单测锁定名称, 防生成器重排静默错位)。
+pub const MOUNTAIN_SCENE: usize = 3;
+
+/// 森林场景在 `SCENES` 中的索引 (单测锁定名称, 防生成器重排静默错位)。
+pub const FOREST_SCENE: usize = 4;
+
 /// 暂停沉降时长 (视觉 500ms; 音频包络 300ms 见 ambient.rs, 两者独立)。
 pub const SETTLE_DURATION: Duration = Duration::from_millis(500);
 
@@ -101,6 +107,20 @@ pub fn fire_intensity(from: usize, to: usize, fade: f32, envelope: f32) -> f32 {
 /// 海效强度合成: 包络 × 海场景淡化权重。
 pub fn sea_intensity(from: usize, to: usize, fade: f32, envelope: f32) -> f32 {
     envelope * scene_weight(SEA_SCENE, from, to, fade)
+}
+
+/// 山效强度合成: 包络 × 山场景淡化权重。
+/// 山暂停时随既有 `MotionEnvelope` 500ms 归零, 视觉逐像素回静态图
+/// (径向光呼吸与山脊呼吸均随强度缩放归零); 不复用雨独立时钟范式。
+pub fn mountain_intensity(from: usize, to: usize, fade: f32, envelope: f32) -> f32 {
+    envelope * scene_weight(MOUNTAIN_SCENE, from, to, fade)
+}
+
+/// 森林效强度合成: 包络 × 森林场景淡化权重。
+/// 森林暂停时随既有 `MotionEnvelope` 500ms 归零, 视觉逐像素回静态图
+/// (顶光呼吸乘性归零、两道横雾 UV 漂移归零); 不复用雨独立时钟范式。
+pub fn forest_intensity(from: usize, to: usize, fade: f32, envelope: f32) -> f32 {
+    envelope * scene_weight(FOREST_SCENE, from, to, fade)
 }
 
 #[cfg(test)]
@@ -221,5 +241,99 @@ mod tests {
         assert_eq!(rain_intensity(0, 1, 0.5), 0.0);
         // 静止于雨 (from == to): 权重恒 1, 不随包络缩放 (暂停雨丝定格可见)。
         assert!((rain_intensity(RAIN_SCENE, RAIN_SCENE, 1.0) - 1.0).abs() < 1e-6);
+    }
+
+    // ---- 山、森林: SCENES[3] / SCENES[4] 索引锁 + intensity 并存语义 ----
+
+    #[test]
+    fn mountain_scene_index_points_at_mountain() {
+        assert_eq!(SCENES[MOUNTAIN_SCENE].name, "山");
+        // 山场景唯一: 其余场景不会被误判。
+        assert_eq!(SCENES.iter().filter(|s| s.name == "山").count(), 1);
+    }
+
+    #[test]
+    fn forest_scene_index_points_at_forest() {
+        assert_eq!(SCENES[FOREST_SCENE].name, "森林");
+        // 森林场景唯一: 其余场景不会被误判。
+        assert_eq!(SCENES.iter().filter(|s| s.name == "森林").count(), 1);
+    }
+
+    #[test]
+    fn mountain_intensity_weights_by_scene_and_fade() {
+        // 山为 from: 随 fade 淡出。
+        assert!((mountain_intensity(MOUNTAIN_SCENE, 1, 0.0, 1.0) - 1.0).abs() < 1e-6);
+        assert!((mountain_intensity(MOUNTAIN_SCENE, 1, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        assert!(mountain_intensity(MOUNTAIN_SCENE, 1, 1.0, 1.0).abs() < 1e-6);
+        // 山为 to: 随 fade 淡入。
+        assert!((mountain_intensity(1, MOUNTAIN_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        // 双非山: 恒 0。
+        assert_eq!(mountain_intensity(0, 1, 0.5, 1.0), 0.0);
+        // 静止于山 (from == to): 权重恒 1, 与包络缩放 (与火/海一致; 与雨不同)。
+        assert!((mountain_intensity(MOUNTAIN_SCENE, MOUNTAIN_SCENE, 1.0, 0.5) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn forest_intensity_weights_by_scene_and_fade() {
+        // 森林为 from: 随 fade 淡出。
+        assert!((forest_intensity(FOREST_SCENE, 1, 0.0, 1.0) - 1.0).abs() < 1e-6);
+        assert!((forest_intensity(FOREST_SCENE, 1, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        assert!(forest_intensity(FOREST_SCENE, 1, 1.0, 1.0).abs() < 1e-6);
+        // 森林为 to: 随 fade 淡入。
+        assert!((forest_intensity(1, FOREST_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        // 双非森林: 恒 0。
+        assert_eq!(forest_intensity(0, 1, 0.5, 1.0), 0.0);
+        // 静止于森林 (from == to): 权重恒 1, 与包络缩放 (与火/海一致)。
+        assert!((forest_intensity(FOREST_SCENE, FOREST_SCENE, 1.0, 0.5) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mountain_and_forest_coexist_on_crossfade() {
+        // 山↔森林交叉淡化中点: 两效果各 0.5 并存 (标量并存, 非互斥选择子)。
+        assert!((mountain_intensity(MOUNTAIN_SCENE, FOREST_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        assert!((forest_intensity(MOUNTAIN_SCENE, FOREST_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        // 山 ↔ 雨 交叉淡化中点: 山强度 0.5, 与雨并存 (后者例外但同标量纪律)。
+        assert!((mountain_intensity(MOUNTAIN_SCENE, RAIN_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        assert!((rain_intensity(MOUNTAIN_SCENE, RAIN_SCENE, 0.5) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mountain_intensity_pauses_fall_to_zero_in_500ms() {
+        // 山沿用火/海"暂停回静态"语义: 包络 500ms 内从 1 滑到 0 时
+        // mountain_intensity 同步缩放, 视觉逐像素回静态图 (无独立 clock, 与雨相反)。
+        let mut envelope = MotionEnvelope::new();
+        envelope.gain(true, ms(0));
+        // 全量: 山强度跟随 envelope.
+        let full = envelope.gain(true, ms(500));
+        assert!((full - 1.0).abs() < 1e-6);
+        assert!((mountain_intensity(MOUNTAIN_SCENE, MOUNTAIN_SCENE, 1.0, full) - 1.0).abs() < 1e-6);
+        // 暂停: envelope 从 1 经 500ms 滑到 0.
+        envelope.gain(false, ms(1000));
+        let mid = envelope.gain(false, ms(1250));
+        assert!((mid - 0.5).abs() < 1e-6);
+        assert!((mountain_intensity(MOUNTAIN_SCENE, MOUNTAIN_SCENE, 1.0, mid) - 0.5).abs() < 1e-6);
+        let zero = envelope.gain(false, ms(1600));
+        assert!(zero.abs() < 1e-6);
+        assert_eq!(
+            mountain_intensity(MOUNTAIN_SCENE, MOUNTAIN_SCENE, 1.0, zero),
+            0.0
+        );
+    }
+
+    #[test]
+    fn forest_intensity_pauses_fall_to_zero_in_500ms() {
+        // 森林沿用火/海"暂停回静态"语义 (与 mountain 测试同构)。
+        let mut envelope = MotionEnvelope::new();
+        envelope.gain(true, ms(0));
+        let full = envelope.gain(true, ms(500));
+        assert!((full - 1.0).abs() < 1e-6);
+        assert!((forest_intensity(FOREST_SCENE, FOREST_SCENE, 1.0, full) - 1.0).abs() < 1e-6);
+        envelope.gain(false, ms(1000));
+        let mid = envelope.gain(false, ms(1250));
+        assert!((mid - 0.5).abs() < 1e-6);
+        assert!((forest_intensity(FOREST_SCENE, FOREST_SCENE, 1.0, mid) - 0.5).abs() < 1e-6);
+        let zero = envelope.gain(false, ms(1600));
+        assert!(zero.abs() < 1e-6);
+        assert_eq!(forest_intensity(FOREST_SCENE, FOREST_SCENE, 1.0, zero), 0.0);
     }
 }

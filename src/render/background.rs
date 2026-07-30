@@ -71,6 +71,10 @@ pub struct BackgroundFrame {
     /// 雨钟 (秒): 雨丝下落时间轴, 暂停时冻结 — 雨丝定格可见 (2026-07-29 用户裁定)。
     /// 默认 0, 经 [`BackgroundFrame::with_rain_time`] 设置, 上传 uniform 前取模。
     pub rain_time: f32,
+    /// 山动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火/海并存, 交叉淡化期间可同时非零)。
+    pub mountain_intensity: f32,
+    /// 森林动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火/海/山并存, 交叉淡化期间可同时非零)。
+    pub forest_intensity: f32,
 }
 
 impl BackgroundFrame {
@@ -86,6 +90,8 @@ impl BackgroundFrame {
             fire_intensity: 0.0,
             sea_intensity: 0.0,
             rain_time: 0.0,
+            mountain_intensity: 0.0,
+            forest_intensity: 0.0,
         }
     }
 
@@ -105,6 +111,18 @@ impl BackgroundFrame {
     /// 设置海动效强度; 强度夹到 0..1。
     pub fn with_sea(mut self, sea_intensity: f32) -> Self {
         self.sea_intensity = sea_intensity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 设置山动效强度; 强度夹到 0..1。
+    pub fn with_mountain(mut self, mountain_intensity: f32) -> Self {
+        self.mountain_intensity = mountain_intensity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 设置森林动效强度; 强度夹到 0..1。
+    pub fn with_forest(mut self, forest_intensity: f32) -> Self {
+        self.forest_intensity = forest_intensity.clamp(0.0, 1.0);
         self
     }
 
@@ -566,17 +584,21 @@ impl BackgroundPipeline {
             fire_intensity: 0.0,
             sea_intensity: 0.0,
             rain_time: 0.0,
+            mountain_intensity: 0.0,
+            forest_intensity: 0.0,
         });
         let Some((from, to, fade)) = resolve_frame(frame, self.scene_bytes.len()) else {
             return;
         };
-        // 场景层动效参数 (雨/火/海强度 + 取模后的时间与雨钟); 叠加层无动效恒 0。
+        // 场景层动效参数 (雨/火/海/山/森林强度 + 取模后的时间与雨钟); 叠加层无动效恒 0。
         let motion = [
             frame.rain_intensity,
             wrap_motion_time(frame.time),
             frame.fire_intensity,
             frame.sea_intensity,
             wrap_motion_time(frame.rain_time),
+            frame.mountain_intensity,
+            frame.forest_intensity,
         ];
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -630,7 +652,7 @@ impl BackgroundPipeline {
                 ScaleMode::Cover,
                 self.glow_opacity,
                 0.0,
-                [0.0; 5],
+                [0.0; 7],
             );
         }
         if let Some(noise) = &self.noise {
@@ -644,13 +666,13 @@ impl BackgroundPipeline {
                 ScaleMode::Stretch,
                 self.noise_opacity,
                 0.0,
-                [0.0; 5],
+                [0.0; 7],
             );
         }
     }
 
     /// 绘制单个叠加层: 上传该层顶点与 uniform, 绑定资源后绘制。
-    /// `motion` = [雨丝强度, 取模后的动效时间, 篝火强度, 海强度, 取模后的雨钟], 仅场景层 (层 0) 非零。
+    /// `motion` = [雨丝强度, 取模后的动效时间, 篝火强度, 海强度, 取模后的雨钟, 山强度, 森林强度], 仅场景层 (层 0) 非零。
     #[allow(clippy::too_many_arguments)]
     fn draw_layer(
         &self,
@@ -663,7 +685,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
-        motion: [f32; 5],
+        motion: [f32; 7],
     ) {
         // 淡化要求 from/to 同尺寸 (场景生成管线保证统一画布);
         // UV 按 from 纹理计算, 尺寸不一致时退回只画 from。
@@ -693,7 +715,7 @@ impl BackgroundPipeline {
     }
 
     /// 按缩放模式计算顶点与 UV, 写入指定层的顶点区段与 uniform buffer。
-    /// uniform 布局 (32B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, pad]。
+    /// uniform 布局 (36B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, 山强度, 森林强度]。
     #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
@@ -705,7 +727,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
-        motion: [f32; 5],
+        motion: [f32; 7],
     ) {
         let screen_w = target.width;
         let screen_h = target.height;
@@ -773,7 +795,8 @@ impl BackgroundPipeline {
             &self.uniform_bufs[layer],
             0,
             bytemuck::cast_slice(&[
-                opacity, fade, motion[0], motion[1], motion[2], motion[3], motion[4], 0.0,
+                opacity, fade, motion[0], motion[1], motion[2], motion[3], motion[4], motion[5],
+                motion[6],
             ]),
         );
     }
@@ -946,6 +969,8 @@ mod tests {
         assert_eq!(f.rain_intensity, 0.0);
         assert_eq!(f.fire_intensity, 0.0);
         assert_eq!(f.sea_intensity, 0.0);
+        assert_eq!(f.mountain_intensity, 0.0);
+        assert_eq!(f.forest_intensity, 0.0);
     }
 
     #[test]
@@ -1009,6 +1034,52 @@ mod tests {
         assert!((f.rain_intensity - 0.4).abs() < f32::EPSILON);
         assert!((f.fire_intensity - 0.6).abs() < f32::EPSILON);
         assert!((f.sea_intensity - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn with_mountain_sets_and_clamps_intensity() {
+        // 山效果是并存标量; 强度夹到 [0, 1]。
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_mountain(0.8);
+        assert!((f.mountain_intensity - 0.8).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_mountain(1.7);
+        assert!((f.mountain_intensity - 1.0).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_mountain(-0.2);
+        assert_eq!(f.mountain_intensity, 0.0);
+    }
+
+    #[test]
+    fn with_forest_sets_and_clamps_intensity() {
+        // 森林效果是并存标量; 强度夹到 [0, 1]。
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_forest(0.65);
+        assert!((f.forest_intensity - 0.65).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_forest(1.5);
+        assert!((f.forest_intensity - 1.0).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_forest(-0.3);
+        assert_eq!(f.forest_intensity, 0.0);
+    }
+
+    #[test]
+    fn with_mountain_is_independent_of_rain_fire_sea_forest() {
+        // 山是第五个并存标量 (与雨/火/海/森林并存, 交叉淡化期间可同时非零)。
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c)
+            .with_motion(2.5, 0.4)
+            .with_fire(0.6)
+            .with_sea(0.7)
+            .with_mountain(0.5)
+            .with_forest(0.55);
+        assert!((f.time - 2.5).abs() < f32::EPSILON);
+        assert!((f.rain_intensity - 0.4).abs() < f32::EPSILON);
+        assert!((f.fire_intensity - 0.6).abs() < f32::EPSILON);
+        assert!((f.sea_intensity - 0.7).abs() < f32::EPSILON);
+        assert!((f.mountain_intensity - 0.5).abs() < f32::EPSILON);
+        assert!((f.forest_intensity - 0.55).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -4,9 +4,9 @@
 // 场景切换时绑定 from/to 两张场景图, 按 fade 交叉淡化;
 // 单图与叠加层 (光晕/噪声) 把同一张图绑到两个槽位, fade 恒 0。
 //
-// uniform 携带场景动效参数 (雨丝强度 + 动效时间 + 篝火强度 + 海强度);
+// uniform 携带场景动效参数 (雨丝强度 + 动效时间 + 篝火强度 + 海强度 + 山强度 + 森林强度);
 // 各效果强度为 0 时零贡献, 输出与静态逐像素一致。
-// 雨、火、海是并存标量而非互斥选择子: 交叉淡化期间两端可同时非零。
+// 雨、火、海、山、森林是并存标量而非互斥选择子: 交叉淡化期间两端可同时非零。
 
 struct Uniforms {
     opacity: f32,
@@ -16,7 +16,8 @@ struct Uniforms {
     fire_intensity: f32,
     sea_intensity: f32,
     rain_time: f32,
-    pad1: f32,
+    mountain_intensity: f32,
+    forest_intensity: f32,
 }
 
 // ---- 雨幕 (雨场景; 静态图已去丝, 雨全部由本段程序化渲染) ----
@@ -196,6 +197,82 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
     return spot * on * twinkle * GLINT_GAIN;
 }
 
+// ---- 山动效 (山场景) ----
+// 暮色径向光呼吸 (乘性, 对齐静态图 glow center 0.5, 0.66) +
+// 山脊 silhouette 整体亮度慢呼吸 (远山层次感)。频率 1/8 + 2/8 Hz,
+// 与雨/火/海共用 8s 公共周期 (Rust 侧 MOTION_WRAP_SECS)。
+// 幅度克制: 暮色场景对调亮敏感, 强于雾林顶部光泽但弱于篝火光晕。
+const MOUNTAIN_W: f32 = 0.7853982;        // 2π/8: 动效基频角速度 (1/8 Hz)
+const MOUNTAIN_BREATH_CENTER: vec2<f32> = vec2<f32>(0.5, 0.66);
+const MOUNTAIN_BREATH_RADIUS: f32 = 0.45;
+const MOUNTAIN_BREATH_GAIN: f32 = 0.07;  // 暮色径向光呼吸幅度 (乘性; ±7%)
+const MOUNTAIN_RIDGE_TOP: f32 = 0.78;    // 山脊区纵向软入起点 (uv.y)
+const MOUNTAIN_RIDGE_FULL: f32 = 0.86;
+const MOUNTAIN_RIDGE_GAIN: f32 = 0.04;    // 山脊 silhouette 亮起幅度 (±4%, 远山层次感)
+
+fn mountain_flicker(t: f32) -> f32 {
+    return 0.65 * sin(t * MOUNTAIN_W * 1.0)
+        + 0.35 * sin(t * MOUNTAIN_W * 2.0 + 2.1);
+}
+
+fn mountain_breath(uv: vec2<f32>, t: f32) -> f32 {
+    let d = distance(uv, MOUNTAIN_BREATH_CENTER);
+    let mask = 1.0 - smoothstep(MOUNTAIN_BREATH_RADIUS * 0.4, MOUNTAIN_BREATH_RADIUS, d);
+    return mountain_flicker(t) * mask * MOUNTAIN_BREATH_GAIN;
+}
+
+fn mountain_ridge_breath(uv: vec2<f32>, t: f32) -> f32 {
+    let mask = smoothstep(MOUNTAIN_RIDGE_TOP, MOUNTAIN_RIDGE_FULL, uv.y);
+    let v = 0.6 * sin(t * MOUNTAIN_W * 1.0 + 0.7)
+        + 0.4 * sin(t * MOUNTAIN_W * 2.0 + 3.9);
+    return v * mask * MOUNTAIN_RIDGE_GAIN;
+}
+
+// ---- 森林动效 (森林场景) ----
+// 顶光呼吸 (乘性, 对齐静态图 glow center 0.5, 0.10) +
+// 两道横雾水平 UV 漂移 (反向造穿林风, 仅作用于雾带 mask)。
+// 漂移必须水平 (森林有横雾带; 垂直位移读作"雾降下", 破坏语义)。
+// 频率 1/8 + 2/8 Hz, 8s 公共周期不变。
+const FOREST_W: f32 = 0.7853982;          // 2π/8
+const FOREST_TOP_CENTER: vec2<f32> = vec2<f32>(0.5, 0.10);
+const FOREST_TOP_RADIUS: f32 = 0.42;
+const FOREST_TOP_GAIN: f32 = 0.06;        // 顶光呼吸幅度 (±6%)
+
+// 两道横向雾带: 位置 (y 中心 / 半高), 与静态图 export-scenes.py:440-443 对齐。
+const FOREST_MIST_TOP_Y: f32 = 0.30;
+const FOREST_MIST_TOP_HALF: f32 = 0.09;
+const FOREST_MIST_MID_Y: f32 = 0.62;
+const FOREST_MIST_MID_HALF: f32 = 0.07;
+
+// 雾带总漂移 (uv 单位; 960x640 窗 ~±9.6px, 雾带内 ±5px) — 终审视觉调参点。
+const FOREST_MIST_GAIN: f32 = 0.010;
+
+fn forest_top_flicker(t: f32) -> f32 {
+    return 0.65 * sin(t * FOREST_W * 1.0)
+        + 0.35 * sin(t * FOREST_W * 2.0 + 1.3);
+}
+
+fn forest_top_breath(uv: vec2<f32>, t: f32) -> f32 {
+    let d = distance(uv, FOREST_TOP_CENTER);
+    let mask = 1.0 - smoothstep(FOREST_TOP_RADIUS * 0.4, FOREST_TOP_RADIUS, d);
+    return forest_top_flicker(t) * mask * FOREST_TOP_GAIN;
+}
+
+// 雾带 mask: [y - half, y + half] 内 1, 边缘软入 (smoothstep 0.6→1.0)。
+fn forest_mist_mask(uv: vec2<f32>, y: f32, half: f32) -> f32 {
+    let d = abs(uv.y - y) / half;
+    return 1.0 - smoothstep(0.6, 1.0, d);
+}
+
+// 两道雾水平漂移: 反向造穿林风 — 上层左漂 (-), 林间右漂 (+)。
+// 同一 oscillator (1/8 Hz) 在两雾带 mask 范围内取反号, 视觉上呈双向漂移。
+fn forest_mist_drift(uv: vec2<f32>, t: f32) -> f32 {
+    let osc = sin(t * FOREST_W * 1.0) * FOREST_MIST_GAIN;
+    let m_top = forest_mist_mask(uv, FOREST_MIST_TOP_Y, FOREST_MIST_TOP_HALF);
+    let m_mid = forest_mist_mask(uv, FOREST_MIST_MID_Y, FOREST_MIST_MID_HALF);
+    return osc * (-m_top + m_mid);
+}
+
 @group(0) @binding(0)
 var<uniform> u: Uniforms;
 
@@ -242,6 +319,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (u.sea_intensity > 0.0) {
         sample_uv += vec2<f32>(0.0, sea_swell(in.uv, u.time) * u.sea_intensity);
     }
+    // 森林: 两道横雾水平 UV 位移 (海之后, 在纹理采样之前)。
+    // 反向造穿林风, 仅作用于两道雾带 mask, 位移随强度缩放归零。
+    if (u.forest_intensity > 0.0) {
+        sample_uv += vec2<f32>(forest_mist_drift(in.uv, u.time) * u.forest_intensity, 0.0);
+    }
     let c_from = textureSample(tex_from, samp_from, sample_uv);
     let c_to = textureSample(tex_to, samp_to, sample_uv);
     var color = mix(c_from, c_to, u.fade);
@@ -266,6 +348,21 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // 亮场景乘性碎点提亮 (不改色相); 涌动已在上方采样坐标中体现。
         color = vec4<f32>(
             color.rgb * (1.0 + sea_glints(in.uv, u.time) * u.sea_intensity),
+            color.a,
+        );
+    }
+    if (u.mountain_intensity > 0.0) {
+        // 暮色径向光呼吸 + 山脊 silhouette 慢呼吸 (乘性, 不改色相, 远山层次感)。
+        color = vec4<f32>(
+            color.rgb * (1.0 + (mountain_breath(in.uv, u.time)
+                + mountain_ridge_breath(in.uv, u.time)) * u.mountain_intensity),
+            color.a,
+        );
+    }
+    if (u.forest_intensity > 0.0) {
+        // 顶光呼吸 (乘性, 不改色相); UV 漂移已在 sample_uv 处叠加。
+        color = vec4<f32>(
+            color.rgb * (1.0 + forest_top_breath(in.uv, u.time) * u.forest_intensity),
             color.a,
         );
     }
