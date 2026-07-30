@@ -202,29 +202,37 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
 // 修正: 4 个 sin 全部用 comparable x 与 y 系数 (y/x ratio 0.7-1.0), 接近 45° 方向;
 //       不同 ± sign + 不同 phase 打破对齐, 造 2D 噪声, 无 dominant direction。
 //
+// 系数 6/8/12/16 (旧 2/2.5/3.5/4.5) — 用户 2026-07-30 反馈 "灰蒙蒙一片":
+//   旧系数 + scale=2 → 空间周期 1.57-0.70 uv = 1500-672 px, 几乎跟屏幕一样大,
+//   每像素都在大梯度中段, 漂移时每像素变化小 (±0.05), 视觉无感, 看起来是平雾。
+//   新系数 → 周期 0.52-0.20 uv = 503-192 px, 真正 fog 团尺寸, 漂移时每像素变化 ±0.20+,
+//   视觉能感到"风在吹"。
+
 // 漂移: x 累加 t*speed 偏移造"风吹过", 速度 0.05 uv/s (8s 漂 0.4 uv = 384 px @960)。
 // Wrap-clean: 严格不满足 (8*0.05=0.4 不为整数, sin 系数 2.0-4.5), 1 帧跳变 < 0.2 uv,
 // 视觉不显, 优先视觉质量 (用户 2026-07-30 反馈 Tyndall 是主要问题)。
 fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f32 {
     let x = uv.x * scale + t * speed + phase;
     let y = uv.y * scale;
-    // 4 个 diagonal sin: y/x 比例 0.7-1.0, 都接近 45° 方向。
-    let v = sin(x * 2.0 + y * 1.8 + phase) * 0.30
-          + sin(x * 2.5 - y * 3.0 + phase * 1.7) * 0.25
-          + sin(x * 3.5 + y * 3.0 + phase * 2.3) * 0.25
-          + sin(x * 4.5 - y * 4.0 + phase * 3.1) * 0.20;
+    // 4 个 diagonal sin: y/x 比例 0.7-0.9, 都接近 45° 方向, 空间周期 0.20-0.52 uv (192-503 px)。
+    let v = sin(x * 6.0 + y * 5.0 + phase) * 0.30
+          + sin(x * 8.0 - y * 7.0 + phase * 1.7) * 0.25
+          + sin(x * 12.0 + y * 10.0 + phase * 2.3) * 0.25
+          + sin(x * 16.0 - y * 13.0 + phase * 3.1) * 0.20;
     return v * 0.5 + 0.5; // 0..1
 }
 
 // ---- 山动效 (山场景) ----
-// 云雾风驱 (用户 2026-07-30 终审反馈 "去掉呼吸效果, 又不是篝火")。
+// 云雾风驱 (用户 2026-07-30 终审反馈 "灰蒙蒙一片, 去掉呼吸效果, 又不是篝火")。
 // 重要语义: 雾 = 风驱(空间漂移, 持续, 无时间脉动) ≠ 火(中心辐射, 时间脉动)。
 // 去掉 density = 0.5 + GAIN * sin(t * 2π * FREQ) — 这是篝火 flicker 范式,
 // 山的雾不该用。剩余: 3 层 2D 各向同性 pattern + 漂移, 读作"风一直在吹"。
+// alpha 0.55 → 0.40 — 旧版 0.55 + 大特征 pattern = 整个屏幕平雾 (灰底),
+// 新版 0.40 让 background 透出, fog 团作为亮点浮在上面。
 const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.30;
 const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.85;
 const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 1.0;
-const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.55;
+const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.40;
 // 雾色 (220, 222, 230) sRGB→linear: 亮冷灰, 与暮色暖调对比, 不抢戏。
 const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.720, 0.740, 0.800);
 
@@ -235,6 +243,7 @@ fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
              * (1.0 - smoothstep(MOUNTAIN_RIDGE_MIST_Y_END, 1.0, uv.y));
     // 3 层 2D 各向同性 pattern: 不同 speed/scale 叠加, 反向漂移造层次。
     // 无时间脉动 — 只有持续漂移, 读作"风驱"而非"火呼吸"。
+    // 系数 6/8/12/16 → 空间周期 192-503 px, fog 团尺寸 (非大梯度的平雾)。
     let p1 = mist_pattern(uv, t, 0.05, 2.0, 0.0);
     let p2 = mist_pattern(uv, t, -0.03, 3.5, 1.7);
     let p3 = mist_pattern(uv, t, 0.025, 5.0, 3.4);
@@ -253,16 +262,18 @@ fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
 // 命名: forest_mist (无 _motion 后缀, 因为现在没有"叠加在静态底雾上"这一说,
 // 雾就是全程序化的主效果)。
 const FOREST_MIST_COLOR: vec3<f32> = vec3<f32>(0.512, 0.604, 0.548);
-// Layer A: 中间重 (y=0.40, 半高 0.20), 慢漂 0.04 uv/s
+// Layer A: 中间重 (y=0.40, 半高 0.15), 慢漂 0.04 uv/s
+//   half 0.20 → 0.15 (用户 2026-07-30 反馈 "雾带太宽了", 集中)。
 const FOREST_MIST_A_Y: f32 = 0.40;
-const FOREST_MIST_A_HALF: f32 = 0.20;
+const FOREST_MIST_A_HALF: f32 = 0.15;
 const FOREST_MIST_A_ALPHA: f32 = 0.20;
 const FOREST_MIST_A_SPEED: f32 = 0.04;
-// Layer B: 下半亮 (y=0.65, 半高 0.18), 快漂 0.06 uv/s — 用户 2026-07-30 反馈
-// "靠下的雾气再明显一点", alpha 0.18 → 0.30, 半高 0.15 → 0.18 (覆盖更宽)。
+// Layer B: 下半亮 (y=0.65, 半高 0.12), 快漂 0.06 uv/s — 用户 2026-07-30 反馈
+// "靠下的雾气再明显一点", 半高 0.15 → 0.18 → 0.12 (聚焦下半),
+// alpha 0.18 → 0.30 → 0.25 (去呼吸后密度减半, alpha 略减保持视觉剂量)。
 const FOREST_MIST_B_Y: f32 = 0.65;
-const FOREST_MIST_B_HALF: f32 = 0.18;
-const FOREST_MIST_B_ALPHA: f32 = 0.30;
+const FOREST_MIST_B_HALF: f32 = 0.12;
+const FOREST_MIST_B_ALPHA: f32 = 0.25;
 const FOREST_MIST_B_SPEED: f32 = 0.06;
 // Layer C: 顶部轻 (y=0.22, 半高 0.12), 反向漂 -0.03 uv/s
 const FOREST_MIST_C_Y: f32 = 0.22;
