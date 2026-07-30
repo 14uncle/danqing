@@ -271,20 +271,34 @@ const FOREST_MIST_B_Y: f32 = 0.691;
 const FOREST_MIST_B_HALF: f32 = 0.159;
 const FOREST_MIST_B_ALPHA: f32 = 0.25;
 const FOREST_MIST_B_SPEED: f32 = 0.0625;
+// 副层 B2: subtle 副雾, 打破主层波形周期性 (用户 2026-07-30 反馈 "波形重置")。
+// 与主层不同: scale 3.0 (主 2.0, 空间周期错开破 LCM), speed -0.035 (反向漂,
+// 破单向传送带), phase 2.3 (错相), alpha 0.08 (主 1/3 subtle), y 0.60 (主 0.691
+// 略上)。主 + 副 pattern 各自 LCM 都错开, 组合永不严格重复, 视觉周期性
+// 消失。
+const FOREST_MIST_B2_Y: f32 = 0.60;
+const FOREST_MIST_B2_HALF: f32 = 0.10;
+const FOREST_MIST_B2_ALPHA: f32 = 0.08;
+const FOREST_MIST_B2_SPEED: f32 = -0.035;
 // Layer C (顶部轻雾) 已删除 — 用户 2026-07-30 反馈 "森林去掉靠上的雾带"。
 // 旧 Layer C: y=0.22, half 0.12, alpha 0.10, speed -0.03。
 // 保留中 (A) + 下 (B) 两层, 视觉重心下移, 顶光区 (静态 PNG 已有) 不被雾覆盖。
 
-fn forest_mist_layer(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32, phase: f32, alpha: f32) -> f32 {
+fn forest_mist_layer(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32, scale: f32, phase: f32, alpha: f32) -> f32 {
     // y mask: 1.0 at peak, 0 at ±half (smoothstep 0.5×half→full×half 软入)
     let band = 1.0 - smoothstep(y_half * 0.5, y_half, abs(uv.y - y_peak));
-    let pattern = mist_pattern(uv, t, speed, 2.0, phase);
+    let pattern = mist_pattern(uv, t, speed, scale, phase);
     return pattern * band * alpha;
 }
 
 fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    // 单层雾带 (下), 用户 2026-07-30 反馈 "去掉中层 + 下层下移 50px"。
-    // 中林 y=0.68 与近林 y=0.88 之间, 贴林下雾, 其它不动。
+    // 2 层雾带 (主 B + 副 B2), 用户 2026-07-30 反馈 "加 1 层 subtle 副雾"。
+    // 主层: y=0.691, half=0.159, alpha=0.25, scale=2.0, speed 时间起伏。
+    // 副层: y=0.60, half=0.10, alpha=0.08 (主 1/3, subtle), scale=3.0
+    //   (主 2.0, 空间周期错开破 LCM), speed=-0.035 (反向, 破单向传送带),
+    //   phase=2.3 (错相)。
+    // 副层不同 scale + 反向漂 + 错相, 与主层干涉成无周期 (主副各自 LCM
+    // 都不在, 组合 pattern 永不严格重复), 视觉重置感消失。
     // 无时间脉动 — 用户 2026-07-30 反馈 "去掉呼吸效果, 又不是篝火",
     // 雾是风驱(空间漂移, 持续), 不是火(中心辐射, 时间脉动)。
     //
@@ -294,8 +308,9 @@ fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
     // 解决: speed_t 让漂移速度慢周期起伏 (0.4 rad/s + 0.27 rad/s, 准周期 15.7s +
     // 23.3s, 不可公度永不严格重复), wisp 时快时慢, 视觉周期性打散。
     let speed_t = FOREST_MIST_B_SPEED * (1.0 + 0.3 * sin(t * 0.4) + 0.2 * cos(t * 0.27));
-    let b = forest_mist_layer(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, speed_t, 1.7, FOREST_MIST_B_ALPHA);
-    return FOREST_MIST_COLOR * b;
+    let b = forest_mist_layer(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, speed_t, 2.0, 1.7, FOREST_MIST_B_ALPHA);
+    let b2 = forest_mist_layer(uv, t, FOREST_MIST_B2_Y, FOREST_MIST_B2_HALF, FOREST_MIST_B2_SPEED, 3.0, 2.3, FOREST_MIST_B2_ALPHA);
+    return FOREST_MIST_COLOR * (b + b2);
 }
 
 @group(0) @binding(0)
