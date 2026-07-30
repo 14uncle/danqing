@@ -253,9 +253,9 @@ fn mist_noise(uv: vec2<f32>, t: f32, speed: f32, scale: f32) -> f32 {
 //
 // 修复: 单层 + 暖粉融入暮色 + 低 alpha, 让雾作为"暮色渐变上的微弱变化"而非"独立云团"。
 // mask 收窄 0.30-0.85 → 0.40-0.95 (集中在山脊附近, 不覆盖整片天空)。
-const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.40;
-const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.75;
-const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 0.95;
+const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.50;
+const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.80;
+const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 0.88;
 const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.45;
 // 雾色 (240, 205, 195) sRGB→linear: 暖粉, 接近暮色 (199, 172, 178) 但更亮,
 // additive 叠加在暮色上读作"暮色加深", 不像"冷云覆盖"。 用户 2026-07-30
