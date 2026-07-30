@@ -198,24 +198,14 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
 }
 
 // ---- 共享: 风驱雾纹 (sum-of-sines 伪噪声, 2D 各向同性, 不动采样坐标) ----
-// 关键: 旧版用 sin(x * scale + ...) (x 主导) → 垂直条纹 + 漂移 = 水平光束 (Tyndall 效应)。
-// 修正: 4 个 sin 全部用 comparable x 与 y 系数 (y/x ratio 0.7-1.0), 接近 45° 方向;
-//       不同 ± sign + 不同 phase 打破对齐, 造 2D 噪声, 无 dominant direction。
-//
-// 系数 6/8/12/16 (旧 2/2.5/3.5/4.5) — 用户 2026-07-30 反馈 "灰蒙蒙一片":
-//   旧系数 + scale=2 → 空间周期 1.57-0.70 uv = 1500-672 px, 几乎跟屏幕一样大,
-//   每像素都在大梯度中段, 漂移时每像素变化小 (±0.05), 视觉无感, 看起来是平雾。
-//   新系数 → 周期 0.52-0.20 uv = 503-192 px, 真正 fog 团尺寸, 漂移时每像素变化 ±0.20+,
-//   视觉能感到"风在吹"。
-
-// 漂移: x 累加 t*speed 偏移造"风吹过"。 调用方必须用 wrap-clean 速度 (1/16 = 0.0625),
-// 才能保证 8s wrap 时 pattern 连续: 8 * 0.0625 * k = k/2 (k 为偶数), sin(k/2 * π) = 0,
-// 所有 sin 项在 wrap 处都 = 0, 无 1 帧跳变 (用户 2026-07-30 反馈 "卡顿" 修复)。
-// 当前所有调用方都用 speed = 0.0625 (1/16), 系数 k = 6/8/12/16 全部偶数, wrap-clean。
+// 4 个 sin 全部用 comparable x 与 y 系数 (y/x ratio 0.7-1.0), 接近 45° 方向;
+// 不同 ± sign + 不同 phase 打破对齐, 造 2D 噪声, 无 dominant direction (无 Tyndall)。
+// 系数 6/8/12/16 → 空间周期 0.52-0.20 uv (503-192 px), 真正 fog 团尺寸
+// (旧 2/2.5/3.5/4.5 → 1500-672 px, 太大读作"灰蒙蒙一片")。
+// 调用方: speed=0.0625 + u.rain_time (非 wrap, 永不重置)。
 fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f32 {
     let x = uv.x * scale + t * speed + phase;
     let y = uv.y * scale;
-    // 4 个 diagonal sin: y/x 比例 0.7-0.9, 都接近 45° 方向, 空间周期 0.20-0.52 uv (192-503 px)。
     let v = sin(x * 6.0 + y * 5.0 + phase) * 0.30
           + sin(x * 8.0 - y * 7.0 + phase * 1.7) * 0.25
           + sin(x * 12.0 + y * 10.0 + phase * 2.3) * 0.25
@@ -223,130 +213,51 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
     return v * 0.5 + 0.5; // 0..1
 }
 
-// 2D hash for value noise (用户 2026-07-30 反馈 "sum-of-sines 仍有周期性")。
-// 替代品: value noise 非周期, hash 后双线性插值, 每个 cell 独立, 无 LCM。
-fn mist_hash_2d(p: vec2<f32>) -> f32 {
-    let h = dot(p, vec2<f32>(127.1, 311.7));
-    return fract(sin(h) * 43758.5453);
-}
-
-// 2D value noise, 1 octave + smoothstep 平滑。
-// uv 输入, t * speed 作 x 漂移 (与 mist_pattern 同样调用方式),
-// 返回 [0, 1]。 非周期: hash 输入端永远在前进, 不像 sin 在 wrap
-// 时有节奏感。
-fn mist_noise(uv: vec2<f32>, t: f32, speed: f32, scale: f32) -> f32 {
-    let p = uv * scale + vec2<f32>(t * speed, 0.0);
-    let ip = floor(p);
-    let fp = fract(p);
-    let u = fp * fp * (3.0 - 2.0 * fp); // smoothstep
-    let a = mist_hash_2d(ip);
-    let b = mist_hash_2d(ip + vec2<f32>(1.0, 0.0));
-    let c = mist_hash_2d(ip + vec2<f32>(0.0, 1.0));
-    let d = mist_hash_2d(ip + vec2<f32>(1.0, 1.0));
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
 // ---- 山动效 (山场景) ----
-// 云雾 (用户 2026-07-30 终审反馈 "山效果不好" + 图)。
-// 旧版问题: 3 层 pattern 干涉 → 横向条纹("cloud bank"), 雾色冷灰在暖粉暮色上
-// 高对比, alpha 0.40 + 整片提亮 = 失去 atmospheric 感, 读作"云团"而非"暮色山雾"。
-//
-// 修复: 单层 + 暖粉融入暮色 + 低 alpha, 让雾作为"暮色渐变上的微弱变化"而非"独立云团"。
-// mask 收窄 0.30-0.85 → 0.40-0.95 (集中在山脊附近, 不覆盖整片天空)。
-const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.50;
-const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.80;
-const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 0.88;
-const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.45;
-// 雾色 (240, 205, 195) sRGB→linear: 暖粉, 接近暮色 (199, 172, 178) 但更亮,
-// additive 叠加在暮色上读作"暮色加深", 不像"冷云覆盖"。 用户 2026-07-30
-// 反馈 "还是不太清楚" 后, 雾色从 (0.87, 0.60, 0.57) 提至 (0.92, 0.65, 0.62),
-// 在暮色背景上对比更明显。
-const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.920, 0.650, 0.620);
+// 单层暖粉雾融入暮色 (用户 2026-07-30 反馈: 旧 3 层冷灰"云团"翻车)。
+// mask 0.50-0.88 集中在山脊上空, 不覆盖整片天空。alpha 0.45 + 暖粉 (0.92,0.65,0.62)
+// 与暮色 (199,172,178) 抬升 ~0.71 红通道, 视觉可见不读作"独立云"。
+const MOUNTAIN_MIST_Y_TOP: f32 = 0.50;
+const MOUNTAIN_MIST_Y_FULL: f32 = 0.80;
+const MOUNTAIN_MIST_Y_END: f32 = 0.88;
+const MOUNTAIN_MIST_ALPHA: f32 = 0.45;
+const MOUNTAIN_MIST_COLOR: vec3<f32> = vec3<f32>(0.920, 0.650, 0.620);
 
 fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    // y mask: 0.40 软入 (暮色天区中部) → 0.75 满 (山脊上空) → 0.95 软出 (山脊)。
-    let band = smoothstep(MOUNTAIN_RIDGE_MIST_Y_TOP, MOUNTAIN_RIDGE_MIST_Y_FULL, uv.y)
-             * (1.0 - smoothstep(MOUNTAIN_RIDGE_MIST_Y_END, 1.0, uv.y));
-    // 单层 pattern — 旧 3 层 (主 0.05 + 副反向 0.03 + 副副 0.025) 干涉出
-    // 横向"cloud bank"条纹, 改单层消除干涉, 读作"风在暮色上轻吹"。
-    // speed 0.04 → 0.0625 (1/16) — 8s wrap 修复 (2026-07-30 用户反馈 "卡顿")。
+    let band = smoothstep(MOUNTAIN_MIST_Y_TOP, MOUNTAIN_MIST_Y_FULL, uv.y)
+             * (1.0 - smoothstep(MOUNTAIN_MIST_Y_END, 1.0, uv.y));
     let p = mist_pattern(uv, t, 0.0625, 2.0, 0.0);
-    return MOUNTAIN_RIDGE_MIST_COLOR * p * band * MOUNTAIN_RIDGE_MIST_ALPHA;
+    return MOUNTAIN_MIST_COLOR * p * band * MOUNTAIN_MIST_ALPHA;
 }
 
 // ---- 森林动效 (森林场景) ----
-// 雾不烘焙 (用户 2026-07-30 终审反馈, 参考雨场景改造范式):
-// export-scenes.py 森林配置已去掉 mist 字段, forest.png 不再绘制底雾;
-// 运行时 forest_mist 全程序化生成 3 层云雾 (雨幕同构, 但 2D 各向同性,
-// 无 dominant direction — 旧版 Tyndall 翻车教训)。
-// 设计: 3 层 y-分层 + 不同 speed + 2D pattern, 总 alpha 峰 ≈ 0.44,
-// 平均 ≈ 0.22, 雾带内可见但不过曝。
-// 暂停 500ms 沉降: forest_intensity = 0, 雾消失, 回到裸静态图 (无底雾)。
-// 命名: forest_mist (无 _motion 后缀, 因为现在没有"叠加在静态底雾上"这一说,
-// 雾就是全程序化的主效果)。
+// 雾不烘焙 (参考雨场景改造范式): export-scenes.py 森林配置已去 mist
+// 字段, 运行时 forest_mist 全程序化生成。 2 层 (主 + 副) 不同 scale
+// 破 sum-of-sines LCM 周期性, 速度 ±30% 起伏破传送带。
+// 暂停 500ms 沉降: forest_intensity = 0, 雾消失, 回到裸静态图。
 const FOREST_MIST_COLOR: vec3<f32> = vec3<f32>(0.512, 0.604, 0.548);
-// Layer A (中间重雾) 已删除 — 用户 2026-07-30 反馈 "森林去掉中层雾带"。
-// 旧 Layer A: y=0.40, half 0.15, alpha 0.20, speed 0.04。
-// 只保留下层 (B), 视觉重心下移到中林 y=0.68 与近林 y=0.88 之间,
-// 读作"林下贴地雾气"。
-// Layer B: 下半亮 (y=0.65, 半高 0.12), 快漂 0.06 uv/s — 用户 2026-07-30 反馈
-// "靠下的雾气再明显一点", 半高 0.15 → 0.18 → 0.12 (聚焦下半),
-// alpha 0.18 → 0.30 → 0.25 (去呼吸后密度减半, alpha 略减保持视觉剂量)。
-const FOREST_MIST_B_Y: f32 = 0.691;
-const FOREST_MIST_B_HALF: f32 = 0.159;
-const FOREST_MIST_B_ALPHA: f32 = 0.25;
-const FOREST_MIST_B_SPEED: f32 = 0.0625;
-// 副层 B2: subtle 副雾, 打破主层波形周期性 (用户 2026-07-30 反馈 "波形重置")。
-// 与主层不同: scale 3.0 (主 2.0, 空间周期错开破 LCM), speed -0.035 (反向漂,
-// 破单向传送带), phase 2.3 (错相), alpha 0.08 (主 1/3 subtle), y 0.60 (主 0.691
-// 略上)。主 + 副 pattern 各自 LCM 都错开, 组合永不严格重复, 视觉周期性
-// 消失。
-const FOREST_MIST_B2_Y: f32 = 0.60;
-const FOREST_MIST_B2_HALF: f32 = 0.10;
-const FOREST_MIST_B2_ALPHA: f32 = 0.08;
-const FOREST_MIST_B2_SPEED: f32 = -0.035;
-// Layer C (顶部轻雾) 已删除 — 用户 2026-07-30 反馈 "森林去掉靠上的雾带"。
-// 旧 Layer C: y=0.22, half 0.12, alpha 0.10, speed -0.03。
-// 保留中 (A) + 下 (B) 两层, 视觉重心下移, 顶光区 (静态 PNG 已有) 不被雾覆盖。
+// 主层: y=0.691 (中林 0.68 与近林 0.88 之间, 贴林下雾), 视觉重心下移。
+const FOREST_MIST_LAYER_B_Y: f32 = 0.691;
+const FOREST_MIST_LAYER_B_HALF: f32 = 0.159;
+const FOREST_MIST_LAYER_B_ALPHA: f32 = 0.25;
+const FOREST_MIST_LAYER_B_SPEED: f32 = 0.0625;
+// 副层: scale 3.0 (主 2.0, 错 LCM), speed -0.035 (反向), phase 2.3
+// (错相), alpha 0.08 (主 1/3 subtle), y 0.60 (主略上)。
+const FOREST_MIST_LAYER_B2_Y: f32 = 0.60;
+const FOREST_MIST_LAYER_B2_HALF: f32 = 0.10;
+const FOREST_MIST_LAYER_B2_ALPHA: f32 = 0.08;
+const FOREST_MIST_LAYER_B2_SPEED: f32 = -0.035;
 
 fn forest_mist_layer(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32, scale: f32, phase: f32, alpha: f32) -> f32 {
-    // y mask: 1.0 at peak, 0 at ±half (smoothstep 0.5×half→full×half 软入)
     let band = 1.0 - smoothstep(y_half * 0.5, y_half, abs(uv.y - y_peak));
     let pattern = mist_pattern(uv, t, speed, scale, phase);
     return pattern * band * alpha;
 }
 
-// 雾的 value noise 版本 (用户 2026-07-30 反馈 "周期性")。 改用 mist_noise
-// (非周期 2D value noise) 而非 mist_pattern (sum-of-sines, 周期)。
-fn forest_mist_layer_noise(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32, scale: f32, alpha: f32) -> f32 {
-    let band = 1.0 - smoothstep(y_half * 0.5, y_half, abs(uv.y - y_peak));
-    let pattern = mist_noise(uv, t, speed, scale);
-    return pattern * band * alpha;
-}
-
 fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    // 2 层雾带 (主 B + 副 B2), 用户 2026-07-30 反馈 "加 1 层 subtle 副雾"。
-    // 主层: y=0.691, half=0.159, alpha=0.25, scale=2.0, speed 时间起伏。
-    // 副层: y=0.60, half=0.10, alpha=0.08 (主 1/3, subtle), scale=3.0
-    //   (主 2.0, 空间周期错开破 LCM), speed=-0.035 (反向, 破单向传送带),
-    //   phase=2.3 (错相)。
-    // 副层不同 scale + 反向漂 + 错相, 与主层干涉成无周期 (主副各自 LCM
-    // 都不在, 组合 pattern 永不严格重复), 视觉重置感消失。
-    // 无时间脉动 — 用户 2026-07-30 反馈 "去掉呼吸效果, 又不是篝火",
-    // 雾是风驱(空间漂移, 持续), 不是火(中心辐射, 时间脉动)。
-    //
-    // 速度随时间起伏 ±30% (用户 2026-07-30 反馈 "波形重置"): 单层 sum-of-sines
-    // pattern 在 x 有 LCM 周期 ~125 px (k=16/2/scale), 8s 漂 0.5 uv ≈ 480 px
-    // = 3.85 个周期, 每个 wisp 用 8s 跨屏然后新 wisp 从左出现, 读作"重置"。
-    // 解决: speed_t 让漂移速度慢周期起伏 (0.4 rad/s + 0.27 rad/s, 准周期 15.7s +
-    // 23.3s, 不可公度永不严格重复), wisp 时快时慢, 视觉周期性打散。
-    //
-    // 注: 用户 2026-07-30 ed91cad 改 value noise 但反馈"撤回到上一步",
-    // 退回 sum-of-sines (本函数)。 mist_hash_2d / mist_noise / forest_mist_layer_noise
-    // 保留 (留作未来选项), 不调用。
-    let speed_t = FOREST_MIST_B_SPEED * (1.0 + 0.3 * sin(t * 0.4) + 0.2 * cos(t * 0.27));
-    let b = forest_mist_layer(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, speed_t, 2.0, 1.7, FOREST_MIST_B_ALPHA);
-    let b2 = forest_mist_layer(uv, t, FOREST_MIST_B2_Y, FOREST_MIST_B2_HALF, FOREST_MIST_B2_SPEED, 3.0, 2.3, FOREST_MIST_B2_ALPHA);
+    let speed_t = FOREST_MIST_LAYER_B_SPEED * (1.0 + 0.3 * sin(t * 0.4) + 0.2 * cos(t * 0.27));
+    let b = forest_mist_layer(uv, t, FOREST_MIST_LAYER_B_Y, FOREST_MIST_LAYER_B_HALF, speed_t, 2.0, 1.7, FOREST_MIST_LAYER_B_ALPHA);
+    let b2 = forest_mist_layer(uv, t, FOREST_MIST_LAYER_B2_Y, FOREST_MIST_LAYER_B2_HALF, FOREST_MIST_LAYER_B2_SPEED, 3.0, 2.3, FOREST_MIST_LAYER_B2_ALPHA);
     return FOREST_MIST_COLOR * (b + b2);
 }
 
