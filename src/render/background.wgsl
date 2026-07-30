@@ -197,110 +197,74 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
     return spot * on * twinkle * GLINT_GAIN;
 }
 
+// ---- 共享: 风驱雾纹 (sum-of-sines 伪噪声, additive 叠加, 不动采样坐标) ----
+// 4 个不同频率 sin 叠加,造有机的、不规则密度分布。x 累加 t*speed 偏移造"风吹过"感。
+//
+// Wrap-clean 约束: t 在 wrap_motion_time 处每 8s 归零,雾纹必须在整数周期数后回到
+// 原位,否则每 8s 出现 1 帧跳变。要点: 8 * speed 必须为整数 (x_input 空间)。
+// 当前 speed 选择: 0.0625 (1 周期/8s), 0.125 (2 周期/8s), -0.0625 (-1), 0.25 (4),
+// 0.5 (8)。x_input 空间 1 周期 = 1.0, 所以"2 周期/8s" = 0.25 uv/s drift, 8s 漂 2 uv。
+// 视觉: 960x640 窗下 0.0625 uv/s = 60 px/s 慢风, 0.125 uv/s = 120 px/s 中风。
+fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f32 {
+    let x = uv.x * scale + t * speed + phase;
+    let y = uv.y * scale;
+    let v = sin(x * 6.28) * 0.40
+          + sin(x * 12.57 + y * 4.0) * 0.25
+          + sin(y * 9.42 + x * 2.0) * 0.20
+          + sin(x * 19.0 + y * 7.0 + phase * 3.0) * 0.15;
+    return v * 0.5 + 0.5; // 0..1
+}
+
 // ---- 山动效 (山场景) ----
-// 暮色径向光呼吸 (乘性 + additive 双轨) +
-// 山脊 silhouette 整体亮度慢呼吸 (远山层次感)。
-// 乘性: 已亮区再亮 7% (sRGB→linear 后视觉剂量衰减, 不够明显) +
-// additive: 暖色径向光显式亮起/熄灭 (绕开 sRGB 视觉衰减, 终审可见剂量) +
-// 频率 1/8 + 2/8 Hz, 与雨/火/海共用 8s 公共周期。
-const MOUNTAIN_W: f32 = 0.7853982;        // 2π/8: 动效基频角速度 (1/8 Hz)
-const MOUNTAIN_BREATH_CENTER: vec2<f32> = vec2<f32>(0.5, 0.66);
-const MOUNTAIN_BREATH_RADIUS: f32 = 0.45;
-const MOUNTAIN_BREATH_GAIN: f32 = 0.12;  // 暮色径向光呼吸幅度 (乘性, ±12%)
-// 暖色径向光颜色 (与 export-scenes.py:399 glow (240, 200, 170) sRGB→linear 对齐)
-const MOUNTAIN_GLOW_COLOR: vec3<f32> = vec3<f32>(0.871, 0.604, 0.420);
-const MOUNTAIN_GLOW_GAIN: f32 = 0.06;    // 暖色径向光 additive 起伏幅度
-const MOUNTAIN_RIDGE_TOP: f32 = 0.78;    // 山脊区纵向软入起点 (uv.y)
-const MOUNTAIN_RIDGE_FULL: f32 = 0.86;
-const MOUNTAIN_RIDGE_GAIN: f32 = 0.07;   // 山脊 silhouette 亮起幅度 (±7%, 远山层次感)
+// 山脊云雾缭绕,随风而动 (用户 2026-07-30 终审反馈)。
+// 替代原 radial glow / ridge breath — additive 雾色叠加,包裹两层山脊 (0.86/0.97)。
+// 沿 x 风驱,密度 1/4 Hz (2 × 1/8 Hz) wrap-clean 慢周期起伏造"雾淡雾浓"。
+const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.78;
+const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.86;
+const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 0.96;
+const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.22;
+// 雾色 (180, 175, 195) sRGB→linear: 冷暖中性, 融入暮色而不抢戏。
+const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.452, 0.430, 0.557);
+const MOUNTAIN_RIDGE_MIST_DENSITY_FREQ: f32 = 0.25;  // 1/4 Hz wrap-clean
+const MOUNTAIN_RIDGE_MIST_DENSITY_GAIN: f32 = 0.40;
 
-fn mountain_flicker(t: f32) -> f32 {
-    return 0.65 * sin(t * MOUNTAIN_W * 1.0)
-        + 0.35 * sin(t * MOUNTAIN_W * 2.0 + 2.1);
-}
-
-fn mountain_breath(uv: vec2<f32>, t: f32) -> f32 {
-    let d = distance(uv, MOUNTAIN_BREATH_CENTER);
-    let mask = 1.0 - smoothstep(MOUNTAIN_BREATH_RADIUS * 0.4, MOUNTAIN_BREATH_RADIUS, d);
-    return mountain_flicker(t) * mask * MOUNTAIN_BREATH_GAIN;
-}
-
-// 暖色径向光 additive 起伏 — 比纯乘性可见度高 (绕开 sRGB→linear 视觉衰减)。
-fn mountain_glow_additive(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    let d = distance(uv, MOUNTAIN_BREATH_CENTER);
-    let mask = 1.0 - smoothstep(MOUNTAIN_BREATH_RADIUS * 0.5, MOUNTAIN_BREATH_RADIUS, d);
-    let flicker = mountain_flicker(t); // -1..+1
-    return MOUNTAIN_GLOW_COLOR * mask * flicker * MOUNTAIN_GLOW_GAIN;
-}
-
-fn mountain_ridge_breath(uv: vec2<f32>, t: f32) -> f32 {
-    let mask = smoothstep(MOUNTAIN_RIDGE_TOP, MOUNTAIN_RIDGE_FULL, uv.y);
-    let v = 0.6 * sin(t * MOUNTAIN_W * 1.0 + 0.7)
-        + 0.4 * sin(t * MOUNTAIN_W * 2.0 + 3.9);
-    return v * mask * MOUNTAIN_RIDGE_GAIN;
+fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
+    // 山脊区 mask: 0.78 软入, 0.86 满, 0.96 软出 — 包裹两层山脊 (0.86 / 0.97)。
+    let band = smoothstep(MOUNTAIN_RIDGE_MIST_Y_TOP, MOUNTAIN_RIDGE_MIST_Y_FULL, uv.y)
+             * (1.0 - smoothstep(MOUNTAIN_RIDGE_MIST_Y_END, 1.0, uv.y));
+    // 两层风驱 pattern: 主漂 (1 周期/8s) + 副反向慢漂 (-0.5 周期/8s)。
+    let p_main = mist_pattern(uv, t, 0.0625, 8.0, 0.0);
+    let p_sub = mist_pattern(uv, t, -0.0625, 6.0, 2.1);
+    let pattern = p_main * 0.65 + p_sub * 0.35;
+    let density = 0.6 + MOUNTAIN_RIDGE_MIST_DENSITY_GAIN * sin(t * 6.28 * MOUNTAIN_RIDGE_MIST_DENSITY_FREQ);
+    return MOUNTAIN_RIDGE_MIST_COLOR * pattern * band * density * MOUNTAIN_RIDGE_MIST_ALPHA;
 }
 
 // ---- 森林动效 (森林场景) ----
-// 顶光呼吸 (乘性, 对齐静态图 glow center 0.5, 0.10) +
-// 两道横雾程序化密度调制 (additive 叠加, 不沿 X 漂移采样坐标)。
-//
-// 重要: 雾的可见运动不能通过 UV 漂移整张采样图实现 — 林线 y=0.52/0.68/0.88
-// 与中林雾带 y=0.55-0.69 直接重叠,水平 UV 漂移会让中林跟着横移,读作"海草"
-// (雨场景试错的"沿轴均匀陷阱"扩展: 离散元素 + 沿轴 UV 位移 = 整片跟着动)。
-// 改用程序化雾色叠加 + density 调制: 静态 PNG 已有底雾, 运行时仅调制密度起伏
-// (雾淡雾浓感), 树梢完全不动。
-// 频率 1/8 + 1/16 Hz, 8s 公共周期不破。
-const FOREST_W: f32 = 0.7853982;          // 2π/8
-const FOREST_TOP_CENTER: vec2<f32> = vec2<f32>(0.5, 0.10);
-const FOREST_TOP_RADIUS: f32 = 0.42;
-const FOREST_TOP_GAIN: f32 = 0.10;       // 顶光呼吸幅度 (±10%, 略上调保证可见)
+// 雾气缭绕,随风而动 (用户 2026-07-30 终审反馈)。
+// 替代原 2 横带 (用户称"太规则,像飞机云") + 顶光呼吸 — additive 全域云雾。
+// 3 层风驱 pattern 叠加 (不同 speed/scale/phase) 造有机的、不规则密度。
+// y 0.20-0.95 软渐变, 避开最顶光和最底色。树梢完全静止 — 雾是独立程序化层。
+const FOREST_MIST_Y_IN: f32 = 0.20;
+const FOREST_MIST_Y_FULL: f32 = 0.45;
+const FOREST_MIST_Y_OUT_START: f32 = 0.80;
+const FOREST_MIST_Y_OUT_END: f32 = 0.95;
+const FOREST_MIST_ALPHA: f32 = 0.18;
+// 雾色 (190, 205, 195) sRGB→linear: 雾绿灰, 融入森林色调。
+const FOREST_MIST_COLOR: vec3<f32> = vec3<f32>(0.512, 0.604, 0.548);
+const FOREST_MIST_DENSITY_FREQ: f32 = 0.375;  // 3/8 Hz wrap-clean
+const FOREST_MIST_DENSITY_GAIN: f32 = 0.40;
 
-// 两道横向雾带位置 (y 中心 / 半高), 与 export-scenes.py:439-444 静态底雾对齐。
-const FOREST_MIST_TOP_Y: f32 = 0.30;
-const FOREST_MIST_TOP_HALF: f32 = 0.09;
-const FOREST_MIST_MID_Y: f32 = 0.62;
-const FOREST_MIST_MID_HALF: f32 = 0.07;
-// 底雾颜色 (sRGB→linear, 接近 (206,220,206)/(188,205,189))。
-const FOREST_MIST_TOP_COLOR: vec3<f32> = vec3<f32>(0.625, 0.708, 0.625);
-const FOREST_MIST_MID_COLOR: vec3<f32> = vec3<f32>(0.512, 0.608, 0.518);
-// 程序化雾带 alpha 上限 (受 density 调制), 接近静态 PNG 里的 base alpha (55/255 / 42/255)。
-const FOREST_MIST_TOP_ALPHA: f32 = 0.16;
-const FOREST_MIST_MID_ALPHA: f32 = 0.12;
-// density 调制幅度 (0..0.25): 1.0 ± 0.20 sin, 雾整体淡浓起伏, 8s 周期。
-const FOREST_MIST_DENSITY_GAIN: f32 = 0.20;
-
-fn forest_top_flicker(t: f32) -> f32 {
-    return 0.65 * sin(t * FOREST_W * 1.0)
-        + 0.35 * sin(t * FOREST_W * 2.0 + 1.3);
-}
-
-fn forest_top_breath(uv: vec2<f32>, t: f32) -> f32 {
-    let d = distance(uv, FOREST_TOP_CENTER);
-    let mask = 1.0 - smoothstep(FOREST_TOP_RADIUS * 0.4, FOREST_TOP_RADIUS, d);
-    return forest_top_flicker(t) * mask * FOREST_TOP_GAIN;
-}
-
-// 雾带 mask: [y - half, y + half] 内 1, 边缘软入 (smoothstep 0.7×half→full×half)。
-fn forest_mist_band(uv: vec2<f32>, y: f32, half: f32) -> f32 {
-    return 1.0 - smoothstep(half * 0.7, half, abs(uv.y - y));
-}
-
-// 两道雾 density 调制 (1.0 附近起伏, 1/16 Hz, 16s 周期) — 8s 公共周期的整数倍
-// (FOREST_W × 0.5 = 1/16 Hz), 上层与林间雾反相, 造"上浓下淡 / 下浓上淡"周期。
-fn forest_mist_density(t: f32) -> vec2<f32> {
-    return vec2<f32>(
-        1.0 + FOREST_MIST_DENSITY_GAIN * sin(t * FOREST_W * 0.5),
-        1.0 + FOREST_MIST_DENSITY_GAIN * sin(t * FOREST_W * 0.5 + 3.14159265)
-    );
-}
-
-// 雾色合成: 两道雾带 mask × 底色 × 调制后 density,additive 叠加到静态采样之上。
-// 不沿 X 漂移采样坐标 — 树梢完全静止, 只有雾密度整体起伏。
-fn forest_mist_overlay(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    let d = forest_mist_density(t);
-    let top = forest_mist_band(uv, FOREST_MIST_TOP_Y, FOREST_MIST_TOP_HALF) * FOREST_MIST_TOP_ALPHA * d.x;
-    let mid = forest_mist_band(uv, FOREST_MIST_MID_Y, FOREST_MIST_MID_HALF) * FOREST_MIST_MID_ALPHA * d.y;
-    return FOREST_MIST_TOP_COLOR * top + FOREST_MIST_MID_COLOR * mid;
+fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
+    let band = smoothstep(FOREST_MIST_Y_IN, FOREST_MIST_Y_FULL, uv.y)
+             * (1.0 - smoothstep(FOREST_MIST_Y_OUT_START, FOREST_MIST_Y_OUT_END, uv.y));
+    // 3 层风驱 pattern: 不同 speed + scale 叠加造层次, 反向漂移造不规则。
+    let p1 = mist_pattern(uv, t, 0.0625, 5.0, 0.0);
+    let p2 = mist_pattern(uv, t, -0.125, 8.0, 1.7);
+    let p3 = mist_pattern(uv, t, 0.125, 11.0, 3.4);
+    let pattern = p1 * 0.5 + p2 * 0.3 + p3 * 0.2;
+    let density = 0.6 + FOREST_MIST_DENSITY_GAIN * sin(t * 6.28 * FOREST_MIST_DENSITY_FREQ + 1.5);
+    return FOREST_MIST_COLOR * pattern * band * density * FOREST_MIST_ALPHA;
 }
 
 @group(0) @binding(0)
@@ -379,21 +343,17 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         );
     }
     if (u.mountain_intensity > 0.0) {
-        // 暮色径向光呼吸: 暖色 additive 起伏 (绕开 sRGB→linear 视觉衰减, 主观可见剂量)
-        // + 山脊 silhouette 慢呼吸 (乘性, 远山层次感)。
+        // 山脊云雾缭绕,随风而动 (用户 2026-07-30 终审反馈, additive 叠加, 不动采样)。
         color = vec4<f32>(
-            color.rgb * (1.0 + (mountain_breath(in.uv, u.time)
-                + mountain_ridge_breath(in.uv, u.time)) * u.mountain_intensity)
-                + mountain_glow_additive(in.uv, u.time) * u.mountain_intensity,
+            color.rgb + mountain_ridge_mist(in.uv, u.time) * u.mountain_intensity,
             color.a,
         );
     }
     if (u.forest_intensity > 0.0) {
-        // 顶光呼吸 (乘性, 不改色相) + 两道雾程序化密度调制 (additive, 不动采样坐标)。
-        // 雾密度调制造"雾淡雾浓"周期感, 树梢完全静止 (避免雨场景试错的"沿轴均匀"陷阱)。
+        // 雾气缭绕,随风而动 (用户 2026-07-30 终审反馈, additive 叠加, 不动采样)。
+        // 3 层风驱 pattern 造有机的、不规则密度; 树梢完全静止。
         color = vec4<f32>(
-            color.rgb * (1.0 + forest_top_breath(in.uv, u.time) * u.forest_intensity)
-                + forest_mist_overlay(in.uv, u.time) * u.forest_intensity,
+            color.rgb + forest_mist(in.uv, u.time) * u.forest_intensity,
             color.a,
         );
     }

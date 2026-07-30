@@ -48,24 +48,28 @@ powershell -NoProfile -File tools/benchmark.ps1 -Example pomodoro -Runs 3  # 性
 
 ### 山效 shader(background.wgsl 新增段落,参数集中可调)
 
-- **暮色径向光呼吸(双轨: 乘性 + additive)**: 暖色径向光 mask(中心 (0.5, 0.66), 半径 0.45)× 双正弦 flicker(1/8 + 2/8 Hz,错相)。
-  - **乘性** `MOUNTAIN_BREATH_GAIN = 0.12`: `color.rgb *= 1 + breath(uv, t) × intensity`(径向光调制)。最初设计 0.07 太小(暮色暗背景 + sRGB→linear 衰减),用户实测无可见动效,上调到 0.12。
-  - **additive** `MOUNTAIN_GLOW_GAIN = 0.06`: 暖色径向光 (240, 200, 170) sRGB→linear 颜色 × mask × flicker(±1)× 增益,直接 additive 叠加,绕开 sRGB 视觉衰减,保证主观可见剂量。
-  - 双轨目的:乘性保持色相不偏(暖光更暖不泛白),additive 保证动态明显;终审可单关一轨观察效果。
-- **山脊 silhouette 整体亮度慢呼吸(新增,靠轮廓而非光)**: mask `smoothstep(0.78, 0.86, uv.y)`(覆盖静态图山脊区 y≈0.86 / 0.97,远山层次感)× 双正弦 flicker(频率 1/8 + 2/8 Hz,相位与径向光错开)× 幅度 `MOUNTAIN_RIDGE_GAIN = 0.07`(原 0.04 略小,上调)。
-- 两个 mask 区域在 y 上**不重叠**(径向光中心 y=0.66 半径 0.45, 山脊 y>0.78),无视觉撞车。
-- 参数全部集中在 wgsl 常量段,调参只动该段(与雨/火/海段并列,互不改名改值)。
+- **山脊云雾缭绕,随风而动**(用户 2026-07-30 终审反馈 — 弃"呼吸光晕"改"风吹云雾"): additive 雾色叠加。
+  - 雾色 `MOUNTAIN_RIDGE_MIST_COLOR` (180, 175, 195) sRGB→linear: 冷暖中性,融入暮色调色不抢戏。
+  - y mask 包裹两层山脊: `smoothstep(0.78, 0.86, y) * (1.0 - smoothstep(0.96, 1.0, y))` — 0.78 软入、0.86 满、0.96 软出,精确包住山脊基线 0.86 与 0.97。
+  - 风驱 pattern: `mist_pattern(uv, t, 0.0625, 8.0, 0.0)` 主 + `mist_pattern(uv, t, -0.0625, 6.0, 2.1)` 副(反向慢漂),加权 0.65+0.35 叠加。`mist_pattern` 是 sum-of-sines 伪噪声(4 个不同频率 sin),x 累加 `t * speed` 偏移造"风吹过"。
+  - 密度调制 1/4 Hz (2 × 1/8 Hz wrap-clean): `density = 0.6 + 0.4 sin(t * 2π * 0.25)`,造"雾淡雾浓"周期感。
+  - alpha 上限 `MOUNTAIN_RIDGE_MIST_ALPHA = 0.22`,gate `intensity > 0` 与 `wrap_motion_time` 配合保证暂停回静态。
+- **Wrap-clean 约束**: 8s 公共周期由 `wrap_motion_time` 强制回零,雾纹必须在整数周期数后回到原位。`8 * speed` 必须为整数(此处 0.0625、-0.0625 都是 1/16 = 0.5 周期/8s)。
+- 采样坐标**完全不动** — 山脊 silhouette 静止,只有雾作为独立程序化层 additive 叠加。
 
 ### 森林效 shader(background.wgsl 新增段落,参数集中可调)
 
-- **顶光呼吸(对位篝火 `fire_breath`,中心偏上)**: 顶光 mask(中心 (0.5, 0.10), 半径 0.42)× 双正弦 flicker(1/8 + 2/8 Hz 错相)× 幅度 `FOREST_TOP_GAIN = 0.10`(原 0.06,上调以保证可见)。
-- **两道横雾程序化密度调制(替代 UV 漂移)**: 两道雾带 mask(y 中心 0.30 / 0.62,半高 0.09 / 0.07)× 静态底雾颜色 (206,220,206) / (188,205,189) sRGB→linear × 静态 alpha (0.16 / 0.12)× **density 调制 (1.0 ± 0.20 sin, 1/16 Hz 反相, 16s 周期)**。
-  - **关键架构决策**: 雾的可见运动**不能通过采样坐标 UV 漂移实现**。初版"水平 UV 漂移"在用户实测时翻车:中林雾带 y=0.55-0.69 与中林线 y=0.68 直接重叠,水平 UV 位移让中林整片跟着横移,读作"海草摇摆"(雨场景试错的"沿轴均匀"陷阱扩展版:离散元素 + 沿轴 UV 位移 = 整片跟着动)。
-  - 改为**程序化雾色叠加 + density 调制**: 静态 PNG 已有底雾,运行时仅按密度起伏再叠一层薄薄的颜色,采样坐标**完全不动**,树梢静止,只有雾整体淡浓。
-  - 雾带 mask 形状与 export-scenes.py:439-444 静态底雾一致,保证两个版本视觉融合;静态底雾提供基础外观,程序化层提供呼吸感。
-  - 频率 1/16 Hz 是 8s 公共周期的整数倍(2×8=16),不破既有约束。
-- 形态:`color.rgb *= 1 + forest_top_breath(uv, t) × intensity + forest_mist_overlay(uv, t) × intensity`(顶光乘性 + 雾 additive 双层叠加,不动采样)。
-- 参数全部集中在 wgsl 常量段,调参只动该段。
+- **雾气缭绕,随风而动**(用户 2026-07-30 终审反馈 — 弃"飞机云横带"改"风吹云雾"): additive 全域云雾。
+  - 雾色 `FOREST_MIST_COLOR` (190, 205, 195) sRGB→linear: 雾绿灰,融入森林色调。
+  - y mask: `smoothstep(0.20, 0.45, y) * (1.0 - smoothstep(0.80, 0.95, y))` — 0.20 软入、0.45 满、0.80 软出、0.95 全出,避开最顶光与最底色,覆盖整片树冠到林下。
+  - **3 层风驱 pattern 叠加**: `mist_pattern(uv, t, 0.0625, 5.0, 0.0)` + `mist_pattern(uv, t, -0.125, 8.0, 1.7)` + `mist_pattern(uv, t, 0.125, 11.0, 3.4)`,加权 0.5+0.3+0.2。3 层不同 speed (1/8、-1/4、1/4 周期/8s) + 不同 scale (5/8/11) + 不同 phase (0/1.7/3.4),造有机的、不规则密度分布 — 视觉上不再像"飞机云"那种规律横带,而是随风漂移的不规则雾气。
+  - 密度调制 3/8 Hz wrap-clean: `density = 0.6 + 0.4 sin(t * 2π * 0.375 + 1.5)`,与山错开相位,造两场景不同步呼吸。
+  - alpha 上限 `FOREST_MIST_ALPHA = 0.18`。
+- **关键架构决策(再次强调)**: 雾的可见运动**只能通过程序化雾层 additive 叠加,不能通过采样坐标 UV 漂移**。两次翻车的教训:
+  1. 初版"水平 UV 漂移" — 中林雾带 y=0.55-0.69 与中林线 y=0.68 重叠,UV 漂移让中林整片跟着横移读作"海草"。
+  2. 二版"两道横带" — 用户称"太规则,像飞机飞过的痕迹"。即使是程序化层,固定 Y 中心 + 软入 mask 仍然读作"飞机云"。
+  3. 当前:程序化层 + sum-of-sines pattern(4 个不同频率)+ 风驱偏移 + 密度调制,造真正的"雾气缭绕"。
+- 树梢完全静止 — 雾是独立程序化层,采样坐标不动。
 
 ### 策略层(examples/pomodoro/motion.rs)
 
