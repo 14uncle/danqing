@@ -217,17 +217,16 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
 }
 
 // ---- 山动效 (山场景) ----
-// 云雾动效 (用户 2026-07-30 终审反馈 "看不见" — 提亮)。
-// alpha 0.30 → 0.55, 雾色 (0.55,0.58,0.67) → (0.72,0.74,0.80) 更亮,
-// 在暮色暖调 (warm pink (199,172,178) at y=0.78) 上对比明显。
+// 云雾风驱 (用户 2026-07-30 终审反馈 "去掉呼吸效果, 又不是篝火")。
+// 重要语义: 雾 = 风驱(空间漂移, 持续, 无时间脉动) ≠ 火(中心辐射, 时间脉动)。
+// 去掉 density = 0.5 + GAIN * sin(t * 2π * FREQ) — 这是篝火 flicker 范式,
+// 山的雾不该用。剩余: 3 层 2D 各向同性 pattern + 漂移, 读作"风一直在吹"。
 const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.30;
 const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.85;
 const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 1.0;
 const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.55;
 // 雾色 (220, 222, 230) sRGB→linear: 亮冷灰, 与暮色暖调对比, 不抢戏。
 const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.720, 0.740, 0.800);
-const MOUNTAIN_RIDGE_MIST_DENSITY_FREQ: f32 = 0.25;
-const MOUNTAIN_RIDGE_MIST_DENSITY_GAIN: f32 = 0.25;
 
 fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
     // y mask: 0.30 软入 (暮色天区顶部) → 0.85 满 (山脊上空) → 1.0 软出 (山脊下)。
@@ -235,12 +234,12 @@ fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
     let band = smoothstep(MOUNTAIN_RIDGE_MIST_Y_TOP, MOUNTAIN_RIDGE_MIST_Y_FULL, uv.y)
              * (1.0 - smoothstep(MOUNTAIN_RIDGE_MIST_Y_END, 1.0, uv.y));
     // 3 层 2D 各向同性 pattern: 不同 speed/scale 叠加, 反向漂移造层次。
+    // 无时间脉动 — 只有持续漂移, 读作"风驱"而非"火呼吸"。
     let p1 = mist_pattern(uv, t, 0.05, 2.0, 0.0);
     let p2 = mist_pattern(uv, t, -0.03, 3.5, 1.7);
     let p3 = mist_pattern(uv, t, 0.025, 5.0, 3.4);
     let pattern = p1 * 0.5 + p2 * 0.3 + p3 * 0.2;
-    let density = 0.5 + MOUNTAIN_RIDGE_MIST_DENSITY_GAIN * sin(t * 6.28 * MOUNTAIN_RIDGE_MIST_DENSITY_FREQ);
-    return MOUNTAIN_RIDGE_MIST_COLOR * pattern * band * density * MOUNTAIN_RIDGE_MIST_ALPHA;
+    return MOUNTAIN_RIDGE_MIST_COLOR * pattern * band * MOUNTAIN_RIDGE_MIST_ALPHA;
 }
 
 // ---- 森林动效 (森林场景) ----
@@ -270,8 +269,6 @@ const FOREST_MIST_C_Y: f32 = 0.22;
 const FOREST_MIST_C_HALF: f32 = 0.12;
 const FOREST_MIST_C_ALPHA: f32 = 0.10;
 const FOREST_MIST_C_SPEED: f32 = -0.03;
-const FOREST_MIST_DENSITY_FREQ: f32 = 0.375;
-const FOREST_MIST_DENSITY_GAIN: f32 = 0.30;
 
 fn forest_mist_layer(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32, phase: f32, alpha: f32) -> f32 {
     // y mask: 1.0 at peak, 0 at ±half (smoothstep 0.5×half→full×half 软入)
@@ -282,11 +279,12 @@ fn forest_mist_layer(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32
 
 fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
     // 3 层雾带叠加, 不同 y 区间 / drift speed / phase, 造有机的、不规则密度。
+    // 无时间脉动 — 用户 2026-07-30 反馈 "去掉呼吸效果, 又不是篝火",
+    // 雾是风驱(空间漂移, 持续), 不是火(中心辐射, 时间脉动)。
     let a = forest_mist_layer(uv, t, FOREST_MIST_A_Y, FOREST_MIST_A_HALF, FOREST_MIST_A_SPEED, 0.0, FOREST_MIST_A_ALPHA);
     let b = forest_mist_layer(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, FOREST_MIST_B_SPEED, 1.7, FOREST_MIST_B_ALPHA);
     let c = forest_mist_layer(uv, t, FOREST_MIST_C_Y, FOREST_MIST_C_HALF, FOREST_MIST_C_SPEED, 3.4, FOREST_MIST_C_ALPHA);
-    let density = 0.5 + FOREST_MIST_DENSITY_GAIN * sin(t * 6.28 * FOREST_MIST_DENSITY_FREQ);
-    return FOREST_MIST_COLOR * (a + b + c) * density;
+    return FOREST_MIST_COLOR * (a + b + c);
 }
 
 @group(0) @binding(0)
