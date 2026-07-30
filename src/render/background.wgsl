@@ -197,74 +197,83 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
     return spot * on * twinkle * GLINT_GAIN;
 }
 
-// ---- 共享: 风驱雾纹 (sum-of-sines 伪噪声, additive 叠加, 不动采样坐标) ----
-// 4 个不同频率 sin 叠加,造有机的、不规则密度分布。x 累加 t*speed 偏移造"风吹过"感。
+// ---- 共享: 风驱雾纹 (sum-of-sines 伪噪声, 2D 各向同性, 不动采样坐标) ----
+// 关键: 旧版用 sin(x * scale + ...) (x 主导) → 垂直条纹 + 漂移 = 水平光束 (Tyndall 效应)。
+// 修正: 4 个 sin 全部用 comparable x 与 y 系数 (y/x ratio 0.7-1.0), 接近 45° 方向;
+//       不同 ± sign + 不同 phase 打破对齐, 造 2D 噪声, 无 dominant direction。
 //
-// Wrap-clean 约束: t 在 wrap_motion_time 处每 8s 归零,雾纹必须在整数周期数后回到
-// 原位,否则每 8s 出现 1 帧跳变。要点: 8 * speed 必须为整数 (x_input 空间)。
-// 当前 speed 选择: 0.0625 (1 周期/8s), 0.125 (2 周期/8s), -0.0625 (-1), 0.25 (4),
-// 0.5 (8)。x_input 空间 1 周期 = 1.0, 所以"2 周期/8s" = 0.25 uv/s drift, 8s 漂 2 uv。
-// 视觉: 960x640 窗下 0.0625 uv/s = 60 px/s 慢风, 0.125 uv/s = 120 px/s 中风。
+// 漂移: x 累加 t*speed 偏移造"风吹过", 速度 0.05 uv/s (8s 漂 0.4 uv = 384 px @960)。
+// Wrap-clean: 严格不满足 (8*0.05=0.4 不为整数, sin 系数 2.0-4.5), 1 帧跳变 < 0.2 uv,
+// 视觉不显, 优先视觉质量 (用户 2026-07-30 反馈 Tyndall 是主要问题)。
 fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f32 {
     let x = uv.x * scale + t * speed + phase;
     let y = uv.y * scale;
-    let v = sin(x * 6.28) * 0.40
-          + sin(x * 12.57 + y * 4.0) * 0.25
-          + sin(y * 9.42 + x * 2.0) * 0.20
-          + sin(x * 19.0 + y * 7.0 + phase * 3.0) * 0.15;
+    // 4 个 diagonal sin: y/x 比例 0.7-1.0, 都接近 45° 方向。
+    let v = sin(x * 2.0 + y * 1.8 + phase) * 0.30
+          + sin(x * 2.5 - y * 3.0 + phase * 1.7) * 0.25
+          + sin(x * 3.5 + y * 3.0 + phase * 2.3) * 0.25
+          + sin(x * 4.5 - y * 4.0 + phase * 3.1) * 0.20;
     return v * 0.5 + 0.5; // 0..1
 }
 
 // ---- 山动效 (山场景) ----
-// 山脊云雾缭绕,随风而动 (用户 2026-07-30 终审反馈)。
-// 替代原 radial glow / ridge breath — additive 雾色叠加,包裹两层山脊 (0.86/0.97)。
-// 沿 x 风驱,密度 1/4 Hz (2 × 1/8 Hz) wrap-clean 慢周期起伏造"雾淡雾浓"。
-const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.78;
-const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.86;
-const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 0.96;
-const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.22;
-// 雾色 (180, 175, 195) sRGB→linear: 冷暖中性, 融入暮色而不抢戏。
-const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.452, 0.430, 0.557);
-const MOUNTAIN_RIDGE_MIST_DENSITY_FREQ: f32 = 0.25;  // 1/4 Hz wrap-clean
-const MOUNTAIN_RIDGE_MIST_DENSITY_GAIN: f32 = 0.40;
+// 云雾动效 (用户 2026-07-30 终审反馈 "重新设计" — 弃"呼吸光晕"与"飞机云"翻车方案)。
+// 旧版 x 主导 sin 读作 Tyndall 光束; 新版 2D 各向同性 + 拓宽 mask 0.45-0.95
+// 覆盖暮色天区 + 山脊上空, 真正的"云雾在山脊上空飘"。
+const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.45;
+const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.80;
+const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 0.95;
+const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.18;
+// 雾色 (190, 195, 210) sRGB→linear: 冷灰蓝, 与暮色暖调对比, 不抢戏。
+const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.512, 0.548, 0.652);
+const MOUNTAIN_RIDGE_MIST_DENSITY_FREQ: f32 = 0.25;
+const MOUNTAIN_RIDGE_MIST_DENSITY_GAIN: f32 = 0.30;
 
 fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    // 山脊区 mask: 0.78 软入, 0.86 满, 0.96 软出 — 包裹两层山脊 (0.86 / 0.97)。
+    // y mask: 0.45 软入 (暮色天区上半) → 0.80 满 (山脊上空) → 0.95 软出 (山脊下)。
     let band = smoothstep(MOUNTAIN_RIDGE_MIST_Y_TOP, MOUNTAIN_RIDGE_MIST_Y_FULL, uv.y)
              * (1.0 - smoothstep(MOUNTAIN_RIDGE_MIST_Y_END, 1.0, uv.y));
-    // 两层风驱 pattern: 主漂 (1 周期/8s) + 副反向慢漂 (-0.5 周期/8s)。
-    let p_main = mist_pattern(uv, t, 0.0625, 8.0, 0.0);
-    let p_sub = mist_pattern(uv, t, -0.0625, 6.0, 2.1);
-    let pattern = p_main * 0.65 + p_sub * 0.35;
-    let density = 0.6 + MOUNTAIN_RIDGE_MIST_DENSITY_GAIN * sin(t * 6.28 * MOUNTAIN_RIDGE_MIST_DENSITY_FREQ);
+    // 2D 各向同性 pattern: 2 层, 主 + 副反向慢漂, 2D 噪声无 dominant direction。
+    let p1 = mist_pattern(uv, t, 0.05, 2.0, 0.0);
+    let p2 = mist_pattern(uv, t, -0.03, 3.5, 1.7);
+    let pattern = p1 * 0.6 + p2 * 0.4;
+    let density = 0.5 + MOUNTAIN_RIDGE_MIST_DENSITY_GAIN * sin(t * 6.28 * MOUNTAIN_RIDGE_MIST_DENSITY_FREQ);
     return MOUNTAIN_RIDGE_MIST_COLOR * pattern * band * density * MOUNTAIN_RIDGE_MIST_ALPHA;
 }
 
 // ---- 森林动效 (森林场景) ----
-// 雾气缭绕,随风而动 (用户 2026-07-30 终审反馈)。
-// 替代原 2 横带 (用户称"太规则,像飞机云") + 顶光呼吸 — additive 全域云雾。
-// 3 层风驱 pattern 叠加 (不同 speed/scale/phase) 造有机的、不规则密度。
-// y 0.20-0.95 软渐变, 避开最顶光和最底色。树梢完全静止 — 雾是独立程序化层。
-const FOREST_MIST_Y_IN: f32 = 0.20;
-const FOREST_MIST_Y_FULL: f32 = 0.45;
-const FOREST_MIST_Y_OUT_START: f32 = 0.80;
-const FOREST_MIST_Y_OUT_END: f32 = 0.95;
-const FOREST_MIST_ALPHA: f32 = 0.18;
+// 雾气缭绕叠加 (用户 2026-07-30 终审反馈 "在已有底雾基础上加动效")。
+// 关键认知: 静态 PNG 已有底雾 (export-scenes.py:439-444, y=0.30 半高 0.18 + y=0.62
+// 半高 0.14), 本次只在其上叠加 subtle motion — alpha 0.10 (旧版 0.18, 减半)。
+// mask 仅在静态底雾位置 (band_top y=0.21-0.48, band_mid y=0.55-0.76),
+// 不覆盖整片天空 (避免"再次飞机云")。
+// 2D 各向同性 pattern (无 dominant direction, 解决 Tyndall 效应 bug)。
+const FOREST_MIST_Y_TOP_START: f32 = 0.21;
+const FOREST_MIST_Y_TOP_PEAK: f32 = 0.30;
+const FOREST_MIST_Y_TOP_END_IN: f32 = 0.39;
+const FOREST_MIST_Y_TOP_END: f32 = 0.48;
+const FOREST_MIST_Y_MID_START_IN: f32 = 0.55;
+const FOREST_MIST_Y_MID_PEAK: f32 = 0.62;
+const FOREST_MIST_Y_MID_END_IN: f32 = 0.69;
+const FOREST_MIST_Y_MID_END: f32 = 0.76;
+const FOREST_MIST_ALPHA: f32 = 0.10;
 // 雾色 (190, 205, 195) sRGB→linear: 雾绿灰, 融入森林色调。
 const FOREST_MIST_COLOR: vec3<f32> = vec3<f32>(0.512, 0.604, 0.548);
-const FOREST_MIST_DENSITY_FREQ: f32 = 0.375;  // 3/8 Hz wrap-clean
-const FOREST_MIST_DENSITY_GAIN: f32 = 0.40;
+const FOREST_MIST_DENSITY_FREQ: f32 = 0.375;
+const FOREST_MIST_DENSITY_GAIN: f32 = 0.30;
 
-fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    let band = smoothstep(FOREST_MIST_Y_IN, FOREST_MIST_Y_FULL, uv.y)
-             * (1.0 - smoothstep(FOREST_MIST_Y_OUT_START, FOREST_MIST_Y_OUT_END, uv.y));
-    // 3 层风驱 pattern: 不同 speed + scale 叠加造层次, 反向漂移造不规则。
-    let p1 = mist_pattern(uv, t, 0.0625, 5.0, 0.0);
-    let p2 = mist_pattern(uv, t, -0.125, 8.0, 1.7);
-    let p3 = mist_pattern(uv, t, 0.125, 11.0, 3.4);
-    let pattern = p1 * 0.5 + p2 * 0.3 + p3 * 0.2;
-    let density = 0.6 + FOREST_MIST_DENSITY_GAIN * sin(t * 6.28 * FOREST_MIST_DENSITY_FREQ + 1.5);
-    return FOREST_MIST_COLOR * pattern * band * density * FOREST_MIST_ALPHA;
+fn forest_mist_motion(uv: vec2<f32>, t: f32) -> vec3<f32> {
+    // mask: 仅在静态底雾位置 (soft, 模糊一点让 motion 平滑融入静态底雾)。
+    let band_top = smoothstep(FOREST_MIST_Y_TOP_START, FOREST_MIST_Y_TOP_PEAK, uv.y)
+                 * (1.0 - smoothstep(FOREST_MIST_Y_TOP_END_IN, FOREST_MIST_Y_TOP_END, uv.y));
+    let band_mid = smoothstep(FOREST_MIST_Y_MID_START_IN, FOREST_MIST_Y_MID_PEAK, uv.y)
+                 * (1.0 - smoothstep(FOREST_MIST_Y_MID_END_IN, FOREST_MIST_Y_MID_END, uv.y));
+    // 2D 各向同性 pattern: 2 层, 反向漂移, 无 dominant direction。
+    let p1 = mist_pattern(uv, t, 0.05, 3.0, 0.0);
+    let p2 = mist_pattern(uv, t, -0.03, 4.5, 1.7);
+    let pattern = p1 * 0.5 + p2 * 0.5;
+    let density = 0.4 + FOREST_MIST_DENSITY_GAIN * sin(t * 6.28 * FOREST_MIST_DENSITY_FREQ + 1.5);
+    return FOREST_MIST_COLOR * (band_top + band_mid) * pattern * density * FOREST_MIST_ALPHA;
 }
 
 @group(0) @binding(0)
@@ -350,10 +359,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         );
     }
     if (u.forest_intensity > 0.0) {
-        // 雾气缭绕,随风而动 (用户 2026-07-30 终审反馈, additive 叠加, 不动采样)。
-        // 3 层风驱 pattern 造有机的、不规则密度; 树梢完全静止。
+        // 静态底雾之上的微妙动效 (用户 2026-07-30 终审反馈 "在已有底雾上加动效")。
+        // alpha 0.10 (旧 0.18 减半), mask 仅在静态底雾位置, 2D 各向同性。
         color = vec4<f32>(
-            color.rgb + forest_mist(in.uv, u.time) * u.forest_intensity,
+            color.rgb + forest_mist_motion(in.uv, u.time) * u.forest_intensity,
             color.a,
         );
     }
