@@ -48,17 +48,23 @@ powershell -NoProfile -File tools/benchmark.ps1 -Example pomodoro -Runs 3  # 性
 
 ### 山效 shader(background.wgsl 新增段落,参数集中可调)
 
-- **暮色径向光呼吸(对位篝火 `fire_breath`)**: 暖色径向光 mask(中心 (0.5, 0.66), 半径 0.45)× 双正弦 flicker(1/8 + 2/8 Hz,错相)× 幅度 `MOUNTAIN_BREATH_GAIN = 0.07`(比篝火 0.08 略低;暮色场景对调亮敏感,克制)。形态:`color.rgb *= 1 + mountain_breath(uv, t) × intensity`。
-- **山脊 silhouette 整体亮度慢呼吸(新增,靠轮廓而非光)**: mask `smoothstep(0.78, 0.86, uv.y)`(覆盖静态图山脊区 y≈0.86 / 0.97,远山层次感)× 双正弦 flicker(频率 1/8 + 2/8 Hz,相位与径向光错开)× 幅度 `MOUNTAIN_RIDGE_GAIN = 0.04`(明显低于径向光,做层次)。
+- **暮色径向光呼吸(双轨: 乘性 + additive)**: 暖色径向光 mask(中心 (0.5, 0.66), 半径 0.45)× 双正弦 flicker(1/8 + 2/8 Hz,错相)。
+  - **乘性** `MOUNTAIN_BREATH_GAIN = 0.12`: `color.rgb *= 1 + breath(uv, t) × intensity`(径向光调制)。最初设计 0.07 太小(暮色暗背景 + sRGB→linear 衰减),用户实测无可见动效,上调到 0.12。
+  - **additive** `MOUNTAIN_GLOW_GAIN = 0.06`: 暖色径向光 (240, 200, 170) sRGB→linear 颜色 × mask × flicker(±1)× 增益,直接 additive 叠加,绕开 sRGB 视觉衰减,保证主观可见剂量。
+  - 双轨目的:乘性保持色相不偏(暖光更暖不泛白),additive 保证动态明显;终审可单关一轨观察效果。
+- **山脊 silhouette 整体亮度慢呼吸(新增,靠轮廓而非光)**: mask `smoothstep(0.78, 0.86, uv.y)`(覆盖静态图山脊区 y≈0.86 / 0.97,远山层次感)× 双正弦 flicker(频率 1/8 + 2/8 Hz,相位与径向光错开)× 幅度 `MOUNTAIN_RIDGE_GAIN = 0.07`(原 0.04 略小,上调)。
 - 两个 mask 区域在 y 上**不重叠**(径向光中心 y=0.66 半径 0.45, 山脊 y>0.78),无视觉撞车。
 - 参数全部集中在 wgsl 常量段,调参只动该段(与雨/火/海段并列,互不改名改值)。
 
 ### 森林效 shader(background.wgsl 新增段落,参数集中可调)
 
-- **顶光呼吸(对位篝火 `fire_breath`,中心偏上)**: 顶光 mask(中心 (0.5, 0.10), 半径 0.42)× 双正弦 flicker(1/8 + 2/8 Hz 错相)× 幅度 `FOREST_TOP_GAIN = 0.06`(略低于山,因为顶光区不与中央倒计时冲突,可稍弱)。
-- **两道横雾水平 UV 漂移(与海同构机制,轴向相反)**: 两道雾带 mask(y 中心 0.30 / 0.62,半高 0.09 / 0.07)× 反向漂移(同 oscillator 在两雾带 mask 范围内取反号,造穿林风感)× 幅度 `FOREST_MIST_GAIN = 0.010` uv 单位(960x640 窗 ±9.6px,雾带内 ±5px——终审视觉调参点,可在 0.008~0.012 区间调)。
-- 漂移必须**水平**——森林有横雾带沿水平延展;若沿垂直 UV 位移会读作"雾降下",破坏"林间穿雾"语义。
-- 形态:`sample_uv.x += forest_mist_drift(uv, t) × intensity`(作用于采样坐标,**在 `textureSample` 之前**叠加,与海段同构;采样 UV 在 `sea_swell` 之后叠加,顺序:海纵向 → 森林水平 → 纹理采样)。
+- **顶光呼吸(对位篝火 `fire_breath`,中心偏上)**: 顶光 mask(中心 (0.5, 0.10), 半径 0.42)× 双正弦 flicker(1/8 + 2/8 Hz 错相)× 幅度 `FOREST_TOP_GAIN = 0.10`(原 0.06,上调以保证可见)。
+- **两道横雾程序化密度调制(替代 UV 漂移)**: 两道雾带 mask(y 中心 0.30 / 0.62,半高 0.09 / 0.07)× 静态底雾颜色 (206,220,206) / (188,205,189) sRGB→linear × 静态 alpha (0.16 / 0.12)× **density 调制 (1.0 ± 0.20 sin, 1/16 Hz 反相, 16s 周期)**。
+  - **关键架构决策**: 雾的可见运动**不能通过采样坐标 UV 漂移实现**。初版"水平 UV 漂移"在用户实测时翻车:中林雾带 y=0.55-0.69 与中林线 y=0.68 直接重叠,水平 UV 位移让中林整片跟着横移,读作"海草摇摆"(雨场景试错的"沿轴均匀"陷阱扩展版:离散元素 + 沿轴 UV 位移 = 整片跟着动)。
+  - 改为**程序化雾色叠加 + density 调制**: 静态 PNG 已有底雾,运行时仅按密度起伏再叠一层薄薄的颜色,采样坐标**完全不动**,树梢静止,只有雾整体淡浓。
+  - 雾带 mask 形状与 export-scenes.py:439-444 静态底雾一致,保证两个版本视觉融合;静态底雾提供基础外观,程序化层提供呼吸感。
+  - 频率 1/16 Hz 是 8s 公共周期的整数倍(2×8=16),不破既有约束。
+- 形态:`color.rgb *= 1 + forest_top_breath(uv, t) × intensity + forest_mist_overlay(uv, t) × intensity`(顶光乘性 + 雾 additive 双层叠加,不动采样)。
 - 参数全部集中在 wgsl 常量段,调参只动该段。
 
 ### 策略层(examples/pomodoro/motion.rs)
