@@ -223,32 +223,28 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
 }
 
 // ---- 山动效 (山场景) ----
-// 云雾风驱 (用户 2026-07-30 终审反馈 "灰蒙蒙一片, 去掉呼吸效果, 又不是篝火")。
-// 重要语义: 雾 = 风驱(空间漂移, 持续, 无时间脉动) ≠ 火(中心辐射, 时间脉动)。
-// 去掉 density = 0.5 + GAIN * sin(t * 2π * FREQ) — 这是篝火 flicker 范式,
-// 山的雾不该用。剩余: 3 层 2D 各向同性 pattern + 漂移, 读作"风一直在吹"。
-// alpha 0.55 → 0.40 — 旧版 0.55 + 大特征 pattern = 整个屏幕平雾 (灰底),
-// 新版 0.40 让 background 透出, fog 团作为亮点浮在上面。
-const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.30;
-const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.85;
-const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 1.0;
-const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.40;
-// 雾色 (220, 222, 230) sRGB→linear: 亮冷灰, 与暮色暖调对比, 不抢戏。
-const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.720, 0.740, 0.800);
+// 云雾 (用户 2026-07-30 终审反馈 "山效果不好" + 图)。
+// 旧版问题: 3 层 pattern 干涉 → 横向条纹("cloud bank"), 雾色冷灰在暖粉暮色上
+// 高对比, alpha 0.40 + 整片提亮 = 失去 atmospheric 感, 读作"云团"而非"暮色山雾"。
+//
+// 修复: 单层 + 暖粉融入暮色 + 低 alpha, 让雾作为"暮色渐变上的微弱变化"而非"独立云团"。
+// mask 收窄 0.30-0.85 → 0.40-0.95 (集中在山脊附近, 不覆盖整片天空)。
+const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.40;
+const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.75;
+const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 0.95;
+const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.15;
+// 雾色 (240, 200, 195) sRGB→linear: 暖粉, 接近暮色 (199, 172, 178) 但更亮,
+// additive 叠加在暮色上读作"暮色加深", 不像"冷云覆盖"。
+const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.870, 0.604, 0.572);
 
 fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    // y mask: 0.30 软入 (暮色天区顶部) → 0.85 满 (山脊上空) → 1.0 软出 (山脊下)。
-    // 拓宽后覆盖整片暮色天区 + 山脊上空, 雾效果更明显。
+    // y mask: 0.40 软入 (暮色天区中部) → 0.75 满 (山脊上空) → 0.95 软出 (山脊)。
     let band = smoothstep(MOUNTAIN_RIDGE_MIST_Y_TOP, MOUNTAIN_RIDGE_MIST_Y_FULL, uv.y)
              * (1.0 - smoothstep(MOUNTAIN_RIDGE_MIST_Y_END, 1.0, uv.y));
-    // 3 层 2D 各向同性 pattern: 不同 speed/scale 叠加, 反向漂移造层次。
-    // 无时间脉动 — 只有持续漂移, 读作"风驱"而非"火呼吸"。
-    // 系数 6/8/12/16 → 空间周期 192-503 px, fog 团尺寸 (非大梯度的平雾)。
-    let p1 = mist_pattern(uv, t, 0.05, 2.0, 0.0);
-    let p2 = mist_pattern(uv, t, -0.03, 3.5, 1.7);
-    let p3 = mist_pattern(uv, t, 0.025, 5.0, 3.4);
-    let pattern = p1 * 0.5 + p2 * 0.3 + p3 * 0.2;
-    return MOUNTAIN_RIDGE_MIST_COLOR * pattern * band * MOUNTAIN_RIDGE_MIST_ALPHA;
+    // 单层 pattern — 旧 3 层 (主 0.05 + 副反向 0.03 + 副副 0.025) 干涉出
+    // 横向"cloud bank"条纹, 改单层消除干涉, 读作"风在暮色上轻吹"。
+    let p = mist_pattern(uv, t, 0.04, 2.0, 0.0);
+    return MOUNTAIN_RIDGE_MIST_COLOR * p * band * MOUNTAIN_RIDGE_MIST_ALPHA;
 }
 
 // ---- 森林动效 (森林场景) ----
@@ -275,11 +271,9 @@ const FOREST_MIST_B_Y: f32 = 0.65;
 const FOREST_MIST_B_HALF: f32 = 0.12;
 const FOREST_MIST_B_ALPHA: f32 = 0.25;
 const FOREST_MIST_B_SPEED: f32 = 0.06;
-// Layer C: 顶部轻 (y=0.22, 半高 0.12), 反向漂 -0.03 uv/s
-const FOREST_MIST_C_Y: f32 = 0.22;
-const FOREST_MIST_C_HALF: f32 = 0.12;
-const FOREST_MIST_C_ALPHA: f32 = 0.10;
-const FOREST_MIST_C_SPEED: f32 = -0.03;
+// Layer C (顶部轻雾) 已删除 — 用户 2026-07-30 反馈 "森林去掉靠上的雾带"。
+// 旧 Layer C: y=0.22, half 0.12, alpha 0.10, speed -0.03。
+// 保留中 (A) + 下 (B) 两层, 视觉重心下移, 顶光区 (静态 PNG 已有) 不被雾覆盖。
 
 fn forest_mist_layer(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32, phase: f32, alpha: f32) -> f32 {
     // y mask: 1.0 at peak, 0 at ±half (smoothstep 0.5×half→full×half 软入)
@@ -289,13 +283,12 @@ fn forest_mist_layer(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32
 }
 
 fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    // 3 层雾带叠加, 不同 y 区间 / drift speed / phase, 造有机的、不规则密度。
+    // 2 层雾带 (中 + 下, 顶雾已删), 不同 y 区间 / drift speed / phase。
     // 无时间脉动 — 用户 2026-07-30 反馈 "去掉呼吸效果, 又不是篝火",
     // 雾是风驱(空间漂移, 持续), 不是火(中心辐射, 时间脉动)。
     let a = forest_mist_layer(uv, t, FOREST_MIST_A_Y, FOREST_MIST_A_HALF, FOREST_MIST_A_SPEED, 0.0, FOREST_MIST_A_ALPHA);
     let b = forest_mist_layer(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, FOREST_MIST_B_SPEED, 1.7, FOREST_MIST_B_ALPHA);
-    let c = forest_mist_layer(uv, t, FOREST_MIST_C_Y, FOREST_MIST_C_HALF, FOREST_MIST_C_SPEED, 3.4, FOREST_MIST_C_ALPHA);
-    return FOREST_MIST_COLOR * (a + b + c);
+    return FOREST_MIST_COLOR * (a + b);
 }
 
 @group(0) @binding(0)
