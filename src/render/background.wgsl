@@ -232,7 +232,7 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
 const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.40;
 const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.75;
 const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 0.95;
-const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.15;
+const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.30;
 // 雾色 (240, 200, 195) sRGB→linear: 暖粉, 接近暮色 (199, 172, 178) 但更亮,
 // additive 叠加在暮色上读作"暮色加深", 不像"冷云覆盖"。
 const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.870, 0.604, 0.572);
@@ -265,8 +265,8 @@ const FOREST_MIST_COLOR: vec3<f32> = vec3<f32>(0.512, 0.604, 0.548);
 // Layer B: 下半亮 (y=0.65, 半高 0.12), 快漂 0.06 uv/s — 用户 2026-07-30 反馈
 // "靠下的雾气再明显一点", 半高 0.15 → 0.18 → 0.12 (聚焦下半),
 // alpha 0.18 → 0.30 → 0.25 (去呼吸后密度减半, alpha 略减保持视觉剂量)。
-const FOREST_MIST_B_Y: f32 = 0.73;
-const FOREST_MIST_B_HALF: f32 = 0.12;
+const FOREST_MIST_B_Y: f32 = 0.691;
+const FOREST_MIST_B_HALF: f32 = 0.159;
 const FOREST_MIST_B_ALPHA: f32 = 0.25;
 const FOREST_MIST_B_SPEED: f32 = 0.06;
 // Layer C (顶部轻雾) 已删除 — 用户 2026-07-30 反馈 "森林去掉靠上的雾带"。
