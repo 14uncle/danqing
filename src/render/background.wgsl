@@ -208,9 +208,10 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
 //   新系数 → 周期 0.52-0.20 uv = 503-192 px, 真正 fog 团尺寸, 漂移时每像素变化 ±0.20+,
 //   视觉能感到"风在吹"。
 
-// 漂移: x 累加 t*speed 偏移造"风吹过", 速度 0.05 uv/s (8s 漂 0.4 uv = 384 px @960)。
-// Wrap-clean: 严格不满足 (8*0.05=0.4 不为整数, sin 系数 2.0-4.5), 1 帧跳变 < 0.2 uv,
-// 视觉不显, 优先视觉质量 (用户 2026-07-30 反馈 Tyndall 是主要问题)。
+// 漂移: x 累加 t*speed 偏移造"风吹过"。 调用方必须用 wrap-clean 速度 (1/16 = 0.0625),
+// 才能保证 8s wrap 时 pattern 连续: 8 * 0.0625 * k = k/2 (k 为偶数), sin(k/2 * π) = 0,
+// 所有 sin 项在 wrap 处都 = 0, 无 1 帧跳变 (用户 2026-07-30 反馈 "卡顿" 修复)。
+// 当前所有调用方都用 speed = 0.0625 (1/16), 系数 k = 6/8/12/16 全部偶数, wrap-clean。
 fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f32 {
     let x = uv.x * scale + t * speed + phase;
     let y = uv.y * scale;
@@ -243,7 +244,8 @@ fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
              * (1.0 - smoothstep(MOUNTAIN_RIDGE_MIST_Y_END, 1.0, uv.y));
     // 单层 pattern — 旧 3 层 (主 0.05 + 副反向 0.03 + 副副 0.025) 干涉出
     // 横向"cloud bank"条纹, 改单层消除干涉, 读作"风在暮色上轻吹"。
-    let p = mist_pattern(uv, t, 0.04, 2.0, 0.0);
+    // speed 0.04 → 0.0625 (1/16) — 8s wrap 修复 (2026-07-30 用户反馈 "卡顿")。
+    let p = mist_pattern(uv, t, 0.0625, 2.0, 0.0);
     return MOUNTAIN_RIDGE_MIST_COLOR * p * band * MOUNTAIN_RIDGE_MIST_ALPHA;
 }
 
@@ -268,7 +270,7 @@ const FOREST_MIST_COLOR: vec3<f32> = vec3<f32>(0.512, 0.604, 0.548);
 const FOREST_MIST_B_Y: f32 = 0.691;
 const FOREST_MIST_B_HALF: f32 = 0.159;
 const FOREST_MIST_B_ALPHA: f32 = 0.25;
-const FOREST_MIST_B_SPEED: f32 = 0.06;
+const FOREST_MIST_B_SPEED: f32 = 0.0625;
 // Layer C (顶部轻雾) 已删除 — 用户 2026-07-30 反馈 "森林去掉靠上的雾带"。
 // 旧 Layer C: y=0.22, half 0.12, alpha 0.10, speed -0.03。
 // 保留中 (A) + 下 (B) 两层, 视觉重心下移, 顶光区 (静态 PNG 已有) 不被雾覆盖。
