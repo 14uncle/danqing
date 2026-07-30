@@ -217,16 +217,15 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
 }
 
 // ---- 山动效 (山场景) ----
-// 云雾动效 (用户 2026-07-30 终审反馈 "重新设计" + "动效不明显")。
-// 弃"呼吸光晕"与"飞机云"翻车方案, 改"云雾在暮色天区填充 + 山脊上空飘"。
-// 旧 mask 0.45-0.95 偏窄, 新 mask 0.30-0.85 覆盖整片暮色天区, 3 层
-// 2D 各向同性 pattern 叠加, alpha 提升到 0.30 (旧 0.18) 让效果更明显。
+// 云雾动效 (用户 2026-07-30 终审反馈 "看不见" — 提亮)。
+// alpha 0.30 → 0.55, 雾色 (0.55,0.58,0.67) → (0.72,0.74,0.80) 更亮,
+// 在暮色暖调 (warm pink (199,172,178) at y=0.78) 上对比明显。
 const MOUNTAIN_RIDGE_MIST_Y_TOP: f32 = 0.30;
 const MOUNTAIN_RIDGE_MIST_Y_FULL: f32 = 0.85;
 const MOUNTAIN_RIDGE_MIST_Y_END: f32 = 1.0;
-const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.30;
-// 雾色 (190, 195, 210) sRGB→linear: 冷灰蓝, 与暮色暖调对比, 不抢戏。
-const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.512, 0.548, 0.652);
+const MOUNTAIN_RIDGE_MIST_ALPHA: f32 = 0.55;
+// 雾色 (220, 222, 230) sRGB→linear: 亮冷灰, 与暮色暖调对比, 不抢戏。
+const MOUNTAIN_RIDGE_MIST_COLOR: vec3<f32> = vec3<f32>(0.720, 0.740, 0.800);
 const MOUNTAIN_RIDGE_MIST_DENSITY_FREQ: f32 = 0.25;
 const MOUNTAIN_RIDGE_MIST_DENSITY_GAIN: f32 = 0.25;
 
@@ -260,10 +259,11 @@ const FOREST_MIST_A_Y: f32 = 0.40;
 const FOREST_MIST_A_HALF: f32 = 0.20;
 const FOREST_MIST_A_ALPHA: f32 = 0.20;
 const FOREST_MIST_A_SPEED: f32 = 0.04;
-// Layer B: 下半亮 (y=0.65, 半高 0.15), 快漂 0.06 uv/s
+// Layer B: 下半亮 (y=0.65, 半高 0.18), 快漂 0.06 uv/s — 用户 2026-07-30 反馈
+// "靠下的雾气再明显一点", alpha 0.18 → 0.30, 半高 0.15 → 0.18 (覆盖更宽)。
 const FOREST_MIST_B_Y: f32 = 0.65;
-const FOREST_MIST_B_HALF: f32 = 0.15;
-const FOREST_MIST_B_ALPHA: f32 = 0.18;
+const FOREST_MIST_B_HALF: f32 = 0.18;
+const FOREST_MIST_B_ALPHA: f32 = 0.30;
 const FOREST_MIST_B_SPEED: f32 = 0.06;
 // Layer C: 顶部轻 (y=0.22, 半高 0.12), 反向漂 -0.03 uv/s
 const FOREST_MIST_C_Y: f32 = 0.22;
