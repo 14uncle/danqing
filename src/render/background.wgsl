@@ -287,7 +287,14 @@ fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
     // 中林 y=0.68 与近林 y=0.88 之间, 贴林下雾, 其它不动。
     // 无时间脉动 — 用户 2026-07-30 反馈 "去掉呼吸效果, 又不是篝火",
     // 雾是风驱(空间漂移, 持续), 不是火(中心辐射, 时间脉动)。
-    let b = forest_mist_layer(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, FOREST_MIST_B_SPEED, 1.7, FOREST_MIST_B_ALPHA);
+    //
+    // 速度随时间起伏 ±30% (用户 2026-07-30 反馈 "波形重置"): 单层 sum-of-sines
+    // pattern 在 x 有 LCM 周期 ~125 px (k=16/2/scale), 8s 漂 0.5 uv ≈ 480 px
+    // = 3.85 个周期, 每个 wisp 用 8s 跨屏然后新 wisp 从左出现, 读作"重置"。
+    // 解决: speed_t 让漂移速度慢周期起伏 (0.4 rad/s + 0.27 rad/s, 准周期 15.7s +
+    // 23.3s, 不可公度永不严格重复), wisp 时快时慢, 视觉周期性打散。
+    let speed_t = FOREST_MIST_B_SPEED * (1.0 + 0.3 * sin(t * 0.4) + 0.2 * cos(t * 0.27));
+    let b = forest_mist_layer(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, speed_t, 1.7, FOREST_MIST_B_ALPHA);
     return FOREST_MIST_COLOR * b;
 }
 
