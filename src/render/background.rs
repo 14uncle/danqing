@@ -192,6 +192,9 @@ impl BackgroundConfig {
     }
 }
 
+/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐, 覆盖 9 字段 × 4B 有效数据)。
+pub(crate) const UNIFORM_BUFFER_BYTES: u64 = 48;
+
 /// 单个已上传的背景纹理。
 #[allow(dead_code)]
 struct BackgroundTexture {
@@ -290,7 +293,11 @@ impl BackgroundPipeline {
         let uniform_bufs: [wgpu::Buffer; LAYER_COUNT] = std::array::from_fn(|_| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("background uniform buffer"),
-                size: 32,
+                // WGSL uniform struct 自动 16-byte 对齐, 9×f32 = 36B 有效数据
+                // 被 WGSL 当作 48B 处理 (尾部 12B padding, shader 不读)。
+                // 常量 UNIFORM_BUFFER_BYTES 与 UNIFORM_FIELDS 一同被回归护栏覆盖
+                // (uniform_buffer_size_covers_wgsl_struct 测试)。
+                size: UNIFORM_BUFFER_BYTES,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
@@ -715,7 +722,8 @@ impl BackgroundPipeline {
     }
 
     /// 按缩放模式计算顶点与 UV, 写入指定层的顶点区段与 uniform buffer。
-    /// uniform 布局 (36B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, 山强度, 森林强度]。
+    /// uniform 布局 (36B 有效, WGSL 16B 对齐为 48B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, 山强度, 森林强度]。
+    /// buffer 实际创建 48B (与 WGSL 自动对齐一致, 尾部 12B 是 padding, shader 不读)。
     #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
@@ -1101,6 +1109,28 @@ mod tests {
         assert!((wrap_motion_time(-0.5) - (MOTION_WRAP_SECS - 0.5)).abs() < 1e-6);
         // 常驻数小时的大时间值仍折回周期内 (f32 精度护栏)。
         assert!(wrap_motion_time(36000.0) < MOTION_WRAP_SECS);
+    }
+
+    #[test]
+    fn uniform_buffer_size_covers_wgsl_struct() {
+        // 回归护栏: WGSL `Uniforms` struct 字段数 (UNIFORM_FIELDS) × 4B 必须
+        // ≤ buffer 大小 (UNIFORM_BUFFER_BYTES),且 buffer 必须 16B 对齐
+        // (WGSL uniform 规范)。这是 2026-07-30 山/森林动效漏改触发的护栏 —
+        // 之前 buffer 留 32B 但 cast_slice 写 36B,wgpu 启动即 panic。
+        const UNIFORM_FIELDS: usize = 9;
+        let payload_bytes = UNIFORM_FIELDS * std::mem::size_of::<f32>();
+        assert!(
+            UNIFORM_BUFFER_BYTES as usize >= payload_bytes,
+            "uniform buffer ({}B) 必须 ≥ 有效 payload ({}B = {} 字段 × f32)",
+            UNIFORM_BUFFER_BYTES,
+            payload_bytes,
+            UNIFORM_FIELDS
+        );
+        assert_eq!(
+            UNIFORM_BUFFER_BYTES % 16,
+            0,
+            "uniform buffer 必须 16B 对齐 (WGSL 自动把 struct 尺寸上取 16 倍数)"
+        );
     }
 
     #[test]
