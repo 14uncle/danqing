@@ -223,6 +223,29 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
     return v * 0.5 + 0.5; // 0..1
 }
 
+// 2D hash for value noise (用户 2026-07-30 反馈 "sum-of-sines 仍有周期性")。
+// 替代品: value noise 非周期, hash 后双线性插值, 每个 cell 独立, 无 LCM。
+fn mist_hash_2d(p: vec2<f32>) -> f32 {
+    let h = dot(p, vec2<f32>(127.1, 311.7));
+    return fract(sin(h) * 43758.5453);
+}
+
+// 2D value noise, 1 octave + smoothstep 平滑。
+// uv 输入, t * speed 作 x 漂移 (与 mist_pattern 同样调用方式),
+// 返回 [0, 1]。 非周期: hash 输入端永远在前进, 不像 sin 在 wrap
+// 时有节奏感。
+fn mist_noise(uv: vec2<f32>, t: f32, speed: f32, scale: f32) -> f32 {
+    let p = uv * scale + vec2<f32>(t * speed, 0.0);
+    let ip = floor(p);
+    let fp = fract(p);
+    let u = fp * fp * (3.0 - 2.0 * fp); // smoothstep
+    let a = mist_hash_2d(ip);
+    let b = mist_hash_2d(ip + vec2<f32>(1.0, 0.0));
+    let c = mist_hash_2d(ip + vec2<f32>(0.0, 1.0));
+    let d = mist_hash_2d(ip + vec2<f32>(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
 // ---- 山动效 (山场景) ----
 // 云雾 (用户 2026-07-30 终审反馈 "山效果不好" + 图)。
 // 旧版问题: 3 层 pattern 干涉 → 横向条纹("cloud bank"), 雾色冷灰在暖粉暮色上
@@ -291,25 +314,27 @@ fn forest_mist_layer(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32
     return pattern * band * alpha;
 }
 
+// 雾的 value noise 版本 (用户 2026-07-30 反馈 "周期性")。 改用 mist_noise
+// (非周期 2D value noise) 而非 mist_pattern (sum-of-sines, 周期)。
+fn forest_mist_layer_noise(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32, scale: f32, alpha: f32) -> f32 {
+    let band = 1.0 - smoothstep(y_half * 0.5, y_half, abs(uv.y - y_peak));
+    let pattern = mist_noise(uv, t, speed, scale);
+    return pattern * band * alpha;
+}
+
 fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    // 2 层雾带 (主 B + 副 B2), 用户 2026-07-30 反馈 "加 1 层 subtle 副雾"。
+    // 2 层雾带 (主 B + 副 B2) — 用户 2026-07-30 反馈 "周期性"。
+    // 用 2D value noise (非周期) 替代 sum-of-sines (周期) — value noise
+    // 每个 cell 是独立 hash 值, 无 LCM, 漂移永远不"传送带"。
     // 主层: y=0.691, half=0.159, alpha=0.25, scale=2.0, speed 时间起伏。
-    // 副层: y=0.60, half=0.10, alpha=0.08 (主 1/3, subtle), scale=3.0
-    //   (主 2.0, 空间周期错开破 LCM), speed=-0.035 (反向, 破单向传送带),
-    //   phase=2.3 (错相)。
-    // 副层不同 scale + 反向漂 + 错相, 与主层干涉成无周期 (主副各自 LCM
-    // 都不在, 组合 pattern 永不严格重复), 视觉重置感消失。
-    // 无时间脉动 — 用户 2026-07-30 反馈 "去掉呼吸效果, 又不是篝火",
-    // 雾是风驱(空间漂移, 持续), 不是火(中心辐射, 时间脉动)。
-    //
-    // 速度随时间起伏 ±30% (用户 2026-07-30 反馈 "波形重置"): 单层 sum-of-sines
-    // pattern 在 x 有 LCM 周期 ~125 px (k=16/2/scale), 8s 漂 0.5 uv ≈ 480 px
-    // = 3.85 个周期, 每个 wisp 用 8s 跨屏然后新 wisp 从左出现, 读作"重置"。
-    // 解决: speed_t 让漂移速度慢周期起伏 (0.4 rad/s + 0.27 rad/s, 准周期 15.7s +
-    // 23.3s, 不可公度永不严格重复), wisp 时快时慢, 视觉周期性打散。
+    // 副层: y=0.60, half=0.10, alpha=0.08, scale=3.0, speed=-0.035。
+    // 副层不同 scale + 反向漂, 与主层组合成无周期 (主副 hash 各自独立,
+    // 组合无 LCM)。 mist_noise 函数 (value noise) 替代 mist_pattern
+    // (sum-of-sines)。
+    // 无时间脉动 — 用户 2026-07-30 反馈 "去掉呼吸效果, 又不是篝火"。
     let speed_t = FOREST_MIST_B_SPEED * (1.0 + 0.3 * sin(t * 0.4) + 0.2 * cos(t * 0.27));
-    let b = forest_mist_layer(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, speed_t, 2.0, 1.7, FOREST_MIST_B_ALPHA);
-    let b2 = forest_mist_layer(uv, t, FOREST_MIST_B2_Y, FOREST_MIST_B2_HALF, FOREST_MIST_B2_SPEED, 3.0, 2.3, FOREST_MIST_B2_ALPHA);
+    let b = forest_mist_layer_noise(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, speed_t, 2.0, FOREST_MIST_B_ALPHA);
+    let b2 = forest_mist_layer_noise(uv, t, FOREST_MIST_B2_Y, FOREST_MIST_B2_HALF, FOREST_MIST_B2_SPEED, 3.0, FOREST_MIST_B2_ALPHA);
     return FOREST_MIST_COLOR * (b + b2);
 }
 
