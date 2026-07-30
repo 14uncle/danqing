@@ -258,16 +258,14 @@ fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
 // 命名: forest_mist (无 _motion 后缀, 因为现在没有"叠加在静态底雾上"这一说,
 // 雾就是全程序化的主效果)。
 const FOREST_MIST_COLOR: vec3<f32> = vec3<f32>(0.512, 0.604, 0.548);
-// Layer A: 中间重 (y=0.40, 半高 0.15), 慢漂 0.04 uv/s
-//   half 0.20 → 0.15 (用户 2026-07-30 反馈 "雾带太宽了", 集中)。
-const FOREST_MIST_A_Y: f32 = 0.40;
-const FOREST_MIST_A_HALF: f32 = 0.15;
-const FOREST_MIST_A_ALPHA: f32 = 0.20;
-const FOREST_MIST_A_SPEED: f32 = 0.04;
+// Layer A (中间重雾) 已删除 — 用户 2026-07-30 反馈 "森林去掉中层雾带"。
+// 旧 Layer A: y=0.40, half 0.15, alpha 0.20, speed 0.04。
+// 只保留下层 (B), 视觉重心下移到中林 y=0.68 与近林 y=0.88 之间,
+// 读作"林下贴地雾气"。
 // Layer B: 下半亮 (y=0.65, 半高 0.12), 快漂 0.06 uv/s — 用户 2026-07-30 反馈
 // "靠下的雾气再明显一点", 半高 0.15 → 0.18 → 0.12 (聚焦下半),
 // alpha 0.18 → 0.30 → 0.25 (去呼吸后密度减半, alpha 略减保持视觉剂量)。
-const FOREST_MIST_B_Y: f32 = 0.65;
+const FOREST_MIST_B_Y: f32 = 0.73;
 const FOREST_MIST_B_HALF: f32 = 0.12;
 const FOREST_MIST_B_ALPHA: f32 = 0.25;
 const FOREST_MIST_B_SPEED: f32 = 0.06;
@@ -283,12 +281,12 @@ fn forest_mist_layer(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32
 }
 
 fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    // 2 层雾带 (中 + 下, 顶雾已删), 不同 y 区间 / drift speed / phase。
+    // 单层雾带 (下), 用户 2026-07-30 反馈 "去掉中层 + 下层下移 50px"。
+    // 中林 y=0.68 与近林 y=0.88 之间, 贴林下雾, 其它不动。
     // 无时间脉动 — 用户 2026-07-30 反馈 "去掉呼吸效果, 又不是篝火",
     // 雾是风驱(空间漂移, 持续), 不是火(中心辐射, 时间脉动)。
-    let a = forest_mist_layer(uv, t, FOREST_MIST_A_Y, FOREST_MIST_A_HALF, FOREST_MIST_A_SPEED, 0.0, FOREST_MIST_A_ALPHA);
     let b = forest_mist_layer(uv, t, FOREST_MIST_B_Y, FOREST_MIST_B_HALF, FOREST_MIST_B_SPEED, 1.7, FOREST_MIST_B_ALPHA);
-    return FOREST_MIST_COLOR * (a + b);
+    return FOREST_MIST_COLOR * b;
 }
 
 @group(0) @binding(0)
