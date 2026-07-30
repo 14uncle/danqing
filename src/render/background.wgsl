@@ -368,16 +368,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     if (u.mountain_intensity > 0.0) {
         // 山脊云雾缭绕,随风而动 (用户 2026-07-30 终审反馈, additive 叠加, 不动采样)。
+        // t 改用 u.rain_time (非 wrap) — 8s wrap_motion_time 重置会让 pattern 跳变
+        // (用户 2026-07-30 反馈 "还是有重置的情况")。rain_time 是 Rust rain_clock,
+        // 每帧 +=dt*motion_gain, 无 8s wrap, 持续累加, 雾漂移连续无跳变。
+        // 雨和雾共用 rain_time, 都是非 wrap 持续动效, 语义一致。
         color = vec4<f32>(
-            color.rgb + mountain_ridge_mist(in.uv, u.time) * u.mountain_intensity,
+            color.rgb + mountain_ridge_mist(in.uv, u.rain_time) * u.mountain_intensity,
             color.a,
         );
     }
     if (u.forest_intensity > 0.0) {
         // 全程序化云雾 (用户 2026-07-30 终审反馈 "去静态底雾, 运行时动态渲染",
-        // 参考雨场景改造范式)。 3 层 2D 各向同性 pattern 叠加, 树梢完全静止。
+        // 参考雨场景改造范式)。 t 同上, 用 u.rain_time 避免 8s wrap 跳变。
         color = vec4<f32>(
-            color.rgb + forest_mist(in.uv, u.time) * u.forest_intensity,
+            color.rgb + forest_mist(in.uv, u.rain_time) * u.forest_intensity,
             color.a,
         );
     }
