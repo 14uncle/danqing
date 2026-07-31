@@ -223,7 +223,7 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
 const MOUNTAIN_MIST_Y_TOP: f32 = 0.50;
 const MOUNTAIN_MIST_Y_FULL: f32 = 0.80;
 const MOUNTAIN_MIST_Y_END: f32 = 0.88;
-const MOUNTAIN_MIST_ALPHA: f32 = 0.22;
+const MOUNTAIN_MIST_ALPHA: f32 = 0.30;
 const MOUNTAIN_MIST_COLOR: vec3<f32> = vec3<f32>(0.920, 0.650, 0.620);
 
 fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
