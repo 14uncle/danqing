@@ -15,7 +15,8 @@
 param(
     [string]$BinaryName = "showcase",
     [string]$Version = "",
-    [string]$OutDir = "target\package"
+    [string]$OutDir = "target\package",
+    [string]$IcoPath = "assets\logo\logo.ico"
 )
 
 $ErrorActionPreference = "Stop"
@@ -97,7 +98,7 @@ if (Test-Path $PatchIconScript) {
         Write-Host "Injecting danqing logo into $StageExe ..."
         Push-Location $RepoRoot
         try {
-            & $Py tools/patch_icon.py --exe $StageExe
+            & $Py tools/patch_icon.py --ico $IcoPath --exe $StageExe
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "patch_icon.py exited $LASTEXITCODE -- packaged exe will keep the default icon."
             }

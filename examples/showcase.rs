@@ -8,6 +8,11 @@
 //! (基础 / 布局 / 表单 / 视图), 右侧经 Switcher 切换分类面板;
 //! 所有面板常驻实例化，切换不重建组件树。
 
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 use danqing::widget::{
     self, Box as UiBox, Button, Column, EventResult, MsgQueue, Node, Padding, Row, Scrollable,
     Switcher, Text, TextArea, TextInput, TitleBar, Widget,
