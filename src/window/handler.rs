@@ -34,7 +34,9 @@ use crate::widget::{
 use crate::{Point, Rect, Size};
 
 use super::event::{WindowAppEvent, convert_event};
-use super::icon::{apply_windows_undecorated_style, load_window_icon};
+#[cfg(target_os = "windows")]
+use super::icon::apply_windows_undecorated_style;
+use super::icon::load_window_icon;
 
 /// winit 应用处理器，驱动窗口生命周期与事件分发。
 ///

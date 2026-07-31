@@ -120,8 +120,6 @@ impl Default for WindowConfig {
 pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowError> {
     use handler::Handler;
     use hotkey::hotkeys;
-    use icon::load_tray_icon;
-
     let boot = Instant::now();
     let event_loop = EventLoop::new()?;
     let texts_start = Instant::now();
@@ -138,10 +136,16 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
     // 启动全局热键监听线程 (None 表示平台不支持)
     let hotkey_rx = hotkeys::spawn().map(|(rx, _handle)| rx);
     // 安装系统托盘 (图标 + 菜单)。load_tray_icon 失败则降级到无托盘。
-    let tray = load_tray_icon(&config.logo_name).and_then(|icon| {
-        let menu = app.tray_menu();
-        tray::install_tray(icon, menu)
-    });
+    #[cfg(target_os = "windows")]
+    let tray = {
+        use icon::load_tray_icon;
+        load_tray_icon(&config.logo_name).and_then(|icon| {
+            let menu = app.tray_menu();
+            tray::install_tray(icon, menu)
+        })
+    };
+    #[cfg(not(target_os = "windows"))]
+    let tray = None;
     let tree = app.view();
     let mut handler = Handler::new(
         config,
