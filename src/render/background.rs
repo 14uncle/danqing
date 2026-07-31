@@ -598,6 +598,10 @@ impl BackgroundPipeline {
         let Some((from, to, fade)) = resolve_frame(frame, self.scene_bytes.len()) else {
             return;
         };
+        // 懒加载保障: 调用方未通过 set_frame 预载 (如 showcase 的静态背景) 时,
+        // 首次 draw 自动触发纹理上传;ensure_loaded 命中即 no-op, 不会重复加载。
+        self.ensure_loaded(from);
+        self.ensure_loaded(to);
         // 场景层动效参数 (雨/火/海/山/森林强度 + 动效时间 + 雨钟)。
         // time 取模 8s (雨/火/海频率对齐 MOTION_WRAP_SECS 公共周期);
         // rain_time 不取模 (山/森林雾漂移需要连续时间, 雨层 fract 自带 wrap)。

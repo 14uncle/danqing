@@ -3,8 +3,11 @@
 
 //! 窗口与托盘图标加载。
 //!
-//! - `load_window_icon`: 256x256 PNG, 窗口标题栏 / 任务栏缩略图
-//! - `load_tray_icon`: 16x16 PNG, 系统托盘图标 (Windows 任务栏首选尺寸)
+//! - `load_window_icon`: 256×256 PNG, 窗口标题栏 / 任务栏缩略图
+//! - `load_tray_icon`: 16×16 PNG, 系统托盘图标 (Windows 任务栏首选尺寸)
+//!
+//! 两个函数接受 logo 名称 (如 `"logo"` 或 `"pomodoro"`), 从
+//! `assets/logo/{name}_{size}.png` 加载对应尺寸的 PNG。
 //! - `apply_windows_undecorated_style`: Windows 无边框窗口的圆角 / 阴影
 //!
 //! 加载失败时记录日志并返 `None`, 窗口创建不会因此 panic。
@@ -39,12 +42,12 @@ pub(super) fn apply_windows_undecorated_style(window: &winit::window::Window) {
 
 /// 加载应用窗口图标。
 ///
-/// 尝试读取 `assets/logo/logo_256.png`;
+/// 读取 `assets/logo/{name}_256.png`;
 /// 失败时记录警告并返回 `None`, 避免窗口创建因图标问题而 panic。
-pub(super) fn load_window_icon() -> Option<Icon> {
+pub(super) fn load_window_icon(name: &str) -> Option<Icon> {
     let path = std::path::Path::new("assets")
         .join("logo")
-        .join("logo_256.png");
+        .join(format!("{name}_256.png"));
     match load_icon_from_png(&path) {
         Ok(icon) => Some(icon),
         Err(err) => {
@@ -56,13 +59,13 @@ pub(super) fn load_window_icon() -> Option<Icon> {
 
 /// 加载托盘图标 (16x16, Windows 任务栏首选尺寸)。
 ///
-/// 读取 `assets/logo/logo_16.png`; 失败时记录警告并返回 `None`。
+/// 读取 `assets/logo/{name}_16.png`; 失败时记录警告并返回 `None`。
 /// 返回 tray-icon 自身的 `Icon` 类型 (与 winit Icon 不通用)。
 #[cfg(target_os = "windows")]
-pub(super) fn load_tray_icon() -> Option<tray_icon::Icon> {
+pub(super) fn load_tray_icon(name: &str) -> Option<tray_icon::Icon> {
     let path = std::path::Path::new("assets")
         .join("logo")
-        .join("logo_16.png");
+        .join(format!("{name}_16.png"));
     match image::open(&path) {
         Ok(img) => {
             let rgba = img.into_rgba8();
@@ -91,6 +94,12 @@ mod tests {
         let path = PathBuf::from("assets").join("logo").join("logo_256.png");
         let icon = super::load_icon_from_png(&path);
         assert!(icon.is_ok(), "应能加载有效 PNG 图标：{icon:?}");
+    }
+
+    #[test]
+    fn load_window_icon_with_logo_name() {
+        let icon = super::load_window_icon("logo");
+        assert!(icon.is_some(), "应能通过名称 'logo' 加载窗口图标");
     }
 
     #[test]
