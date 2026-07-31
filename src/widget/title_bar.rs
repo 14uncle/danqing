@@ -767,8 +767,8 @@ impl Widget for TitleBar {
                 let py = cy + logo_size * 0.047;
 
                 // 分针 (长细, 3 点钟 = 15 分): 水平向右。
-                let min_len = logo_size * 0.273; // 70/256
-                let min_thick = logo_size * 0.08;
+                let min_len = logo_size * 0.234; // 60/256, 与 SVG 对齐
+                let min_thick = logo_size * 0.055; // dot-queue 最小可见粗度; 仍与环有间隙
                 self.push_axis_aligned_diagonal(
                     rects,
                     Point::new(cx, py),
@@ -777,9 +777,10 @@ impl Widget for TitleBar {
                     self.logo_dot_color,
                 );
 
-                // 时针 (短粗, 11 点过 1/4 ≈ 22.5° 左偏)。
+                // 时针 (短粗, 11 点过 1/4 ≈ 22.5° 左偏); 对角线 dot-queue 比水平
+                // 更容易锯齿, 粗度需略大于 SVG 的 stroke-width=10 以保证可辨。
                 let hour_len = logo_size * 0.195; // 50/256
-                let hour_thick = logo_size * 0.10;
+                let hour_thick = logo_size * 0.07; // dot-queue 对角线最小可辨粗度
                 self.push_axis_aligned_diagonal(
                     rects,
                     Point::new(cx, py),
