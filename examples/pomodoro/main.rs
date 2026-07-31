@@ -14,6 +14,7 @@
 
 mod ambient;
 mod audio;
+mod close_button;
 mod fader;
 mod flash;
 mod hint;
@@ -28,21 +29,22 @@ mod tray;
 mod example_log;
 
 use std::process::ExitCode;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use danqing::widget::{
-    self, Box as UiBox, Button, Center, Column, LogoKind, Node, Padding, Row, Stack, Text, TitleBar,
+    self, Box as UiBox, Button, Center, Column, LogoKind, Node, Padding, Row, Stack, Switcher,
+    Text, TitleBar,
 };
 use danqing::{
-    AnimationCtx, App, BackgroundConfig, BackgroundFrame, Color, Easing, Edges, LightTheme,
-    ScaleMode, ScenePalette, SceneTheme, Size, Theme, WindowAction, WindowConfig,
-    WindowEventSender, hotkey_ids, shortcut_for_id, tray_action_ids,
+    AnimationCtx, App, BackgroundConfig, BackgroundFrame, Color, Easing, Edges, Event, Key,
+    LightTheme, NamedKey, ScaleMode, ScenePalette, SceneTheme, Size, Theme, WindowAction,
+    WindowConfig, WindowEventSender, hotkey_ids, shortcut_for_id, tray_action_ids,
 };
 use fader::SceneFader;
 use flash::FlashOverlay;
 use hint::ShortcutHintOverlay;
 use scenes::SCENES;
-use state::{PomodoroState, RunState, load_state, save_state};
+use state::{PomodoroState, RunState, current_wall_secs, load_state, save_state};
 use timer::{Phase, Pomodoro, Run};
 use tray::build_menu;
 
@@ -60,6 +62,12 @@ const SAVE_THROTTLE: Duration = Duration::from_secs(1);
 
 /// 淡化缓动曲线 (淡入淡出两端柔和)。
 const FADE_EASING: Easing = Easing::EaseInOut;
+/// 设置面板卡片宽度。
+const SETTINGS_CARD_WIDTH: f32 = 300.0;
+/// 设置面板标题与关闭按钮间距。
+const SETTINGS_HEADER_GAP: f32 = 150.0;
+/// 设置面板步进器数值显示宽度。
+const STEPPER_VALUE_WIDTH: f32 = 72.0;
 
 /// 番茄钟应用状态。
 struct PomodoroApp {
@@ -102,6 +110,8 @@ struct PomodoroApp {
     window_sender: Option<WindowEventSender>,
     /// 窗口是否已最大化 (决定标题栏按钮图标 □/□□)。
     is_maximized: bool,
+    /// 设置面板是否打开。
+    settings_open: bool,
 }
 
 /// 应用消息。
@@ -111,8 +121,6 @@ enum Msg {
     StartPause,
     /// 跳过当前阶段，进入下一阶段。
     Skip,
-    /// 重置回专注 25:00 停止态。
-    Reset,
     /// 上一个场景。
     PrevScene,
     /// 下一个场景。
@@ -121,6 +129,22 @@ enum Msg {
     ToggleVisible,
     /// 退出应用 (全局热键 Ctrl+Shift+Q)。
     Quit,
+    /// 打开 / 关闭设置面板。
+    ToggleSettings,
+    /// 专注时长 +1 分钟。
+    IncFocus,
+    /// 专注时长 −1 分钟。
+    DecFocus,
+    /// 短休息时长 +1 分钟。
+    IncBreak,
+    /// 短休息时长 −1 分钟。
+    DecBreak,
+    /// 长休息时长 +1 分钟。
+    IncLongBreak,
+    /// 长休息时长 −1 分钟。
+    DecLongBreak,
+    /// 重置计时配置为默认值 (25/5/15)。
+    ResetConfig,
 }
 
 impl PomodoroApp {
@@ -147,6 +171,7 @@ impl PomodoroApp {
             rain_clock: 0.0,
             window_sender: None,
             is_maximized: false,
+            settings_open: false,
         }
     }
 
@@ -161,7 +186,19 @@ impl PomodoroApp {
         } else {
             None
         };
-        let timer = Pomodoro::restore(state.phase, run, remaining, deadline, state.completed_focus);
+        let saved_config = timer::TimerConfig {
+            focus_secs: state.focus_duration_secs,
+            break_secs: state.break_duration_secs,
+            long_break_secs: state.long_break_duration_secs,
+        };
+        let timer = Pomodoro::restore(
+            state.phase,
+            run,
+            remaining,
+            deadline,
+            state.completed_focus,
+            saved_config,
+        );
         let fader = if state.current_scene < SCENES.len() {
             SceneFader::new(state.current_scene, FADE_DURATION)
         } else {
@@ -196,6 +233,7 @@ impl PomodoroApp {
             rain_clock: 0.0,
             window_sender: None,
             is_maximized: false,
+            settings_open: false,
         }
     }
 
@@ -213,6 +251,7 @@ impl PomodoroApp {
 
     /// 应用当前状态为快照 (供 save_state 调用)。
     fn snapshot_state(&self) -> PomodoroState {
+        let config = self.timer.config();
         PomodoroState {
             phase: self.timer.phase(),
             run: RunState::from(self.timer.run()),
@@ -224,6 +263,9 @@ impl PomodoroApp {
             completed_focus: self.timer.completed_focus(),
             today_date: self.today_date.clone(),
             today_count: self.today_count,
+            focus_duration_secs: config.focus_secs,
+            break_duration_secs: config.break_secs,
+            long_break_duration_secs: config.long_break_secs,
         }
     }
 
@@ -243,14 +285,23 @@ impl PomodoroApp {
     fn theme(&self) -> SceneTheme {
         SceneTheme::new(self.palette())
     }
-}
 
-/// 当前 wall-clock Unix 秒 (失败时回落到 0, 不影响持久化逻辑)。
-fn current_wall_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+    /// 调整指定 phase 的时长 (秒级 delta, 约束到有效范围后写回 timer)。
+    fn adjust_config(&mut self, phase: Phase, delta_secs: i64) {
+        let mut config = *self.timer.config();
+        let target = match phase {
+            Phase::Focus => &mut config.focus_secs,
+            Phase::Break => &mut config.break_secs,
+            Phase::LongBreak => &mut config.long_break_secs,
+        };
+        // u64 的饱和加减
+        if delta_secs >= 0 {
+            *target = target.saturating_add(delta_secs as u64);
+        } else {
+            *target = target.saturating_sub((-delta_secs) as u64);
+        }
+        self.timer.update_config(config);
+    }
 }
 
 impl App for PomodoroApp {
@@ -263,7 +314,6 @@ impl App for PomodoroApp {
             Msg::Skip => {
                 self.timer.skip(self.now);
             }
-            Msg::Reset => self.timer.reset(),
             Msg::PrevScene => {
                 let target = (self.fader.current() + SCENES.len() - 1) % SCENES.len();
                 self.fader.switch_to(target, self.now);
@@ -282,6 +332,23 @@ impl App for PomodoroApp {
                     sender.quit();
                 }
             }
+            Msg::ToggleSettings => {
+                log::info!(
+                    "ToggleSettings: before={}, after={}",
+                    self.settings_open,
+                    !self.settings_open
+                );
+                self.settings_open = !self.settings_open;
+            }
+            Msg::IncFocus => self.adjust_config(Phase::Focus, 60),
+            Msg::DecFocus => self.adjust_config(Phase::Focus, -60),
+            Msg::IncBreak => self.adjust_config(Phase::Break, 60),
+            Msg::DecBreak => self.adjust_config(Phase::Break, -60),
+            Msg::IncLongBreak => self.adjust_config(Phase::LongBreak, 60),
+            Msg::DecLongBreak => self.adjust_config(Phase::LongBreak, -60),
+            Msg::ResetConfig => {
+                self.timer.update_config(timer::TimerConfig::default());
+            }
         }
     }
 
@@ -289,10 +356,35 @@ impl App for PomodoroApp {
         let t = self.theme();
         widget::node(
             Stack::new()
-                .child(content_column(t))
+                .child(
+                    Switcher::new()
+                        .child(content_column(t))
+                        .child(
+                            // 额外包裹一层 Padding 避免焦点路径
+                            // 在主面板和设置面板间碰撞：
+                            // 同索引路径会命中不同组件导致
+                            // FocusOut 无法送达隐藏面板内的旧焦点。
+                            Padding::new(Edges::ZERO, settings_panel(t)),
+                        )
+                        .bind(|s: &PomodoroApp| if s.settings_open { 1 } else { 0 }),
+                )
                 .child(flash_overlay_widget())
                 .child(shortcut_hint_overlay_widget()),
         )
+    }
+
+    fn event(&mut self, event: &Event) {
+        if let Event::Key {
+            key: Key::Named(NamedKey::Escape),
+            pressed: true,
+            ..
+        } = event
+        {
+            if self.settings_open {
+                self.settings_open = false;
+                self.state_dirty = true;
+            }
+        }
     }
 
     fn tick(&mut self, ctx: &AnimationCtx) {
@@ -594,9 +686,109 @@ fn control_pill(t: SceneTheme) -> impl widget::Widget {
                 .child(ghost_button(t, "前", Msg::PrevScene))
                 .child(primary_button(t))
                 .child(ghost_button(t, "跳", Msg::Skip))
-                .child(ghost_button(t, "重置", Msg::Reset))
-                .child(ghost_button(t, "后", Msg::NextScene)),
+                .child(ghost_button(t, "后", Msg::NextScene))
+                .child(ghost_button(t, "设置", Msg::ToggleSettings)),
         ))
+}
+
+/// 设置面板浮层：居中玻璃卡片，调整专注/短休/长休时长。
+fn settings_panel(t: SceneTheme) -> impl widget::Widget {
+    // 半透明遮罩 + 居中玻璃卡片
+    Stack::new()
+        .child(UiBox::new(Color::rgba(0.0, 0.0, 0.0, 0.35)).radius(0.0))
+        .child(
+            Center::new(
+                UiBox::new(Color::TRANSPARENT)
+                    .bind_color(|s: &PomodoroApp| s.palette().surface)
+                    .radius(t.radius_lg())
+                    .width(SETTINGS_CARD_WIDTH)
+                    .child(Padding::new(
+                        Edges::all(t.spacing_xl()),
+                        Column::new()
+                            .gap(t.spacing_lg())
+                            .child(settings_header(t))
+                            .child(stepper_row(
+                                t,
+                                "专注时长",
+                                |s: &PomodoroApp| s.timer.config().focus_secs / 60,
+                                Msg::DecFocus,
+                                Msg::IncFocus,
+                            ))
+                            .child(stepper_row(
+                                t,
+                                "\u{3000}短休息",
+                                |s: &PomodoroApp| s.timer.config().break_secs / 60,
+                                Msg::DecBreak,
+                                Msg::IncBreak,
+                            ))
+                            .child(stepper_row(
+                                t,
+                                "\u{3000}长休息",
+                                |s: &PomodoroApp| s.timer.config().long_break_secs / 60,
+                                Msg::DecLongBreak,
+                                Msg::IncLongBreak,
+                            ))
+                            .child(ghost_button(t, "重置计时", Msg::ResetConfig))
+                            .child(
+                                Text::new("变更在下一阶段生效")
+                                    .font_size(t.font_size_small())
+                                    .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
+                            ),
+                    )),
+            )
+            .fill_max(),
+        )
+}
+
+/// 设置面板标题行："计时设置" + 固定间距 + 关闭按钮。
+fn settings_header(t: SceneTheme) -> impl widget::Widget {
+    Row::new()
+        .cross_stretch()
+        .child(Center::new(
+            Text::new("计时设置")
+                .font_size(t.font_size_heading())
+                .bind_color(|s: &PomodoroApp| s.palette().text_primary),
+        ))
+        .child(
+            UiBox::new(Color::TRANSPARENT)
+                .width(SETTINGS_HEADER_GAP)
+                .height(1.0),
+        )
+        .child(
+            close_button::CloseButton::new()
+                .on_click(|| Msg::ToggleSettings)
+                .bind_color(|s: &PomodoroApp| s.palette().text_primary)
+                .bind_hover_color(|s: &PomodoroApp| s.palette().accent),
+        )
+}
+
+/// 单行步进控件：标签 + [-] + 数值 + [+]
+fn stepper_row(
+    t: SceneTheme,
+    label: &'static str,
+    value_fn: fn(&PomodoroApp) -> u64,
+    dec_msg: Msg,
+    inc_msg: Msg,
+) -> impl widget::Widget {
+    Row::new()
+        .cross_stretch()
+        .gap(t.spacing_xs())
+        .child(Center::new(
+            Text::new(label)
+                .font_size(t.font_size_body())
+                .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
+        ))
+        .child(Center::new(ghost_button(t, "-", dec_msg)))
+        .child(
+            UiBox::new(Color::TRANSPARENT)
+                .width(STEPPER_VALUE_WIDTH)
+                .child(Center::new(
+                    Text::bind(move |s: &PomodoroApp| format!("{} 分钟", value_fn(s)))
+                        .font_size(t.font_size_body())
+                        .bind_color(|s: &PomodoroApp| s.palette().text_primary),
+                )),
+        )
+        .child(Center::new(ghost_button(t, "+", inc_msg)))
 }
 
 fn main() -> ExitCode {
@@ -1181,5 +1373,47 @@ mod tests {
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_secs(2));
         app.tick(&ctx);
         assert_eq!(app.today_count, 2, "同日不得误清");
+    }
+
+    #[test]
+    fn toggle_settings_flips_state() {
+        let mut app = PomodoroApp::new_default();
+        assert!(!app.settings_open);
+        app.update(Msg::ToggleSettings);
+        assert!(app.settings_open);
+        app.update(Msg::ToggleSettings);
+        assert!(!app.settings_open);
+    }
+
+    #[test]
+    fn adjust_focus_increases_by_one_minute() {
+        let mut app = PomodoroApp::new_default();
+        let original = app.timer.config().focus_secs;
+        app.update(Msg::IncFocus);
+        assert_eq!(app.timer.config().focus_secs, original + 60);
+    }
+
+    #[test]
+    fn adjust_focus_clamps_to_max() {
+        let mut app = PomodoroApp::new_default();
+        app.timer.update_config(timer::TimerConfig {
+            focus_secs: 10_800,
+            break_secs: 300,
+            long_break_secs: 900,
+        });
+        app.update(Msg::IncFocus);
+        assert_eq!(app.timer.config().focus_secs, 10_800);
+    }
+
+    #[test]
+    fn adjust_focus_clamps_to_min() {
+        let mut app = PomodoroApp::new_default();
+        app.timer.update_config(timer::TimerConfig {
+            focus_secs: 60,
+            break_secs: 300,
+            long_break_secs: 900,
+        });
+        app.update(Msg::DecFocus);
+        assert_eq!(app.timer.config().focus_secs, 60);
     }
 }
