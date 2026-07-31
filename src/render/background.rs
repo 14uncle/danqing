@@ -60,18 +60,88 @@ pub struct BackgroundFrame {
     pub fade: f32,
     /// 本帧清屏色 (随场景基调流动)。
     pub clear_color: crate::Color,
+    /// 动效时间 (秒, 注入时间轴; 默认 0, 经 [`BackgroundFrame::with_motion`] 设置)。
+    pub time: f32,
+    /// 雨丝动效强度 (0.0 ..= 1.0; 默认 0 = 无动效, shader 输出与静态一致)。
+    pub rain_intensity: f32,
+    /// 篝火动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨并存, 交叉淡化期间可同时非零)。
+    pub fire_intensity: f32,
+    /// 海动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火并存, 交叉淡化期间可同时非零)。
+    pub sea_intensity: f32,
+    /// 雨钟 (秒): 雨丝下落时间轴 + 山/森林雾漂移时间轴, 暂停时冻结 — 雨丝定格可见 (2026-07-29 用户裁定)。
+    /// 默认 0, 经 [`BackgroundFrame::with_rain_time`] 设置, 直接上传不取模
+    /// (山/森林 mist_pattern 需要连续时间, wrap 会每 8s 重置跳变; 雨层 fract 自带 wrap 无需额外处理)。
+    pub rain_time: f32,
+    /// 山动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火/海并存, 交叉淡化期间可同时非零)。
+    pub mountain_intensity: f32,
+    /// 森林动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火/海/山并存, 交叉淡化期间可同时非零)。
+    pub forest_intensity: f32,
 }
 
 impl BackgroundFrame {
-    /// 构造每帧背景状态;`fade` 夹到 0..1。
+    /// 构造每帧背景状态;`fade` 夹到 0..1, 动效参数默认为 0 (无动效)。
     pub fn new(from: usize, to: usize, fade: f32, clear_color: crate::Color) -> Self {
         Self {
             from,
             to,
             fade: fade.clamp(0.0, 1.0),
             clear_color,
+            time: 0.0,
+            rain_intensity: 0.0,
+            fire_intensity: 0.0,
+            sea_intensity: 0.0,
+            rain_time: 0.0,
+            mountain_intensity: 0.0,
+            forest_intensity: 0.0,
         }
     }
+
+    /// 设置场景动效参数 (时间秒 + 雨丝强度); 强度夹到 0..1。
+    pub fn with_motion(mut self, time: f32, rain_intensity: f32) -> Self {
+        self.time = time;
+        self.rain_intensity = rain_intensity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 设置篝火动效强度; 强度夹到 0..1。
+    pub fn with_fire(mut self, fire_intensity: f32) -> Self {
+        self.fire_intensity = fire_intensity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 设置海动效强度; 强度夹到 0..1。
+    pub fn with_sea(mut self, sea_intensity: f32) -> Self {
+        self.sea_intensity = sea_intensity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 设置山动效强度; 强度夹到 0..1。
+    pub fn with_mountain(mut self, mountain_intensity: f32) -> Self {
+        self.mountain_intensity = mountain_intensity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 设置森林动效强度; 强度夹到 0..1。
+    pub fn with_forest(mut self, forest_intensity: f32) -> Self {
+        self.forest_intensity = forest_intensity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 设置雨钟 (雨丝下落时间轴, 秒); 推进/冻结节奏由调用方控制。
+    pub fn with_rain_time(mut self, rain_time: f32) -> Self {
+        self.rain_time = rain_time;
+        self
+    }
+}
+
+/// 场景动效时间取模周期 (秒): 与 background.wgsl 雨/火/海效果频率的公共周期一致
+/// (雨丝速度 0.125/0.25/0.375、火/海效频率取 1/8 Hz 整数倍 → 公共周期 8s)。
+/// 上传 uniform 前取模, 避免常驻数小时后 f32 时间精度退化导致相位抖动。
+const MOTION_WRAP_SECS: f32 = 8.0;
+
+/// 动效时间取模 (纯逻辑): 折回 `[0, MOTION_WRAP_SECS)`; 负值按欧几里得余数处理。
+fn wrap_motion_time(time: f32) -> f32 {
+    time.rem_euclid(MOTION_WRAP_SECS)
 }
 
 /// 将每帧背景状态解析为合法的场景索引对 (纯逻辑, 便于测试)。
@@ -122,6 +192,9 @@ impl BackgroundConfig {
         self
     }
 }
+
+/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐, 覆盖 9 字段 × 4B 有效数据)。
+pub(crate) const UNIFORM_BUFFER_BYTES: u64 = 48;
 
 /// 单个已上传的背景纹理。
 #[allow(dead_code)]
@@ -221,7 +294,11 @@ impl BackgroundPipeline {
         let uniform_bufs: [wgpu::Buffer; LAYER_COUNT] = std::array::from_fn(|_| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("background uniform buffer"),
-                size: 16,
+                // WGSL uniform struct 自动 16-byte 对齐, 9×f32 = 36B 有效数据
+                // 被 WGSL 当作 48B 处理 (尾部 12B padding, shader 不读)。
+                // 常量 UNIFORM_BUFFER_BYTES 与 UNIFORM_FIELDS 一同被回归护栏覆盖
+                // (uniform_buffer_size_covers_wgsl_struct 测试)。
+                size: UNIFORM_BUFFER_BYTES,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
@@ -325,9 +402,9 @@ impl BackgroundPipeline {
                     scene_dims.push(dims);
                 }
                 None => {
-                    // 预读失败: 占位空字节, 后续 ensure_loaded 会再次失败
-                    // 并按 log+panic 路径暴露, 不静默跳过避免索引错位。
-                    log::warn!("场景图预读失败, 将在按需加载时再次尝试: {}", path.display());
+                    // 预读失败: 占位空字节保持索引对齐, ensure_loaded 静默
+                    // 跳过, draw 端走缺失分支降级 (clear_color 透出)。
+                    log::warn!("场景图预读失败, 该场景将不显示: {}", path.display());
                     scene_bytes.push(Vec::new());
                     scene_dims.push((0, 0));
                 }
@@ -400,10 +477,16 @@ impl BackgroundPipeline {
             self.lru_order.push_front(idx);
             return;
         }
-        // 未命中: decode + 创建纹理。
+        // 未命中: decode + 创建纹理 (PNG 字节在此才解码, 见 read_scene_bytes)。
         let bytes = self.scene_bytes[idx].clone();
         let dims = self.scene_dims[idx];
-        let tex = self.create_scene_texture(&bytes, dims, idx);
+        let Some(tex) = self.create_scene_texture(&bytes, dims, idx) else {
+            // 解码失败: 置空槽位, 后续 ensure_loaded 走空字节静默守卫,
+            // 避免每帧重试解码 + 刷 warn 日志 (set_frame 是每帧调用的)。
+            // 字节不可变, 失败槽位永远不可能之后解码成功, 置空无损。
+            self.scene_bytes[idx] = Vec::new();
+            return;
+        };
         // 缓存已满时淘汰 LRU 尾。
         while self.scene_cache.len() >= SCENE_CACHE_CAPACITY {
             if let Some(evicted) = self.lru_order.pop_back() {
@@ -416,13 +499,21 @@ impl BackgroundPipeline {
         self.lru_order.push_front(idx);
     }
 
-    /// 从已预读的字节创建 wgpu 纹理 (懒加载的实际解码上传)。
+    /// 从预读的 PNG 字节解码并创建 wgpu 纹理 (懒加载的实际解码上传)。
+    /// 解码失败返回 None (调用方跳过插入, draw 端走缺失分支降级)。
     fn create_scene_texture(
         &self,
         bytes: &[u8],
         dims: (u32, u32),
         idx: usize,
-    ) -> BackgroundTexture {
+    ) -> Option<BackgroundTexture> {
+        let img = match image::load_from_memory(bytes) {
+            Ok(img) => img.into_rgba8(),
+            Err(err) => {
+                log::warn!("场景图解码失败 scene[{idx}]: {err}");
+                return None;
+            }
+        };
         let (width, height) = dims;
         let size = wgpu::Extent3d {
             width,
@@ -467,7 +558,7 @@ impl BackgroundPipeline {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            bytes,
+            &img,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * width),
@@ -475,13 +566,13 @@ impl BackgroundPipeline {
             },
             size,
         );
-        BackgroundTexture {
+        Some(BackgroundTexture {
             texture,
             view,
             bind_group,
             width,
             height,
-        }
+        })
     }
 
     /// 绘制背景层 (在 RectBatch 之前调用)。
@@ -496,10 +587,33 @@ impl BackgroundPipeline {
             to: 0,
             fade: 0.0,
             clear_color: target.clear_color,
+            time: 0.0,
+            rain_intensity: 0.0,
+            fire_intensity: 0.0,
+            sea_intensity: 0.0,
+            rain_time: 0.0,
+            mountain_intensity: 0.0,
+            forest_intensity: 0.0,
         });
         let Some((from, to, fade)) = resolve_frame(frame, self.scene_bytes.len()) else {
             return;
         };
+        // 懒加载保障: 调用方未通过 set_frame 预载 (如 showcase 的静态背景) 时,
+        // 首次 draw 自动触发纹理上传;ensure_loaded 命中即 no-op, 不会重复加载。
+        self.ensure_loaded(from);
+        self.ensure_loaded(to);
+        // 场景层动效参数 (雨/火/海/山/森林强度 + 动效时间 + 雨钟)。
+        // time 取模 8s (雨/火/海频率对齐 MOTION_WRAP_SECS 公共周期);
+        // rain_time 不取模 (山/森林雾漂移需要连续时间, 雨层 fract 自带 wrap)。
+        let motion = [
+            frame.rain_intensity,
+            wrap_motion_time(frame.time),
+            frame.fire_intensity,
+            frame.sea_intensity,
+            frame.rain_time, // 非 wrap: 山/森林雾漂移需要连续时间, 避免 8s 重置跳变
+            frame.mountain_intensity,
+            frame.forest_intensity,
+        ];
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("background pass"),
@@ -533,12 +647,12 @@ impl BackgroundPipeline {
         let tex_to = self.scene_cache.get(&to);
         if let (Some(tex_from), Some(tex_to)) = (tex_from, tex_to) {
             self.draw_layer(
-                &mut pass, queue, target, 0, tex_from, tex_to, self.scale, 1.0, fade,
+                &mut pass, queue, target, 0, tex_from, tex_to, self.scale, 1.0, fade, motion,
             );
         } else if let Some(only) = tex_from.or(tex_to) {
             // 仅一端就绪: 单图绘制, fade=0 (无淡化)
             self.draw_layer(
-                &mut pass, queue, target, 0, only, only, self.scale, 1.0, 0.0,
+                &mut pass, queue, target, 0, only, only, self.scale, 1.0, 0.0, motion,
             );
         } // 两端都缺失: 不画场景层, 让 clear_color 透出
         if let Some(glow) = &self.glow {
@@ -552,6 +666,7 @@ impl BackgroundPipeline {
                 ScaleMode::Cover,
                 self.glow_opacity,
                 0.0,
+                [0.0; 7],
             );
         }
         if let Some(noise) = &self.noise {
@@ -565,11 +680,13 @@ impl BackgroundPipeline {
                 ScaleMode::Stretch,
                 self.noise_opacity,
                 0.0,
+                [0.0; 7],
             );
         }
     }
 
     /// 绘制单个叠加层: 上传该层顶点与 uniform, 绑定资源后绘制。
+    /// `motion` = [雨丝强度, 取模后的动效时间, 篝火强度, 海强度, 取模后的雨钟, 山强度, 森林强度], 仅场景层 (层 0) 非零。
     #[allow(clippy::too_many_arguments)]
     fn draw_layer(
         &self,
@@ -582,6 +699,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
+        motion: [f32; 7],
     ) {
         // 淡化要求 from/to 同尺寸 (场景生成管线保证统一画布);
         // UV 按 from 纹理计算, 尺寸不一致时退回只画 from。
@@ -601,6 +719,7 @@ impl BackgroundPipeline {
             scale,
             opacity,
             fade,
+            motion,
         );
         pass.set_bind_group(0, &self.uniform_binds[layer], &[]);
         pass.set_bind_group(1, &tex_from.bind_group, &[]);
@@ -610,6 +729,8 @@ impl BackgroundPipeline {
     }
 
     /// 按缩放模式计算顶点与 UV, 写入指定层的顶点区段与 uniform buffer。
+    /// uniform 布局 (36B 有效, WGSL 16B 对齐为 48B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, 山强度, 森林强度]。
+    /// buffer 实际创建 48B (与 WGSL 自动对齐一致, 尾部 12B 是 padding, shader 不读)。
     #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
@@ -621,6 +742,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
+        motion: [f32; 7],
     ) {
         let screen_w = target.width;
         let screen_h = target.height;
@@ -687,21 +809,28 @@ impl BackgroundPipeline {
         queue.write_buffer(
             &self.uniform_bufs[layer],
             0,
-            bytemuck::cast_slice(&[opacity, fade, 0.0, 0.0f32]),
+            bytemuck::cast_slice(&[
+                opacity, fade, motion[0], motion[1], motion[2], motion[3], motion[4], motion[5],
+                motion[6],
+            ]),
         );
     }
 }
 
-/// 读取 PNG 文件, 解析为 RGBA8 字节与 (宽, 高); 失败时返回 None 并记录警告。
+/// 读取场景 PNG 文件字节与尺寸 (尺寸从内存字节解析头, 不解码); 失败时返回 None。
 ///
-/// 与 `load_texture` 不同: 本函数只 decode PNG, 不接触 wgpu 设备, 是
-/// `BackgroundPipeline::new` 阶段预读场景字节的纯 CPU 操作。
-/// `BackgroundTexture` 的真正创建推迟到 `ensure_loaded` 懒加载路径。
+/// 与 `load_texture` 不同: 本函数只读原始 PNG 字节 (5 场景合计 ~0.8MB),
+/// 不接触 wgpu 设备, 也不做 RGBA 解码 — 解码推迟到 `ensure_loaded`
+/// 懒加载路径, 避免启动期为 5 张图常驻 ~31MB 解码缓冲。
+/// 尺寸与字节同源 (单次文件读取), 不存在两次读文件之间被替换的不一致窗口。
 fn read_scene_bytes(path: &Path) -> Option<(Vec<u8>, (u32, u32))> {
     let data = std::fs::read(path).ok()?;
-    let img = image::load_from_memory(&data).ok()?.into_rgba8();
-    let (width, height) = img.dimensions();
-    Some((img.into_raw(), (width, height)))
+    let dims = image::ImageReader::new(std::io::Cursor::new(&data))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    Some((data, dims))
 }
 
 /// 加载 PNG 并创建纹理与 bind group; 失败时返回 None 并记录警告。
@@ -846,6 +975,169 @@ mod tests {
         assert_eq!(cfg.scenes.len(), 3);
         assert!(cfg.image.is_none());
         assert_eq!(cfg.scale, ScaleMode::Cover);
+    }
+
+    #[test]
+    fn background_frame_motion_defaults_zero() {
+        let f = BackgroundFrame::new(0, 1, 0.5, crate::Color::BLACK);
+        assert_eq!(f.time, 0.0);
+        assert_eq!(f.rain_intensity, 0.0);
+        assert_eq!(f.fire_intensity, 0.0);
+        assert_eq!(f.sea_intensity, 0.0);
+        assert_eq!(f.mountain_intensity, 0.0);
+        assert_eq!(f.forest_intensity, 0.0);
+    }
+
+    #[test]
+    fn with_motion_sets_time_and_clamps_intensity() {
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_motion(12.5, 1.7);
+        assert!((f.time - 12.5).abs() < f32::EPSILON);
+        assert!((f.rain_intensity - 1.0).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_motion(3.0, -0.2);
+        assert_eq!(f.rain_intensity, 0.0);
+    }
+
+    #[test]
+    fn with_fire_sets_and_clamps_intensity() {
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_fire(0.8);
+        assert!((f.fire_intensity - 0.8).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_fire(1.7);
+        assert!((f.fire_intensity - 1.0).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_fire(-0.2);
+        assert_eq!(f.fire_intensity, 0.0);
+    }
+
+    #[test]
+    fn with_sea_sets_and_clamps_intensity() {
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_sea(0.8);
+        assert!((f.sea_intensity - 0.8).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_sea(1.7);
+        assert!((f.sea_intensity - 1.0).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_sea(-0.2);
+        assert_eq!(f.sea_intensity, 0.0);
+    }
+
+    #[test]
+    fn with_motion_and_with_fire_are_independent() {
+        // 雨/火是两个并存标量 (交叉淡化期间可同时非零), 链式设置互不覆盖。
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c)
+            .with_motion(2.5, 0.4)
+            .with_fire(0.6);
+        assert!((f.time - 2.5).abs() < f32::EPSILON);
+        assert!((f.rain_intensity - 0.4).abs() < f32::EPSILON);
+        assert!((f.fire_intensity - 0.6).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn with_sea_is_independent_of_rain_and_fire() {
+        // 雨/火/海是三个并存标量 (交叉淡化期间两两可同时非零), 链式设置互不覆盖。
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c)
+            .with_motion(2.5, 0.4)
+            .with_fire(0.6)
+            .with_sea(0.7);
+        assert!((f.time - 2.5).abs() < f32::EPSILON);
+        assert!((f.rain_intensity - 0.4).abs() < f32::EPSILON);
+        assert!((f.fire_intensity - 0.6).abs() < f32::EPSILON);
+        assert!((f.sea_intensity - 0.7).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn with_mountain_sets_and_clamps_intensity() {
+        // 山效果是并存标量; 强度夹到 [0, 1]。
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_mountain(0.8);
+        assert!((f.mountain_intensity - 0.8).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_mountain(1.7);
+        assert!((f.mountain_intensity - 1.0).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_mountain(-0.2);
+        assert_eq!(f.mountain_intensity, 0.0);
+    }
+
+    #[test]
+    fn with_forest_sets_and_clamps_intensity() {
+        // 森林效果是并存标量; 强度夹到 [0, 1]。
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_forest(0.65);
+        assert!((f.forest_intensity - 0.65).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_forest(1.5);
+        assert!((f.forest_intensity - 1.0).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_forest(-0.3);
+        assert_eq!(f.forest_intensity, 0.0);
+    }
+
+    #[test]
+    fn with_mountain_is_independent_of_rain_fire_sea_forest() {
+        // 山是第五个并存标量 (与雨/火/海/森林并存, 交叉淡化期间可同时非零)。
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c)
+            .with_motion(2.5, 0.4)
+            .with_fire(0.6)
+            .with_sea(0.7)
+            .with_mountain(0.5)
+            .with_forest(0.55);
+        assert!((f.time - 2.5).abs() < f32::EPSILON);
+        assert!((f.rain_intensity - 0.4).abs() < f32::EPSILON);
+        assert!((f.fire_intensity - 0.6).abs() < f32::EPSILON);
+        assert!((f.sea_intensity - 0.7).abs() < f32::EPSILON);
+        assert!((f.mountain_intensity - 0.5).abs() < f32::EPSILON);
+        assert!((f.forest_intensity - 0.55).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn with_rain_time_sets_clock_and_defaults_zero() {
+        // 雨钟独立于动效时间 (雨丝暂停定格可见, 走自己的冻结时间轴)。
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c);
+        assert_eq!(f.rain_time, 0.0, "雨钟默认 0 (静态一致)");
+        let f = f.with_motion(2.5, 0.4).with_rain_time(1.75);
+        assert!((f.time - 2.5).abs() < f32::EPSILON);
+        assert!((f.rain_time - 1.75).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn wrap_motion_time_wraps_and_stays_positive() {
+        assert!(wrap_motion_time(0.0).abs() < f32::EPSILON);
+        assert!(wrap_motion_time(MOTION_WRAP_SECS).abs() < f32::EPSILON);
+        assert!((wrap_motion_time(9.5) - 1.5).abs() < 1e-6);
+        assert!((wrap_motion_time(-0.5) - (MOTION_WRAP_SECS - 0.5)).abs() < 1e-6);
+        // 常驻数小时的大时间值仍折回周期内 (f32 精度护栏)。
+        assert!(wrap_motion_time(36000.0) < MOTION_WRAP_SECS);
+    }
+
+    #[test]
+    fn uniform_buffer_size_covers_wgsl_struct() {
+        // 回归护栏: WGSL `Uniforms` struct 字段数 (UNIFORM_FIELDS) × 4B 必须
+        // ≤ buffer 大小 (UNIFORM_BUFFER_BYTES),且 buffer 必须 16B 对齐
+        // (WGSL uniform 规范)。这是 2026-07-30 山/森林动效漏改触发的护栏 —
+        // 之前 buffer 留 32B 但 cast_slice 写 36B,wgpu 启动即 panic。
+        const UNIFORM_FIELDS: usize = 9;
+        let payload_bytes = UNIFORM_FIELDS * std::mem::size_of::<f32>();
+        assert!(
+            UNIFORM_BUFFER_BYTES as usize >= payload_bytes,
+            "uniform buffer ({}B) 必须 ≥ 有效 payload ({}B = {} 字段 × f32)",
+            UNIFORM_BUFFER_BYTES,
+            payload_bytes,
+            UNIFORM_FIELDS
+        );
+        assert_eq!(
+            UNIFORM_BUFFER_BYTES % 16,
+            0,
+            "uniform buffer 必须 16B 对齐 (WGSL 自动把 struct 尺寸上取 16 倍数)"
+        );
     }
 
     #[test]

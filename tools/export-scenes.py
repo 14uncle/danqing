@@ -4,7 +4,7 @@
 Five procedural scenes spanning dark/bright families:
     bonfire  篝火 (dark, warm fire glow)
     sea      海   (bright, cyan)
-    rain     雨   (gray-blue, streaks)
+    rain     雨   (gray-blue)
     mountain 山   (neutral dusk, ridgelines)
     forest   森林 (misty conifer green, treelines + fog bands)
 
@@ -41,7 +41,7 @@ SCENES_RS = REPO_ROOT / "examples" / "pomodoro" / "scenes.rs"
 WIDTH, HEIGHT = 1536, 1024
 SIZE = (WIDTH, HEIGHT)
 
-# Hard-edged elements (ridges/streaks/embers) render at SS x and LANCZOS
+# Hard-edged elements (ridges/embers) render at SS x and LANCZOS
 # downsample back: cheap SSAA — Pillow ImageDraw has no anti-aliasing,
 # and window Cover upscale (e.g. 1920x1080 maximized) makes baked-in
 # staircase edges painfully visible. Smooth elements (gradient/glow/veil)
@@ -268,28 +268,6 @@ def build_mist(bands: list[dict]) -> Image.Image:
     return overlay.filter(ImageFilter.GaussianBlur(radius=18))
 
 
-def build_streaks(count: int, color: tuple, alpha: int, seed: int) -> Image.Image:
-    """Rain streaks: faint short diagonal lines. SS x + downsample for AA."""
-    w, h = WIDTH * SS, HEIGHT * SS
-    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    state = seed
-
-    def rnd() -> float:
-        nonlocal state
-        state = (state * 1103515245 + 12345) & 0x7FFFFFFF
-        return (state >> 16) / 32768.0
-
-    for _ in range(count):
-        x = rnd() * w
-        y = rnd() * h
-        length = (24 + rnd() * 48) * SS
-        dx = length * 0.18
-        draw.line([(x, y), (x + dx, y + length)], fill=(*color, alpha), width=2 * SS)
-    overlay = overlay.resize(SIZE, Image.LANCZOS)
-    return overlay.filter(ImageFilter.GaussianBlur(radius=1.0))
-
-
 def build_embers(count: int, color: tuple, seed: int) -> Image.Image:
     """Bonfire embers: tiny bright dots rising above the glow. SS x for AA."""
     w, h = WIDTH * SS, HEIGHT * SS
@@ -304,7 +282,7 @@ def build_embers(count: int, color: tuple, seed: int) -> Image.Image:
 
     for _ in range(count):
         x = w * (0.30 + rnd() * 0.40)
-        y = h * (0.35 + rnd() * 0.35)
+        y = h * (0.55 + rnd() * 0.33)
         r = (1 + rnd() * 2.2) * SS
         a = int(60 + rnd() * 140)
         draw.ellipse([x - r, y - r, x + r, y + r], fill=(*color, a))
@@ -343,7 +321,7 @@ SCENES = [
             (0.75, (48, 24, 12)),
             (1.00, (24, 12, 8)),
         ],
-        "glow": {"color": (255, 159, 67), "center": (0.5, 0.74), "radius": 0.52, "peak": 120},
+        "glow": {"color": (255, 159, 67), "center": (0.5, 0.86), "radius": 0.48, "peak": 120},
         "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 60},
         "embers": {"count": 42, "color": (255, 190, 110), "seed": 0xB0E1},
         "palette": {
@@ -397,7 +375,8 @@ SCENES = [
         ],
         "glow": {"color": (210, 224, 235), "center": (0.32, 0.22), "radius": 0.5, "peak": 50},
         "veil": {"color": (10, 14, 18), "center": (0.5, 0.48), "radius": 0.55, "peak": 45},
-        "streaks": {"count": 320, "color": (215, 228, 238), "alpha": 52, "seed": 0x9A17},
+        # 雨丝不烘焙: 2026-07-29 用户裁定静态图去丝, 雨全部由运行时程序化
+        # 雨幕渲染 (background.wgsl rain_overlay; 暂停雨钟冻结、雨丝定格可见)。
         "palette": {
             "base": (82, 95, 107),
             "accent": (127, 179, 217),
@@ -457,12 +436,10 @@ SCENES = [
             {"base_y": 0.88, "h_min": 0.12, "h_max": 0.22, "color": (36, 56, 45),
              "alpha": 255, "blur": 1.0, "seed": 0xF03},
         ],
-        "mist": [
-            # 上层雾: 天光与远林之间。
-            {"y": 0.30, "height": 0.18, "color": (206, 220, 206), "alpha": 55},
-            # 林间雾: 中林与近林之间。
-            {"y": 0.62, "height": 0.14, "color": (188, 205, 189), "alpha": 42},
-        ],
+        # 雾不烘焙: 2026-07-30 用户裁定森林静态图去底雾, 雾全部由运行时程序化
+        # 渲染 (background.wgsl forest_mist, 3 层 2D 各向同性 + 风驱, 暂停 500ms
+        # 沉降回裸静态图 — 雨场景改造范式)。 对比 export-scenes.py 雨配置: 雨
+        # 丝不烘焙, 同样全运行时。
         "palette": {
             "base": (50, 72, 59),
             "accent": (172, 198, 158),
@@ -489,9 +466,6 @@ def build_scene(cfg: dict) -> Image.Image:
         img = Image.alpha_composite(img, build_trees(cfg["trees"]))
     if "mist" in cfg:
         img = Image.alpha_composite(img, build_mist(cfg["mist"]))
-    if "streaks" in cfg:
-        s = cfg["streaks"]
-        img = Image.alpha_composite(img, build_streaks(s["count"], s["color"], s["alpha"], s["seed"]))
     if "embers" in cfg:
         e = cfg["embers"]
         img = Image.alpha_composite(img, build_embers(e["count"], e["color"], e["seed"]))

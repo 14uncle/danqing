@@ -94,4 +94,10 @@ pub trait App: Any {
     fn tray_menu(&self) -> Menu {
         Menu::new()
     }
+
+    /// 窗口最大化状态发生变化 (通过标题栏按钮 / 双击 / Win+↑↓ / 拖拽顶缘等
+    /// 任意入口触发)。`true` 表示窗口已最大化，`false` 表示已还原。
+    ///
+    /// 默认空实现：不需要区分最大化 / 还原图标的应用无需关心。
+    fn maximized_changed(&mut self, _is_maximized: bool) {}
 }

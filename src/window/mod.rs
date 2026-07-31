@@ -94,6 +94,8 @@ pub struct WindowConfig {
     pub border_thickness: f32,
     /// 关闭请求策略：默认 [`CloseBehavior::Exit`] (关闭即退出进程)。
     pub close_behavior: CloseBehavior,
+    /// LOGO 名称 (对应 `assets/logo/{name}_*.png`)。默认 `"logo"`。
+    pub logo_name: String,
 }
 
 impl Default for WindowConfig {
@@ -109,6 +111,7 @@ impl Default for WindowConfig {
             border_radius: 12.0,
             border_thickness: 1.0,
             close_behavior: CloseBehavior::Exit,
+            logo_name: "logo".into(),
         }
     }
 }
@@ -135,7 +138,7 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
     // 启动全局热键监听线程 (None 表示平台不支持)
     let hotkey_rx = hotkeys::spawn().map(|(rx, _handle)| rx);
     // 安装系统托盘 (图标 + 菜单)。load_tray_icon 失败则降级到无托盘。
-    let tray = load_tray_icon().and_then(|icon| {
+    let tray = load_tray_icon(&config.logo_name).and_then(|icon| {
         let menu = app.tray_menu();
         tray::install_tray(icon, menu)
     });

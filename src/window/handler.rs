@@ -77,6 +77,13 @@ pub(super) struct Handler<'a, A: App> {
     window_event_rx: Receiver<WindowAppEvent>,
     /// 当前窗口可见性 (热键 ToggleVisible 状态记录，与 Handler 同步)。
     is_visible: bool,
+    /// 窗口当前是否持有 OS 焦点 (由 WindowEvent::Focused 维护)。
+    ///
+    /// Alt+Tab 激活本窗口时，若用户先松 Alt、后松 Tab, Windows 会把迟到的
+    /// Tab 投递进队列——实测它排在 Focused(true) 之前 (同毫秒、序在前),
+    /// 且此时 winit 已清零修饰键状态，无法靠 Alt 识别。唯一可靠的判据是
+    /// 到达时窗口尚未持有 OS 焦点 (见 [`dispatch_focused_event`] 的 Tab 守卫)。
+    has_os_focus: bool,
 }
 
 impl<'a, A: App> Handler<'a, A> {
@@ -118,11 +125,20 @@ impl<'a, A: App> Handler<'a, A> {
             tray,
             window_event_rx,
             is_visible: true,
+            has_os_focus: false,
         }
     }
 }
 
 use super::{CloseBehavior, WindowConfig};
+
+/// Tab 焦点遍历是否放行：仅当窗口持有 OS 焦点。
+///
+/// Alt+Tab 激活本窗口时泄漏的 Tab 排在 Focused(true) 之前到达
+/// (此时 `has_os_focus == false`); 用户主动遍历只发生在持有 OS 焦点期间。
+fn tab_traverse_allowed(has_os_focus: bool) -> bool {
+    has_os_focus
+}
 
 impl<A: App> Handler<'_, A> {
     /// 记录一条窗口事件到日志。
@@ -146,12 +162,19 @@ impl<A: App> Handler<'_, A> {
             WindowEvent::ModifiersChanged(mods) => {
                 log::debug!("修饰键：{mods:?}");
             }
+            WindowEvent::Focused(gained) => {
+                log::info!("OS 焦点：{gained}");
+            }
             _ => {}
         }
     }
 
     /// 发送焦点进 / 出事件。
     fn dispatch_focus_changes(&mut self, previous: Option<&[usize]>, current: Option<&[usize]>) {
+        // 焦点迁移是稀有且高价值的诊断信号 (Alt+Tab 泄漏类排查), 值得常驻。
+        if previous != current {
+            log::info!("焦点变化：{previous:?} -> {current:?}");
+        }
         if let Some(path) = previous {
             if current.map(|c| c != path).unwrap_or(true) {
                 event_at_path(
@@ -186,10 +209,17 @@ impl<A: App> Handler<'_, A> {
             ..
         } = event
         {
-            if self.modifiers.shift_key() {
-                self.focus.prev();
-            } else {
-                self.focus.next();
+            // Alt+Tab 切回本窗口时，先松 Alt、后松 Tab 的指法会让 Windows 把
+            // 迟到的 Tab 投递进队列——实测它排在 Focused(true) 之前到达，
+            // 且修饰键已被清零，无法靠 Alt 状态识别。唯一可靠的判据：
+            // 窗口未持有 OS 焦点时到达的 Tab 必是泄漏，不做焦点遍历。
+            // 合法 Tab 遍历只会发生在持有 OS 焦点期间，零误伤。
+            if tab_traverse_allowed(self.has_os_focus) {
+                if self.modifiers.shift_key() {
+                    self.focus.prev();
+                } else {
+                    self.focus.next();
+                }
             }
             return;
         }
@@ -339,6 +369,8 @@ impl<A: App> Handler<'_, A> {
                 let maximized = window.is_maximized();
                 log::info!("标题栏最大化/还原窗口：{}", !maximized);
                 window.set_maximized(!maximized);
+                // 通知应用层窗口最大化状态已切换 (TitleBar 据此 □↔□□)。
+                self.app.maximized_changed(!maximized);
             }
             WindowAction::Drag => {
                 if let Err(err) = window.drag_window() {
@@ -381,14 +413,25 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 持久化恢复：用 app 的 boot_elapsed_offset 重置 start, 使得
         // AnimationCtx::elapsed 从 effective_now 起算，而不是 0。
         self.start = Instant::now() - self.app.boot_elapsed_offset();
-        let attrs = WindowAttributes::default()
+        let window_width = f64::from(self.config.size.width);
+        let window_height = f64::from(self.config.size.height);
+        // 窗口居中：取主显示器尺寸计算偏移，确保窗口显示在屏幕正中央。
+        let position = event_loop.available_monitors().next().map(|monitor| {
+            let m_size = monitor.size();
+            let m_pos = monitor.position();
+            LogicalPosition::new(
+                (m_pos.x as f64 + (m_size.width as f64 - window_width) / 2.0).max(0.0),
+                (m_pos.y as f64 + (m_size.height as f64 - window_height) / 2.0).max(0.0),
+            )
+        });
+        let mut attrs = WindowAttributes::default()
             .with_title(&self.config.title)
             .with_visible(false)
-            .with_window_icon(load_window_icon())
-            .with_inner_size(LogicalSize::new(
-                f64::from(self.config.size.width),
-                f64::from(self.config.size.height),
-            ));
+            .with_window_icon(load_window_icon(&self.config.logo_name))
+            .with_inner_size(LogicalSize::new(window_width, window_height));
+        if let Some(pos) = position {
+            attrs = attrs.with_position(pos);
+        }
         // 全平台使用自绘标题栏 (按钮布局样式由 TitleBar 按平台适配，
         // 参见 docs/specs/title-bar-cross-platform.md)。
         let attrs = attrs.with_decorations(false);
@@ -408,7 +451,8 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 同步 inline 初始化 GPU 上下文 (实例 + surface + 适配器 + 设备 + 管线)。
         // request_adapter 传 `compatible_surface: Some(&surface)` 让 DX12 后端
         // 一步优化 device / presentation engine 创建，比传 None 省 ~200ms。
-        // 这里没有用后台线程预建 GpuDevice:实测 DX12 上 inline 比 join 快。
+        // 实例预建后台线程试过又撤回 (2026-07): 实例时间确实藏住了, 但
+        // request_adapter 等额变贵 (+250ms), 净收益为零且方差更大。
         let ctx_start = Instant::now();
         match Context::new(
             Arc::clone(&window),
@@ -444,6 +488,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         if let WindowEvent::ModifiersChanged(mods) = event {
             self.modifiers = mods.state();
             return;
+        }
+        if let WindowEvent::Focused(gained) = event {
+            self.has_os_focus = gained;
         }
 
         // 鼠标事件经组件树命中分发，分发后可能更新焦点
@@ -674,5 +721,23 @@ impl<A: App> Handler<'_, A> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tab_traverse_allowed;
+
+    #[test]
+    fn tab_without_os_focus_is_suppressed() {
+        // Alt+Tab 泄漏的 Tab 在 Focused(true) 之前到达 (has_os_focus=false),
+        // 必须拦截, 否则焦点被切到下一个组件 (2026-07-29 实测回归)。
+        assert!(!tab_traverse_allowed(false));
+    }
+
+    #[test]
+    fn tab_with_os_focus_traverses() {
+        // 持有 OS 焦点期间的 Tab 是用户主动遍历, 必须放行。
+        assert!(tab_traverse_allowed(true));
     }
 }

@@ -110,12 +110,15 @@ impl Context {
         let size = window.inner_size();
         let flags = instance_flags();
         log::info!("创建 wgpu instance：backends={DEFAULT_BACKENDS:?}, flags={flags:?}");
+        let mut stage = std::time::Instant::now();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: DEFAULT_BACKENDS,
             flags,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let surface = instance.create_surface(window)?;
+        log::info!("instance+surface 耗时：{:?}", stage.elapsed());
+        stage = std::time::Instant::now();
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 compatible_surface: Some(&surface),
@@ -125,6 +128,7 @@ impl Context {
                 ..Default::default()
             })
             .await?;
+        log::info!("request_adapter 耗时：{:?}", stage.elapsed());
         let adapter_info = adapter.get_info();
         log::info!(
             "GPU 适配器：name={}, type={:?}, backend={:?}, vendor=0x{:04x}, device=0x{:04x}, driver={}, driver_info={}",
@@ -136,7 +140,7 @@ impl Context {
             adapter_info.driver,
             adapter_info.driver_info
         );
-        log::info!("开始请求 GPU device");
+        stage = std::time::Instant::now();
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("danqing device"),
@@ -146,7 +150,7 @@ impl Context {
                 ..Default::default()
             })
             .await?;
-        log::info!("GPU device 创建成功");
+        log::info!("request_device 耗时：{:?}", stage.elapsed());
 
         let caps = surface.get_capabilities(&adapter);
         let format = caps
@@ -173,9 +177,11 @@ impl Context {
             config.height
         );
 
+        stage = std::time::Instant::now();
         let rect_pipeline = RectPipeline::new(&device, format);
         let text_pipeline = TextPipeline::new(&device, format, crate::GlyphAtlas::DEFAULT_SIZE);
         let background_pipeline = BackgroundPipeline::new(&device, &queue, format, background);
+        log::info!("渲染管线创建耗时：{:?}", stage.elapsed());
 
         Ok(Self {
             surface,

@@ -16,6 +16,18 @@ use crate::render::{RectBatch, TextBatch};
 use crate::widget::{EventResult, MsgQueue, Widget};
 use crate::{Color, Constraints, LightTheme, Point, Rect, Size, Theme};
 
+/// LOGO 变体 — 标题栏程序化绘制。
+///
+/// 每个应用有独立视觉标识, 不强制共享母 logo 结构。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LogoKind {
+    /// 母 logo: 玉色圆角框 + 右下角朱砂圆点破框 ("破框朱砂")。
+    #[default]
+    Default,
+    /// 番茄钟: 玉色外环 (计时轨道) + 朱砂时针 / 分针 + 轴心。
+    Pomodoro,
+}
+
 /// 标题栏按钮布局样式。
 ///
 /// 默认值由 [`TitleBarStyle::platform_default`] 按平台解析，
@@ -122,8 +134,10 @@ pub struct TitleBar {
     logo_frame_color: Color,
     /// LOGO 内部填充色。
     logo_fill_color: Color,
-    /// LOGO 颜料点色。
+    /// LOGO 颜料点 / 弧段色。
     logo_dot_color: Color,
+    /// LOGO 变体。
+    logo_kind: LogoKind,
     /// 红绿灯关闭按钮色。
     traffic_close_color: Color,
     /// 红绿灯最小化按钮色。
@@ -154,6 +168,10 @@ pub struct TitleBar {
     last_left_press: Option<(Instant, Point)>,
     /// 主题绑定: 设置后每帧 sync 重取流动色 (场景色调流动)。
     theme_binding: Option<ThemeBinding>,
+    /// 窗口当前是否最大化 (决定按钮绘制 □ 还是 □□)。
+    is_maximized: bool,
+    /// 最大化状态绑定: 每帧从应用状态读取, 覆盖 `is_maximized`。
+    maximized_binding: Option<MaximizedBinding>,
 }
 
 /// 品牌朱砂红 (#E34234)：仅用于 LOGO 颜料滴的品牌资产色，不属于 theme token 体系。
@@ -186,6 +204,9 @@ impl FlowingColors {
 /// 主题绑定闭包: 每帧从类型擦除的应用状态产出流动色 (与 `Button::bind_color` 同构)。
 type ThemeBinding = std::boxed::Box<dyn Fn(&dyn Any) -> FlowingColors>;
 
+/// 最大化状态绑定闭包: 每帧从类型擦除的应用状态读取 `is_maximized`。
+type MaximizedBinding = std::boxed::Box<dyn Fn(&dyn Any) -> bool>;
+
 impl TitleBar {
     /// 创建标题栏，使用默认浅色主题。
     pub fn new(title: impl Into<String>) -> Self {
@@ -215,6 +236,7 @@ impl TitleBar {
             logo_fill_color: flowing.logo_fill_color,
             // 朱砂滴为品牌专属色,不随 theme token 变化。
             logo_dot_color: BRAND_CINNABAR,
+            logo_kind: LogoKind::default(),
             traffic_close_color: theme.traffic_close(),
             traffic_minimize_color: theme.traffic_minimize(),
             traffic_maximize_color: theme.traffic_maximize(),
@@ -231,6 +253,8 @@ impl TitleBar {
             area: Rect::default(),
             last_left_press: None,
             theme_binding: None,
+            is_maximized: false,
+            maximized_binding: None,
         }
     }
 
@@ -250,9 +274,39 @@ impl TitleBar {
         self
     }
 
+    /// 绑定最大化状态: 每帧从应用状态读取 `is_maximized`, 决定按钮绘制
+    /// □ (最大化) 还是 □□ (还原)。
+    ///
+    /// 未绑定时默认 `false` (显示最大化图标 □)。
+    pub fn bind_maximized<S: 'static>(mut self, f: impl Fn(&S) -> bool + 'static) -> Self {
+        self.maximized_binding = Some(std::boxed::Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("TitleBar 最大化状态绑定的状态类型不匹配");
+            f(state)
+        }));
+        self
+    }
+
+    /// 直接设置最大化状态 (用于不需要绑定的场景, 如测试)。
+    pub fn set_maximized(&mut self, maximized: bool) {
+        self.is_maximized = maximized;
+    }
+
+    /// 返回当前按钮图标对应的窗口状态。
+    pub fn is_maximized(&self) -> bool {
+        self.is_maximized
+    }
+
     /// 设置按钮布局样式，覆盖平台默认值。
     pub fn style(mut self, style: TitleBarStyle) -> Self {
         self.style = style;
+        self
+    }
+
+    /// 设置 LOGO 变体，覆盖默认母 logo。
+    pub fn logo_kind(mut self, kind: LogoKind) -> Self {
+        self.logo_kind = kind;
         self
     }
 
@@ -439,6 +493,7 @@ impl TitleBar {
     ///
     /// 为避开旋转实例在部分 GPU 驱动下的表现不一致，所有符号均用
     /// `push_rect` 实现：水平 / 垂直线段用细长矩形，对角线用小圆点队列近似。
+    ///
     fn paint_button_symbol(
         &self,
         rects: &mut RectBatch,
@@ -471,7 +526,7 @@ impl TitleBar {
                     color,
                 );
             }
-            // 最大化：Standard 为 □ 形方框，红绿灯为 + 形 (水平 + 垂直线段)。
+            // 最大化：Standard 为 □ 形方框 (已最大化时 □□ 双框), 红绿灯为 + 形。
             ButtonRole::Maximize => {
                 if self.style == TitleBarStyle::TrafficLights {
                     rects.push_rect(
@@ -486,38 +541,40 @@ impl TitleBar {
                     );
                     return;
                 }
-                let side = extent * 2.0;
-                let top = cy - extent;
-                let left = cx - extent;
-                // 上
-                rects.push_rect(
-                    Rect::from_xywh(left, top, side, thickness),
-                    color,
-                    half_thick,
-                );
-                // 下
-                rects.push_rect(
-                    Rect::from_xywh(left, top + side - thickness, side, thickness),
-                    color,
-                    half_thick,
-                );
-                // 左
-                rects.push_rect(
-                    Rect::from_xywh(left, top + thickness, thickness, side - 2.0 * thickness),
-                    color,
-                    half_thick,
-                );
-                // 右
-                rects.push_rect(
-                    Rect::from_xywh(
-                        left + side - thickness,
-                        top + thickness,
-                        thickness,
-                        side - 2.0 * thickness,
-                    ),
-                    color,
-                    half_thick,
-                );
+                if self.is_maximized {
+                    // 还原图标: 居中完整方框 (前窗) + 右上角 ┌ 形折线 (后窗上边+右边),
+                    // 两条线在右上角汇合, 右边线较短, 暗示背后还有一个窗口。
+                    let offset = extent * 0.55;
+                    let corner_x = cx + extent + offset;
+                    let corner_y = cy - extent - offset;
+                    // 居中完整方框 (前窗)。
+                    self.paint_hollow_square(rects, cx, cy, extent, thickness, color);
+                    // 上方水平线段: 从左 (略内缩) 到拐角点。
+                    rects.push_rect(
+                        Rect::from_xywh(
+                            cx - extent + offset,
+                            corner_y - half_thick,
+                            corner_x - (cx - extent + offset),
+                            thickness,
+                        ),
+                        color,
+                        half_thick,
+                    );
+                    // 右侧垂直线段: 从拐角点向下, 长度较短。
+                    let right_len = extent * 1.2 + 3.0;
+                    rects.push_rect(
+                        Rect::from_xywh(
+                            corner_x - half_thick,
+                            corner_y - half_thick,
+                            thickness,
+                            right_len,
+                        ),
+                        color,
+                        half_thick,
+                    );
+                } else {
+                    self.paint_hollow_square(rects, cx, cy, extent, thickness, color);
+                }
             }
             // 最小化：水平线段。
             ButtonRole::Minimize => {
@@ -528,6 +585,51 @@ impl TitleBar {
                 );
             }
         }
+    }
+
+    /// 绘制一个空心方框 (四条线段), 中心在 `(cx, cy)`。
+    fn paint_hollow_square(
+        &self,
+        rects: &mut RectBatch,
+        cx: f32,
+        cy: f32,
+        extent: f32,
+        thickness: f32,
+        color: Color,
+    ) {
+        let side = extent * 2.0;
+        let half_thick = thickness * 0.5;
+        let top = cy - extent;
+        let left = cx - extent;
+        // 上
+        rects.push_rect(
+            Rect::from_xywh(left, top, side, thickness),
+            color,
+            half_thick,
+        );
+        // 下
+        rects.push_rect(
+            Rect::from_xywh(left, top + side - thickness, side, thickness),
+            color,
+            half_thick,
+        );
+        // 左
+        rects.push_rect(
+            Rect::from_xywh(left, top + thickness, thickness, side - 2.0 * thickness),
+            color,
+            half_thick,
+        );
+        // 右
+        rects.push_rect(
+            Rect::from_xywh(
+                left + side - thickness,
+                top + thickness,
+                thickness,
+                side - 2.0 * thickness,
+            ),
+            color,
+            half_thick,
+        );
     }
 
     /// 用轴对齐小圆点队列近似一条对角线。
@@ -579,6 +681,9 @@ impl Widget for TitleBar {
             self.logo_frame_color = flowing.logo_frame_color;
             self.logo_fill_color = flowing.logo_fill_color;
         }
+        if let Some(binding) = &self.maximized_binding {
+            self.is_maximized = binding(state);
+        }
     }
 
     fn layout(&mut self, constraints: Constraints, _texts: &mut TextBatch) -> Size {
@@ -593,33 +698,106 @@ impl Widget for TitleBar {
             rects.push_rect(area, self.bg, 0.0);
         }
 
-        // LOGO: 玻璃画布 + 颜料滴。
+        // LOGO: 按变体分支绘制。
         let logo_rect = self.logo_rect(area);
         let logo_size = logo_rect.size.width;
+        match self.logo_kind {
+            LogoKind::Default => {
+                // ── 母 logo: 破框朱砂 ──
+                // 外框：accent 描边效果的圆角矩形。
+                let outer_inset = logo_size * 0.164;
+                let frame_rect = logo_rect.inset(outer_inset);
+                let frame_radius = logo_size * 0.18;
+                rects.push_rect(frame_rect, self.logo_frame_color, frame_radius);
 
-        // 外框：accent 描边效果的圆角矩形。
-        // 与 assets/logo/logo.svg 比例对应：外框内缩 16.4%，圆角 18%，描边 10.2%。
-        let outer_inset = logo_size * 0.164;
-        let frame_rect = logo_rect.inset(outer_inset);
-        let frame_radius = logo_size * 0.18;
-        rects.push_rect(frame_rect, self.logo_frame_color, frame_radius);
+                // 内部填充：白色半透明，形成”环 + 面”。
+                let stroke = logo_size * 0.102;
+                let fill_rect = frame_rect.inset(stroke);
+                let fill_radius = (frame_radius - stroke).max(0.0);
+                rects.push_rect(fill_rect, self.logo_fill_color, fill_radius);
 
-        // 内部填充：白色半透明，形成“环 + 面”。
-        let stroke = logo_size * 0.102;
-        let fill_rect = frame_rect.inset(stroke);
-        let fill_radius = (frame_radius - stroke).max(0.0);
-        rects.push_rect(fill_rect, self.logo_fill_color, fill_radius);
+                // 朱砂滴: 实心圆，骑跨右下角框线。
+                let dot_size = logo_size * 0.258;
+                let dot_offset = logo_size * 0.781;
+                let dot_cx = logo_rect.origin.x + dot_offset;
+                let dot_cy = logo_rect.origin.y + dot_offset;
+                rects.push_rect(
+                    Rect::from_xywh(
+                        dot_cx - dot_size / 2.0,
+                        dot_cy - dot_size / 2.0,
+                        dot_size,
+                        dot_size,
+                    ),
+                    self.logo_dot_color,
+                    dot_size / 2.0,
+                );
+            }
+            LogoKind::Pomodoro => {
+                // ── 番茄钟: 外环 + 时针 / 分针 (轴心下移) ──
+                let cx = logo_rect.origin.x + logo_size * 0.5;
+                let cy = logo_rect.origin.y + logo_size * 0.5;
 
-        // 朱砂滴：实心品牌红圆，中心在 78.1% 处骑跨右下角框线，半内半外。
-        let dot_size = logo_size * 0.258;
-        let dot_offset = logo_size * 0.781;
-        let dot_rect = Rect::from_xywh(
-            logo_rect.origin.x + dot_offset - dot_size / 2.0,
-            logo_rect.origin.y + dot_offset - dot_size / 2.0,
-            dot_size,
-            dot_size,
-        );
-        rects.push_rect(dot_rect, self.logo_dot_color, dot_size / 2.0);
+                // 玉色外环 (donut): 保持在几何中心。
+                let ring_r = logo_size * 0.352; // 90/256
+                let ring_half = logo_size * 0.039; // 10/256
+                let ring_outer_r = ring_r + ring_half;
+                let ring_inner_r = ring_r - ring_half;
+                rects.push_rect(
+                    Rect::from_xywh(
+                        cx - ring_outer_r,
+                        cy - ring_outer_r,
+                        ring_outer_r * 2.0,
+                        ring_outer_r * 2.0,
+                    ),
+                    self.logo_frame_color,
+                    ring_outer_r,
+                );
+                rects.push_rect(
+                    Rect::from_xywh(
+                        cx - ring_inner_r,
+                        cy - ring_inner_r,
+                        ring_inner_r * 2.0,
+                        ring_inner_r * 2.0,
+                    ),
+                    self.logo_fill_color,
+                    ring_inner_r,
+                );
+
+                // 指针轴心下移 12/256 ≈ 4.7%。
+                let py = cy + logo_size * 0.047;
+
+                // 分针 (长细, 3 点钟 = 15 分): 水平向右。
+                let min_len = logo_size * 0.234; // 60/256, 与 SVG 对齐
+                let min_thick = logo_size * 0.055; // dot-queue 最小可见粗度; 仍与环有间隙
+                self.push_axis_aligned_diagonal(
+                    rects,
+                    Point::new(cx, py),
+                    Point::new(cx + min_len, py),
+                    min_thick,
+                    self.logo_dot_color,
+                );
+
+                // 时针 (短粗, 11 点过 1/4 ≈ 22.5° 左偏); 对角线 dot-queue 比水平
+                // 更容易锯齿, 粗度需略大于 SVG 的 stroke-width=10 以保证可辨。
+                let hour_len = logo_size * 0.195; // 50/256
+                let hour_thick = logo_size * 0.07; // dot-queue 对角线最小可辨粗度
+                self.push_axis_aligned_diagonal(
+                    rects,
+                    Point::new(cx, py),
+                    Point::new(cx - 0.383 * hour_len, py - 0.924 * hour_len),
+                    hour_thick,
+                    self.logo_dot_color,
+                );
+
+                // 轴心。
+                let pivot_r = logo_size * 0.035; // 9/256
+                rects.push_rect(
+                    Rect::from_xywh(cx - pivot_r, py - pivot_r, pivot_r * 2.0, pivot_r * 2.0),
+                    self.logo_dot_color,
+                    pivot_r,
+                );
+            }
+        }
 
         // 标题文字，垂直居中。
         let font_size = self.font_size;
@@ -1204,5 +1382,180 @@ mod tests {
             .map(|(r, radii)| (*r, radii))
             .collect();
         assert!(!matches.is_empty(), "应找到最大化按钮 hover 背景");
+    }
+
+    // ── 最大化 / 还原图标区分 ──
+
+    /// 已知方框中心的四色，返回该中心附近绘制了空心方框的实例数。
+    fn count_hollow_square_rects_at(
+        rects: &RectBatch,
+        cx: f32,
+        cy: f32,
+        extent: f32,
+        thickness: f32,
+    ) -> usize {
+        let side = extent * 2.0;
+        let left = cx - extent;
+        let top = cy - extent;
+        let expected_rects = [
+            // 上边
+            Rect::from_xywh(left, top, side, thickness),
+            // 下边
+            Rect::from_xywh(left, top + side - thickness, side, thickness),
+            // 左边
+            Rect::from_xywh(left, top + thickness, thickness, side - 2.0 * thickness),
+            // 右边
+            Rect::from_xywh(
+                left + side - thickness,
+                top + thickness,
+                thickness,
+                side - 2.0 * thickness,
+            ),
+        ];
+        rects
+            .instance_rects()
+            .iter()
+            .filter(|r| expected_rects.contains(r))
+            .count()
+    }
+
+    /// 从 paint 产出的矩形批中提取最大化按钮符号附近的所有矩形。
+    fn maximize_symbol_rects(bar: &TitleBar, area: Rect) -> RectBatch {
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        bar.paint(area, &mut rects, &mut texts);
+        rects
+    }
+
+    #[test]
+    fn default_maximize_shows_single_square() {
+        let mut bar = TitleBar::themed(&LightTheme, "丹青");
+        let area = title_bar_area();
+        let mut texts = TextBatch::new();
+        bar.layout(Constraints::tight(area.size), &mut texts);
+        assert!(!bar.is_maximized());
+
+        let icon = bar.button_icon_rect(bar.button_rect(area, ButtonRole::Maximize));
+        let cx = icon.origin.x + icon.size.width * 0.5;
+        let cy = icon.origin.y + icon.size.height * 0.5;
+        let extent = icon.size.width.min(icon.size.height) * 0.58 * 0.5;
+        let thickness = icon.size.width.min(icon.size.height) * 0.075;
+
+        let rects = maximize_symbol_rects(&bar, area);
+        // 默认状态：仅一个空心方框 (□)。
+        let count = count_hollow_square_rects_at(&rects, cx, cy, extent, thickness);
+        assert_eq!(count, 4, "默认态应绘制一个空心方框的 4 条边");
+        // 没有第二个方框。
+        let offset = extent * 0.55;
+        let front =
+            count_hollow_square_rects_at(&rects, cx + offset, cy - offset, extent, thickness);
+        let back =
+            count_hollow_square_rects_at(&rects, cx - offset, cy + offset, extent, thickness);
+        assert_eq!(front, 0, "默认态不应出现还原图标前框");
+        assert_eq!(back, 0, "默认态不应出现还原图标后框");
+    }
+
+    #[test]
+    fn maximized_shows_restore_icon() {
+        let mut bar = TitleBar::themed(&LightTheme, "丹青");
+        let area = title_bar_area();
+        let mut texts = TextBatch::new();
+        bar.layout(Constraints::tight(area.size), &mut texts);
+        bar.set_maximized(true);
+        assert!(bar.is_maximized());
+
+        let icon = bar.button_icon_rect(bar.button_rect(area, ButtonRole::Maximize));
+        let cx = icon.origin.x + icon.size.width * 0.5;
+        let cy = icon.origin.y + icon.size.height * 0.5;
+        let extent = icon.size.width.min(icon.size.height) * 0.58 * 0.5;
+        let thickness = icon.size.width.min(icon.size.height) * 0.075;
+
+        let rects = maximize_symbol_rects(&bar, area);
+        // 居中完整方框 4 条边。
+        let center = count_hollow_square_rects_at(&rects, cx, cy, extent, thickness);
+        assert_eq!(center, 4, "还原图标应有居中完整方框 4 条边");
+
+        // ┌ 形折线在右上角汇合。
+        let offset = extent * 0.55;
+        let half_thick = thickness * 0.5;
+        let corner_x = cx + extent + offset;
+        let corner_y = cy - extent - offset;
+        let expected_top = Rect::from_xywh(
+            cx - extent + offset,
+            corner_y - half_thick,
+            corner_x - (cx - extent + offset),
+            thickness,
+        );
+        let expected_right = Rect::from_xywh(
+            corner_x - half_thick,
+            corner_y - half_thick,
+            thickness,
+            extent * 1.2 + 3.0,
+        );
+        let all_rects = rects.instance_rects();
+        assert!(
+            all_rects.iter().any(|r| *r == expected_top),
+            "还原图标应有上方水平线段，右端到 ({corner_x:.1})"
+        );
+        assert!(
+            all_rects.iter().any(|r| *r == expected_right),
+            "还原图标应有右侧垂直线段，从 ({corner_y:.1}) 开始"
+        );
+    }
+
+    #[test]
+    fn bind_maximized_reads_from_app_state() {
+        struct AppState {
+            maximized: bool,
+        }
+        let mut bar =
+            TitleBar::themed(&LightTheme, "丹青").bind_maximized(|s: &AppState| s.maximized);
+
+        bar.sync(&AppState { maximized: false });
+        assert!(!bar.is_maximized());
+
+        bar.sync(&AppState { maximized: true });
+        assert!(bar.is_maximized());
+    }
+
+    #[test]
+    fn traffic_lights_unaffected_by_is_maximized() {
+        // 红绿灯最大化按钮始终绘制 + 形，不受 is_maximized 影响。
+        let mut bar = TitleBar::themed(&LightTheme, "丹青").style(TitleBarStyle::TrafficLights);
+        let area = title_bar_area();
+        let mut texts = TextBatch::new();
+        bar.layout(Constraints::tight(area.size), &mut texts);
+
+        // 触发 hover 使符号可见。
+        let center = bar.button_center(area, ButtonRole::Maximize.index());
+        let mut msgs = MsgQueue::new();
+        bar.event(&Event::CursorMoved(center), area, &mut msgs);
+
+        let glyph_count = |bar: &TitleBar| -> usize {
+            let mut rects = RectBatch::new();
+            let mut texts_batch = TextBatch::new();
+            bar.paint(area, &mut rects, &mut texts_batch);
+            // 统计 TRAFFIC_GLYPH_COLOR 颜色的矩形数 = 符号矩形数。
+            let glyph = TRAFFIC_GLYPH_COLOR;
+            rects
+                .instance_colors()
+                .iter()
+                .filter(|c| {
+                    (c[0] - glyph.r).abs() < f32::EPSILON
+                        && (c[1] - glyph.g).abs() < f32::EPSILON
+                        && (c[2] - glyph.b).abs() < f32::EPSILON
+                        && (c[3] - glyph.a).abs() < f32::EPSILON
+                })
+                .count()
+        };
+
+        let count_normal = glyph_count(&bar);
+        bar.set_maximized(true);
+        let count_maximized = glyph_count(&bar);
+        assert_eq!(
+            count_normal, count_maximized,
+            "红绿灯 + 形符号数不受 is_maximized 影响"
+        );
+        assert!(count_normal > 0, "hover 态应至少绘制一个符号矩形");
     }
 }
