@@ -216,19 +216,20 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
 }
 
 // ---- 山动效 (山场景) ----
-// 单层暖粉雾融入暮色 (用户 2026-07-30 反馈: 旧 3 层冷灰"云团"翻车)。
-// mask 0.50-0.88 集中在山脊上空, 不覆盖整片天空。alpha 0.45 + 暖粉 (0.92,0.65,0.62)
-// 与暮色 (199,172,178) 抬升 ~0.71 红通道, 视觉可见不读作"独立云"。
+// 单层暖粉雾融入暮色。mask 0.50-0.88 集中在山脊上空。
+// alpha 0.22 (降自 0.45 — 山脊背景本已暖粉 ~170/255, additive 叠加后
+// 暖上加暖过饱和读作"黄沙"; 降 alpha 后雾薄融入不抢戏)。
+// scale 3.0 (升自 2.0, 雾团 ~125-320px 更细腻不读作"沙粒")。
 const MOUNTAIN_MIST_Y_TOP: f32 = 0.50;
 const MOUNTAIN_MIST_Y_FULL: f32 = 0.80;
 const MOUNTAIN_MIST_Y_END: f32 = 0.88;
-const MOUNTAIN_MIST_ALPHA: f32 = 0.45;
+const MOUNTAIN_MIST_ALPHA: f32 = 0.22;
 const MOUNTAIN_MIST_COLOR: vec3<f32> = vec3<f32>(0.920, 0.650, 0.620);
 
 fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
     let band = smoothstep(MOUNTAIN_MIST_Y_TOP, MOUNTAIN_MIST_Y_FULL, uv.y)
              * (1.0 - smoothstep(MOUNTAIN_MIST_Y_END, 1.0, uv.y));
-    let p = mist_pattern(uv, t, 0.0625, 2.0, 0.0);
+    let p = mist_pattern(uv, t, 0.0625, 3.0, 0.0);
     return MOUNTAIN_MIST_COLOR * p * band * MOUNTAIN_MIST_ALPHA;
 }
 
