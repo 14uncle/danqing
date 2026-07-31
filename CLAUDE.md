@@ -74,10 +74,27 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 - 公开 API 一律经 `src/lib.rs` re-export,不暴露深层模块路径给用户。
 - 所有公共类型/函数写中文文档注释;内部实现用英文命名。
 - 新增 `.rs` 文件头必须包含 `//! @author 十四叔` 与 `//! @date yyyy/MM/dd`。
-- 提交前必须: `cargo fmt` + `cargo clippy -- -D warnings` + `cargo test --lib --tests` 全绿。
+- 提交前必须: `cargo fmt` + `cargo clippy -- -D warnings` + `cargo test --lib --tests` 全绿。可用 `Workflow({name: "pre-commit"})` 自动化三件套。
 - 新增组件必须出现在 `examples/showcase.rs` 中(以用代测)。
 - `widget/`、`layout.rs`、`event.rs`、`text/` 保持纯逻辑;平台/GPU 代码只出现在 `window/` 与 `render/`。
 - 阶段 1 组件使用 `src/theme.rs` token,避免魔法颜色/圆角/阴影值。
+
+## Context loading
+
+按任务类型加载上下文,避免一次加载所有文档——聚焦上下文胜过大量上下文。
+
+| 任务类型 | 必须加载 | 可选(深入时加载) | 相关 Memory |
+|----------|----------|-------------------|-------------|
+| **场景动效**(shader/uniform/动效) | `docs/CONTEXT/scenes-guidelines.md` | 对应场景 spec(`docs/specs/pomodoro-scene-motion*.md`) | `scene-motion-uv-displacement`, `scene-lru-pattern` |
+| **跨模块重构**(依赖/渲染/事件) | `docs/CONTEXT/architecture.md` | 相关模块源码 + 测试 | — |
+| **窗口/平台**(winit/IME/托盘/热键) | `src/window/mod.rs` | `docs/CONTEXT/architecture.md` §平台适配层 | `danqing-visual-debug-tooling` |
+| **新增组件**(widget) | 一个现有同族组件(照模式) | `src/theme.rs` | — |
+| **性能/内存** | `tools/benchmark.ps1` | `docs/CONTEXT/architecture.md` | `wgpu-30-memory-lever`, `minidbg-symbol-preference` |
+| **构建/工具链** | — | `build.rs` + `.cargo/config.toml` | `windows-gnu-toolchain-lld-fix` |
+| **Pomodoro POC** | `examples/pomodoro/CLAUDE.md` | `docs/specs/phase2-pomodoro-poc.md` | — |
+| **Bug 修复** | 最小复现 + `cargo test` 输出 | 相关模块源码 | — |
+
+Agent 启动时的默认加载: `CLAUDE.md` + `MEMORY.md`(已自动加载)。CONTEXT 文档**不在默认加载之列**——仅在上述任务类型触发时按需加载。
 
 ## Documentation layout
 
