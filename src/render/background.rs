@@ -68,8 +68,9 @@ pub struct BackgroundFrame {
     pub fire_intensity: f32,
     /// 海动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火并存, 交叉淡化期间可同时非零)。
     pub sea_intensity: f32,
-    /// 雨钟 (秒): 雨丝下落时间轴, 暂停时冻结 — 雨丝定格可见 (2026-07-29 用户裁定)。
-    /// 默认 0, 经 [`BackgroundFrame::with_rain_time`] 设置, 上传 uniform 前取模。
+    /// 雨钟 (秒): 雨丝下落时间轴 + 山/森林雾漂移时间轴, 暂停时冻结 — 雨丝定格可见 (2026-07-29 用户裁定)。
+    /// 默认 0, 经 [`BackgroundFrame::with_rain_time`] 设置, 直接上传不取模
+    /// (山/森林 mist_pattern 需要连续时间, wrap 会每 8s 重置跳变; 雨层 fract 自带 wrap 无需额外处理)。
     pub rain_time: f32,
     /// 山动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火/海并存, 交叉淡化期间可同时非零)。
     pub mountain_intensity: f32,
@@ -597,13 +598,15 @@ impl BackgroundPipeline {
         let Some((from, to, fade)) = resolve_frame(frame, self.scene_bytes.len()) else {
             return;
         };
-        // 场景层动效参数 (雨/火/海/山/森林强度 + 取模后的时间与雨钟); 叠加层无动效恒 0。
+        // 场景层动效参数 (雨/火/海/山/森林强度 + 动效时间 + 雨钟)。
+        // time 取模 8s (雨/火/海频率对齐 MOTION_WRAP_SECS 公共周期);
+        // rain_time 不取模 (山/森林雾漂移需要连续时间, 雨层 fract 自带 wrap)。
         let motion = [
             frame.rain_intensity,
             wrap_motion_time(frame.time),
             frame.fire_intensity,
             frame.sea_intensity,
-            wrap_motion_time(frame.rain_time),
+            frame.rain_time, // 非 wrap: 山/森林雾漂移需要连续时间, 避免 8s 重置跳变
             frame.mountain_intensity,
             frame.forest_intensity,
         ];
