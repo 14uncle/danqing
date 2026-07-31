@@ -202,7 +202,9 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
 // 不同 ± sign + 不同 phase 打破对齐, 造 2D 噪声, 无 dominant direction (无 Tyndall)。
 // 系数 6/8/12/16 → 空间周期 0.52-0.20 uv (503-192 px), 真正 fog 团尺寸
 // (旧 2/2.5/3.5/4.5 → 1500-672 px, 太大读作"灰蒙蒙一片")。
-// 调用方: speed=0.0625 + u.rain_time (非 wrap, 永不重置)。
+// 调用方: speed 恒定, t = u.rain_time (非 wrap, 永不重置)。
+// 速度必须恒定 — 若 speed 含 sin/cos(t) 调制, 则 t·speed 的导数为
+// speed + t·speed', t 增大后摆幅线性增长, 雾气加速失控。
 fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f32 {
     let x = uv.x * scale + t * speed + phase;
     let y = uv.y * scale;
@@ -232,33 +234,23 @@ fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
 
 // ---- 森林动效 (森林场景) ----
 // 雾不烘焙 (参考雨场景改造范式): export-scenes.py 森林配置已去 mist
-// 字段, 运行时 forest_mist 全程序化生成。 2 层 (主 + 副) 不同 scale
-// 破 sum-of-sines LCM 周期性, 速度 ±30% 起伏破传送带。
+// 字段, 运行时 forest_mist 全程序化生成。
 // 暂停 500ms 沉降: forest_intensity = 0, 雾消失, 回到裸静态图。
+//
+// 速度恒定不调制: 调制 × unwrapped rain_time 产生 t·d(speed)/dt 项,
+// t 增大后速度摆幅线性增长 (t=100s 时 ±0.75, 远超基准 0.0625),
+// 视觉读作雾气越来越快 + 方向来回狂暴。副层已去 (反向对冲造成方向感混乱)。
+const FOREST_MIST_Y: f32 = 0.691;
+const FOREST_MIST_HALF: f32 = 0.159;
+const FOREST_MIST_ALPHA: f32 = 0.25;
+const FOREST_MIST_SPEED: f32 = 0.0625;
+const FOREST_MIST_SCALE: f32 = 2.0;
 const FOREST_MIST_COLOR: vec3<f32> = vec3<f32>(0.512, 0.604, 0.548);
-// 主层: y=0.691 (中林 0.68 与近林 0.88 之间, 贴林下雾), 视觉重心下移。
-const FOREST_MIST_LAYER_B_Y: f32 = 0.691;
-const FOREST_MIST_LAYER_B_HALF: f32 = 0.159;
-const FOREST_MIST_LAYER_B_ALPHA: f32 = 0.25;
-const FOREST_MIST_LAYER_B_SPEED: f32 = 0.0625;
-// 副层: scale 3.0 (主 2.0, 错 LCM), speed -0.035 (反向), phase 2.3
-// (错相), alpha 0.08 (主 1/3 subtle), y 0.60 (主略上)。
-const FOREST_MIST_LAYER_B2_Y: f32 = 0.60;
-const FOREST_MIST_LAYER_B2_HALF: f32 = 0.10;
-const FOREST_MIST_LAYER_B2_ALPHA: f32 = 0.08;
-const FOREST_MIST_LAYER_B2_SPEED: f32 = -0.035;
-
-fn forest_mist_layer(uv: vec2<f32>, t: f32, y_peak: f32, y_half: f32, speed: f32, scale: f32, phase: f32, alpha: f32) -> f32 {
-    let band = 1.0 - smoothstep(y_half * 0.5, y_half, abs(uv.y - y_peak));
-    let pattern = mist_pattern(uv, t, speed, scale, phase);
-    return pattern * band * alpha;
-}
 
 fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    let speed_t = FOREST_MIST_LAYER_B_SPEED * (1.0 + 0.3 * sin(t * 0.4) + 0.2 * cos(t * 0.27));
-    let b = forest_mist_layer(uv, t, FOREST_MIST_LAYER_B_Y, FOREST_MIST_LAYER_B_HALF, speed_t, 2.0, 1.7, FOREST_MIST_LAYER_B_ALPHA);
-    let b2 = forest_mist_layer(uv, t, FOREST_MIST_LAYER_B2_Y, FOREST_MIST_LAYER_B2_HALF, FOREST_MIST_LAYER_B2_SPEED, 3.0, 2.3, FOREST_MIST_LAYER_B2_ALPHA);
-    return FOREST_MIST_COLOR * (b + b2);
+    let band = 1.0 - smoothstep(FOREST_MIST_HALF * 0.5, FOREST_MIST_HALF, abs(uv.y - FOREST_MIST_Y));
+    let pattern = mist_pattern(uv, t, FOREST_MIST_SPEED, FOREST_MIST_SCALE, 1.7);
+    return FOREST_MIST_COLOR * pattern * band * FOREST_MIST_ALPHA;
 }
 
 @group(0) @binding(0)
