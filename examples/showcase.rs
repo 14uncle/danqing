@@ -38,6 +38,8 @@ struct Showcase {
     textarea_value: String,
     /// 当前选中的分类索引 (驱动 Switcher)。
     selected: usize,
+    /// 窗口是否已最大化 (决定标题栏按钮图标 □/□□)。
+    is_maximized: bool,
 }
 
 /// 应用消息。
@@ -107,6 +109,10 @@ impl App for Showcase {
             _ => return,
         };
         self.update(Msg::MoveSquare { dx, dy });
+    }
+
+    fn maximized_changed(&mut self, is_maximized: bool) {
+        self.is_maximized = is_maximized;
     }
 }
 
@@ -540,6 +546,7 @@ fn build_tree() -> Node {
         Column::new()
             .child(
                 TitleBar::themed(&t, "danqing 丹青")
+                    .bind_maximized(|s: &Showcase| s.is_maximized)
                     .on_close(|| WindowAction::Close)
                     .on_minimize(|| WindowAction::Minimize)
                     .on_maximize(|| WindowAction::MaximizeOrRestore)
@@ -573,6 +580,7 @@ fn main() -> anyhow::Result<()> {
         input_value: String::new(),
         textarea_value: String::new(),
         selected: 0,
+        is_maximized: false,
     };
 
     let t = theme();

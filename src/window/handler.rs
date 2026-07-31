@@ -369,6 +369,8 @@ impl<A: App> Handler<'_, A> {
                 let maximized = window.is_maximized();
                 log::info!("标题栏最大化/还原窗口：{}", !maximized);
                 window.set_maximized(!maximized);
+                // 通知应用层窗口最大化状态已切换 (TitleBar 据此 □↔□□)。
+                self.app.maximized_changed(!maximized);
             }
             WindowAction::Drag => {
                 if let Err(err) = window.drag_window() {
@@ -411,14 +413,25 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 持久化恢复：用 app 的 boot_elapsed_offset 重置 start, 使得
         // AnimationCtx::elapsed 从 effective_now 起算，而不是 0。
         self.start = Instant::now() - self.app.boot_elapsed_offset();
-        let attrs = WindowAttributes::default()
+        let window_width = f64::from(self.config.size.width);
+        let window_height = f64::from(self.config.size.height);
+        // 窗口居中：取主显示器尺寸计算偏移，确保窗口显示在屏幕正中央。
+        let position = event_loop.available_monitors().next().map(|monitor| {
+            let m_size = monitor.size();
+            let m_pos = monitor.position();
+            LogicalPosition::new(
+                (m_pos.x as f64 + (m_size.width as f64 - window_width) / 2.0).max(0.0),
+                (m_pos.y as f64 + (m_size.height as f64 - window_height) / 2.0).max(0.0),
+            )
+        });
+        let mut attrs = WindowAttributes::default()
             .with_title(&self.config.title)
             .with_visible(false)
-            .with_window_icon(load_window_icon())
-            .with_inner_size(LogicalSize::new(
-                f64::from(self.config.size.width),
-                f64::from(self.config.size.height),
-            ));
+            .with_window_icon(load_window_icon(&self.config.logo_name))
+            .with_inner_size(LogicalSize::new(window_width, window_height));
+        if let Some(pos) = position {
+            attrs = attrs.with_position(pos);
+        }
         // 全平台使用自绘标题栏 (按钮布局样式由 TitleBar 按平台适配，
         // 参见 docs/specs/title-bar-cross-platform.md)。
         let attrs = attrs.with_decorations(false);

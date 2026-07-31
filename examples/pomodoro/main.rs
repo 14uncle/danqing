@@ -31,7 +31,7 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use danqing::widget::{
-    self, Box as UiBox, Button, Center, Column, Node, Padding, Row, Stack, Text, TitleBar,
+    self, Box as UiBox, Button, Center, Column, LogoKind, Node, Padding, Row, Stack, Text, TitleBar,
 };
 use danqing::{
     AnimationCtx, App, BackgroundConfig, BackgroundFrame, Color, Easing, Edges, LightTheme,
@@ -100,6 +100,8 @@ struct PomodoroApp {
     rain_clock: f32,
     /// 窗口事件发送器 (run_app 启动时注入，App 借此控制窗口显隐 / 退出)。
     window_sender: Option<WindowEventSender>,
+    /// 窗口是否已最大化 (决定标题栏按钮图标 □/□□)。
+    is_maximized: bool,
 }
 
 /// 应用消息。
@@ -144,6 +146,7 @@ impl PomodoroApp {
             motion_gain: 0.0,
             rain_clock: 0.0,
             window_sender: None,
+            is_maximized: false,
         }
     }
 
@@ -192,6 +195,7 @@ impl PomodoroApp {
             motion_gain: 0.0,
             rain_clock: 0.0,
             window_sender: None,
+            is_maximized: false,
         }
     }
 
@@ -407,6 +411,10 @@ impl App for PomodoroApp {
     fn tray_menu(&self) -> danqing::tray_icon::menu::Menu {
         build_menu()
     }
+
+    fn maximized_changed(&mut self, is_maximized: bool) {
+        self.is_maximized = is_maximized;
+    }
 }
 
 /// 内容列：标题栏 + 中央倒计时 + 底部控件条 (无 flash 叠加，flash 由 Stack 在根上盖)。
@@ -415,7 +423,9 @@ fn content_column(t: SceneTheme) -> impl widget::Widget {
         .cross_stretch()
         .child(
             TitleBar::themed(&t, "丹青 · 番茄钟")
+                .logo_kind(LogoKind::Pomodoro)
                 .bind_theme(|s: &PomodoroApp| s.theme())
+                .bind_maximized(|s: &PomodoroApp| s.is_maximized)
                 .on_close(|| WindowAction::Close)
                 .on_minimize(|| WindowAction::Minimize)
                 .on_maximize(|| WindowAction::MaximizeOrRestore)
@@ -628,6 +638,7 @@ fn run() -> anyhow::Result<()> {
         background,
         // 常驻型应用：关闭按钮 / Alt+F4 只隐藏窗口，进程由托盘 / 全局热键退出。
         close_behavior: danqing::CloseBehavior::Hide,
+        logo_name: "pomodoro".into(),
         ..WindowConfig::default()
     };
     danqing::run_app(config, &mut app)?;
