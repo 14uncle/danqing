@@ -32,6 +32,9 @@ dirs = "5"
 # 番茄钟环境音: 仅 OGG Vorbis 解码 + 播放, 精简 symphonia 特性。
 rodio = { version = "0.22", default-features = false, features = ["playback", "symphonia-ogg", "symphonia-vorbis"] }
 
+[build-dependencies]
+winresource = "0.1"
+
 [profile.dev]
 # debug 构建默认关闭 wgpu 校验层,避免部分机器 1~3s 启动/关闭延迟
 opt-level = 1
