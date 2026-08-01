@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 丹青 (danqing) 是一个 Rust 跨平台自绘 UI 框架,使用 `winit` 0.30 处理窗口与事件,`wgpu` 30 自绘,保留模式组件树。基础里程碑 M1~M3 与阶段 1(设计系统 + 品牌视觉)、阶段 2(专注陪伴 POC:番茄钟 × 场景沉浸美学)及后续补完均已关闭并归档到 `tasks/archive/`。
 
 - **当前分支**: `dev`(主分支 `master`)
-- **下一步**: 山/森林场景动效等待用户人工终审。之后候选:第二 POC 剪贴板历史管理器(效率工具族,美学剂量低于专注陪伴族)。**未获用户指示时不要启动新 POC**。
+- **战略**: 2026-08-01 interview-me 确认「著作型旗舰」十年战略(专注陪伴系统 × 十年建造史),见 `docs/intent/companion-flagship.md` + `tasks/plan-flagship-roadmap.md`。里程碑 0「旗舰化第一刀」已完成:山/森林动效终审通过(2026-08-01)、付费边界 spec 确认、数据层 MVP、建造实录三篇草稿。剪贴板降级为引擎复用验证顺延。**未获用户指示时不要启动新 POC**。
 - **性能门槛**: 启动 ≤1s、常驻内存 WS ≤360MB(核显记账);测量用 `tools/benchmark.ps1`。
 
 > 详细架构见 `docs/CONTEXT/architecture.md`;场景动效开发范式见 `docs/CONTEXT/scenes-guidelines.md`。

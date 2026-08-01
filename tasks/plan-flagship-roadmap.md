@@ -29,12 +29,13 @@
 
 - **Description:** 既有待办(2026-07-30 代码 + 门槛全绿,等待用户终审),完成旗舰视觉完整度的最后一块拼图;终审通过后收尾归档。
 - **Acceptance criteria:**
-  - [ ] 用户人工终审山/森林动效通过
-  - [ ] 归档 `tasks/archive/` + spec 验收勾选
+  - [x] 用户人工终审山/森林动效通过 (2026-08-01 用户通过)
+  - [x] 归档 `tasks/archive/` + spec 验收勾选 (T5 已勾, spec 验收 8 已注)
 - **Verification:** 用户终审 + `cargo test` 全绿。
 - **Dependencies:** None(用户终审)
 - **Files:** `tasks/archive/{plan,todo}-pomodoro-scene-motion-mountain-forest.md`(归档)
 - **Scope:** S
+- **Status:** ✅ 2026-08-01 终审通过并归档。**终审修正**: 无 1-5 场景快捷键(仅 ◀/▶); 森林副层已去(单层 mist_pattern)
 
 ### Task B: 付费边界 spec
 

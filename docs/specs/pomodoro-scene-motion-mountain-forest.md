@@ -109,4 +109,6 @@ let forest = motion::forest_intensity(from, to, fade, self.motion_gain);
 5. 窗口隐藏时零渲染成本(架构事实,无新增 `request_redraw`)。
 6. benchmark 门槛 PASS(暖机启动 ≤1s、常驻 WS ≤360MB)。
 7. 提交门槛全绿(fmt / clippy×2 / test×2)+ 五轴评审通过。
-8. 用户人工终审通过(山/森林运行+暂停帧差、目测节奏与剂量)。
+8. 用户人工终审通过(山/森林运行+暂停帧差、目测节奏与剂量)。**✅ 2026-08-01 用户通过**(目测运行/暂停动效节奏与剂量; 修正: 无 1-5 场景快捷键, 场景切换仅 ◀/▶; 森林副层已去, 当前为单层 mist_pattern)。
+
+> 终审通过 2026-08-01, plan/todo 已归档 `tasks/archive/`, 本 spec 关闭。
