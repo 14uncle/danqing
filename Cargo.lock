@@ -656,6 +656,7 @@ dependencies = [
  "image",
  "log",
  "pollster",
+ "raw-window-handle",
  "resvg",
  "rodio",
  "serde",

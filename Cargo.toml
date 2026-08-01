@@ -8,6 +8,8 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 winit = "0.30.13"
+# 与 winit 0.30 共享同一 raw-window-handle 版本 (0.6), 用于取原生窗口句柄 (HWND)。
+raw-window-handle = "0.6"
 wgpu = "30"
 fontdue = "0.9"
 etagere = "0.3"
@@ -19,7 +21,7 @@ log = "0.4"
 arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 tray-icon = "0.19"
-windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_Debug"] }
+windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_Debug", "Win32_System_Threading"] }
 
 [dev-dependencies]
 resvg = "0.44"

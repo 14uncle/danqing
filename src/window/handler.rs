@@ -693,11 +693,18 @@ impl<A: App> Handler<'_, A> {
     }
 
     /// 显示窗口 + 抢焦点 + 重绘。winit 的 SW_SHOW 默认不抢焦点，
-    /// 显式 focus_window 防止"已显示但被遮" (尤其在另一 app 后台时)。
+    /// 显式抢前台防止"已显示但被遮" (尤其在另一 app 后台时)。
     fn show_window(&self) {
         if let Some(window) = &self.window {
             window.set_visible(true);
             window.request_redraw();
+            // Windows: winit 的 focus_window() 走合成 Alt + SetForegroundWindow,
+            // 对后台常驻进程受前台锁限制而静默失败 —— 窗口"已显示但被遮"。
+            // 用 foreground 模块的 AttachThreadInput 方案硬抢 (先直调, 失败再挂接);
+            // 其它平台保留 winit 原生 focus_window。
+            #[cfg(target_os = "windows")]
+            super::foreground::bring_to_foreground(window);
+            #[cfg(not(target_os = "windows"))]
             window.focus_window();
         }
     }

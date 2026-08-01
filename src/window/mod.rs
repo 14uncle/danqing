@@ -7,13 +7,16 @@
 //! 并把 winit 事件转换为平台无关的内部事件。
 //!
 //! 子模块：
-//! - `event`   应用 → Handler 事件通道 + winit → 内部事件适配
-//! - `icon`    窗口 / 托盘图标加载 + Windows 无边框样式
-//! - `hotkey`  全局热键 ID 常量 + Windows 注册线程
-//! - `tray`    托盘菜单项 ID + 快捷键 label 单一来源 + 跨平台托盘
-//! - `handler` ApplicationHandler 实现 (本模块最大，单独拆出)
+//! - `event`      应用 → Handler 事件通道 + winit → 内部事件适配
+//! - `foreground` 窗口抢前台 / 顶层 (Windows AttachThreadInput)
+//! - `icon`       窗口 / 托盘图标加载 + Windows 无边框样式
+//! - `hotkey`     全局热键 ID 常量 + Windows 注册线程
+//! - `tray`       托盘菜单项 ID + 快捷键 label 单一来源 + 跨平台托盘
+//! - `handler`    ApplicationHandler 实现 (本模块最大，单独拆出)
 
 mod event;
+#[cfg(target_os = "windows")]
+mod foreground;
 mod handler;
 mod hotkey;
 mod icon;
