@@ -405,6 +405,73 @@ impl<A: App> Handler<'_, A> {
             }
         }
     }
+
+    /// 渲染一帧并 present (RedrawRequested 与启动预渲染共用)。
+    ///
+    /// 每帧心跳 → sync 绑定 → 焦点重建 → 布局 → 绘制 → 提交 wgpu。
+    /// 渲染失败返回 `false` 并退出事件循环。
+    fn render_frame(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        let frame_start = Instant::now();
+        let mut rects = RectBatch::new();
+        self.texts.clear();
+        let screen = self.window.as_ref().map(|w| {
+            let size = w.inner_size();
+            Size::new(size.width as f32, size.height as f32)
+        });
+        if let Some(screen) = screen {
+            let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
+            // 每帧心跳先行：计时 / 过渡动画推进后，绑定闭包在 sync 中读到新状态。
+            self.app.tick(&ctx);
+            self.tree.sync(self.app);
+            self.tree.animate(&ctx);
+            self.focus.rebuild(&self.tree);
+            // 焦点为空且应用请求恢复 (如面板关闭后回到打开面板的按钮):
+            // 按名聚焦, 一次性 (应用后回调 focus_restored 清除请求)。
+            if self.focus.current().is_none() {
+                if let Some(id) = self.app.focus_request() {
+                    self.focus.set_focus_by_id(id);
+                    self.app.focus_restored();
+                }
+            }
+            let prev = self.focus.previous().map(|p| p.to_vec());
+            let curr = self.focus.current().map(|p| p.to_vec());
+            self.dispatch_focus_changes(prev.as_deref(), curr.as_deref());
+            self.focus.acknowledge();
+            let size = self
+                .tree
+                .layout(crate::Constraints::tight(screen), &mut self.texts);
+            self.root_area = Rect::new(Point::ZERO, size);
+            self.tree.paint(self.root_area, &mut rects, &mut self.texts);
+            // 无边框窗口下自绘边框与圆角。
+            if self.config.border_thickness > 0.0 {
+                rects.push_rounded_border(
+                    self.root_area,
+                    self.config.border_color,
+                    self.config.border_radius,
+                    self.config.border_thickness,
+                );
+            }
+            self.update_ime();
+        }
+        if let Some(context) = &mut self.context {
+            // 应用层提供的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
+            if let Some(frame) = self.app.background_frame() {
+                context.set_background_frame(frame);
+            }
+            if !context.render(&rects, &mut self.texts) {
+                event_loop.exit();
+                return false;
+            }
+        }
+        if !self.first_frame_done {
+            self.first_frame_done = true;
+            log::info!("首帧渲染耗时：{:?}", frame_start.elapsed());
+        }
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+        true
+    }
 }
 
 impl<A: App> ApplicationHandler for Handler<'_, A> {
@@ -430,8 +497,11 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             .with_title(&self.config.title)
             .with_visible(false)
             .with_window_icon(load_window_icon(&self.config.logo_name))
-            .with_inner_size(LogicalSize::new(window_width, window_height))
-            .with_maximized(self.config.maximized);
+            .with_inner_size(LogicalSize::new(window_width, window_height));
+        // 显式居中位置 (同时是最大化窗口的还原位置: 取消最大化后回到屏幕中央)。
+        // 注意: 不设 with_maximized —— winit 的 create_window 对 maximized 属性会调
+        // set_maximized → ShowWindow(SW_MAXIMIZE), 无视 with_visible(false) 直接让
+        // 窗口在 GPU 初始化期间全屏可见 (空表面白屏一闪)。见下方「先显示再最大化」。
         if let Some(pos) = position {
             attrs = attrs.with_position(pos);
         }
@@ -472,15 +542,20 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 return;
             }
         }
+        // 先持有窗口引用: 预渲染首帧需要查询 inner_size。
+        self.window = Some(Arc::clone(&window));
+        // 预渲染首帧: 隐藏时渲染 + present, 显示时直接见内容 — 避免首帧就绪前白屏。
+        self.render_frame(event_loop);
         window.set_visible(true);
+        // 先以普通尺寸显示 (预渲染内容已在屏), 再最大化 — 而非在 create_window 设
+        // maximized (那会让窗口在 GPU 初始化期间全屏白屏)。最大化过程有内容, 无白屏。
+        if self.config.maximized {
+            window.set_maximized(true);
+        }
         log::info!("窗口已显示");
         // 机器可读启动基准 (ASCII, 供 tools/benchmark.ps1 解析)。
         log::info!("perf startup_to_visible {:?}", self.boot.elapsed());
-        self.window = Some(window);
-        // 持续渲染模式：请求首帧，之后每帧结束再请求下一帧
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        // 持续渲染模式: render_frame 末尾已请求首帧, 之后每帧结束再请求下一帧。
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -556,65 +631,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 }
             }
             WindowEvent::RedrawRequested => {
-                let frame_start = Instant::now();
-                let mut rects = RectBatch::new();
-                self.texts.clear();
-                let screen = self.window.as_ref().map(|w| {
-                    let size = w.inner_size();
-                    Size::new(size.width as f32, size.height as f32)
-                });
-                if let Some(screen) = screen {
-                    let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
-                    // 每帧心跳先行：计时 / 过渡动画推进后，绑定闭包在 sync 中读到新状态。
-                    self.app.tick(&ctx);
-                    self.tree.sync(self.app);
-                    self.tree.animate(&ctx);
-                    self.focus.rebuild(&self.tree);
-                    // 焦点为空且应用请求恢复 (如面板关闭后回到打开面板的按钮):
-                    // 按名聚焦, 一次性 (应用后回调 focus_restored 清除请求)。
-                    if self.focus.current().is_none() {
-                        if let Some(id) = self.app.focus_request() {
-                            self.focus.set_focus_by_id(id);
-                            self.app.focus_restored();
-                        }
-                    }
-                    let prev = self.focus.previous().map(|p| p.to_vec());
-                    let curr = self.focus.current().map(|p| p.to_vec());
-                    self.dispatch_focus_changes(prev.as_deref(), curr.as_deref());
-                    self.focus.acknowledge();
-                    let size = self
-                        .tree
-                        .layout(crate::Constraints::tight(screen), &mut self.texts);
-                    self.root_area = Rect::new(Point::ZERO, size);
-                    self.tree.paint(self.root_area, &mut rects, &mut self.texts);
-                    // 无边框窗口下自绘边框与圆角。
-                    if self.config.border_thickness > 0.0 {
-                        rects.push_rounded_border(
-                            self.root_area,
-                            self.config.border_color,
-                            self.config.border_radius,
-                            self.config.border_thickness,
-                        );
-                    }
-                    self.update_ime();
-                }
-                if let Some(context) = &mut self.context {
-                    // 应用层提供的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
-                    if let Some(frame) = self.app.background_frame() {
-                        context.set_background_frame(frame);
-                    }
-                    if !context.render(&rects, &mut self.texts) {
-                        event_loop.exit();
-                        return;
-                    }
-                }
-                if !self.first_frame_done {
-                    self.first_frame_done = true;
-                    log::info!("首帧渲染耗时：{:?}", frame_start.elapsed());
-                }
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
+                self.render_frame(event_loop);
             }
             _ => {}
         }
