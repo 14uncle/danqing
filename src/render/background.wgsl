@@ -263,48 +263,68 @@ fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
 // - 流星 (meteor): 随 starry_intensity, rain_time 连续触发 (非 wrap 无跳变), 淡入淡出, 压暗。
 const STAR_W: f32 = 0.7853982;  // 2π/8: 动效基频角速度 (1/8 Hz)
 
-// 基础星野: 密网格 hash 星点, 格内随机偏移, 亮度/尺寸按 hash 分布。
-const SF_COLS: f32 = 96.0;     // 列数
-const SF_ROWS: f32 = 40.0;     // 行数
-const SF_ON: f32 = 0.40;       // 有星格比例
+// 参照原静态星图 (build_stars 风格): 少量散布星点 + ~10% 大亮星 + 蓝白为主 ~22% 暖星,
+// 软边光晕 (非硬盘)。粗网格 + 大 jitter → 随机散布无网格感。
+const SF_COLS: f32 = 48.0;     // 粗网格列
+const SF_ROWS: f32 = 28.0;     // 粗网格行
+const SF_ON: f32 = 0.14;       // 有星格比例 (48×28×0.14 ≈ 188 颗, 对齐原 ~170)
+const SF_BIG: f32 = 0.10;      // 大亮星比例 (对齐原 big_frac 0.10)
+const SF_WARM: f32 = 0.22;     // 暖星比例 (对齐原 colors 22%)
 const SF_ASPECT: f32 = 1.5;    // 场景画布宽高比, 圆点修正
-const SF_BRIGHT: f32 = 0.38;   // 星点亮度上限 (additive)
 const SF_BAND_BOT: f32 = 0.80; // 星带下缘 (山脊上方)
 
 fn star_cell(uv: vec2<f32>) -> vec2<f32> {
     return vec2<f32>(floor(uv.x * SF_COLS), floor(uv.y * SF_ROWS));
 }
 
+// 星点颜色: 蓝白为主, 偶有暖星 (原静态图 colors ((200,212,244),(255,236,190)) 线性近似)。
+fn star_color(h: f32) -> vec3<f32> {
+    let warm = step(1.0 - SF_WARM, h);
+    let cool = vec3<f32>(0.78, 0.83, 0.96);
+    let warm_c = vec3<f32>(1.0, 0.93, 0.74);
+    return cool + (warm_c - cool) * warm;
+}
+
 // 基础星野 (静态, 常驻): 位置/亮度固定, 暂停时不消失 (定格语义)。
-fn star_field(uv: vec2<f32>) -> f32 {
+// 每格: 大 jitter 位置 → 随机散布; 独立 hash 决定 有星/大星/暖星。
+fn star_field(uv: vec2<f32>) -> vec3<f32> {
     let cell = star_cell(uv);
     let h = rain_hash(cell.x * 137.0 + cell.y * 71.0 + 5.0);
     let on = step(SF_ON, h);
-    let cx = (cell.x + rain_hash(cell.x * 7.3 + cell.y * 13.1)) / SF_COLS;
-    let cy = (cell.y + rain_hash(cell.x * 3.7 + cell.y * 29.3)) / SF_ROWS;
+    let big = step(1.0 - SF_BIG, rain_hash(cell.x * 11.0 + cell.y * 17.0 + 4.0));
+    let warm_h = rain_hash(cell.x * 5.9 + cell.y * 41.3 + 3.0);
+    let jx = rain_hash(cell.x * 7.3 + cell.y * 13.1 + 1.0);
+    let jy = rain_hash(cell.x * 3.7 + cell.y * 29.3 + 2.0);
+    let cx = (cell.x + 0.1 + jx * 0.8) / SF_COLS;
+    let cy = (cell.y + 0.1 + jy * 0.8) / SF_ROWS;
     let band = 1.0 - smoothstep(SF_BAND_BOT, SF_BAND_BOT + 0.04, cy);
-    let bright = 0.08 + h * 0.30;
+    let r = (0.0016 + jx * 0.0012) * (1.0 + big * 1.3) * SF_ASPECT;
     let d = distance(vec2<f32>(uv.x * SF_ASPECT, uv.y), vec2<f32>(cx * SF_ASPECT, cy));
-    let r = (0.0016 + h * 0.0020) * SF_ASPECT;
-    let spot = 1.0 - smoothstep(r * 0.3, r, d);
-    return spot * on * band * bright;
+    let spot = 1.0 - smoothstep(r * 0.15, r, d);   // 软边光晕 (非硬盘)
+    let bright = (0.12 + jx * 0.18) * (1.0 + big * 1.2);
+    return star_color(warm_h) * spot * on * band * bright;
 }
 
 // 星闪: 与基础星野同格, 亮度明灭 (频率档位 {1,2,3}/8 Hz), smoothstep 缓起缓落。
-fn star_twinkle(uv: vec2<f32>, t: f32) -> f32 {
+// 明灭增量 0.28 — 明显可感 (原 0.14 几乎看不出, 用户反馈「静态」)。
+fn star_twinkle(uv: vec2<f32>, t: f32) -> vec3<f32> {
     let cell = star_cell(uv);
     let h = rain_hash(cell.x * 137.0 + cell.y * 71.0 + 5.0);
     let on = step(SF_ON, h);
-    let cx = (cell.x + rain_hash(cell.x * 7.3 + cell.y * 13.1)) / SF_COLS;
-    let cy = (cell.y + rain_hash(cell.x * 3.7 + cell.y * 29.3)) / SF_ROWS;
+    let big = step(1.0 - SF_BIG, rain_hash(cell.x * 11.0 + cell.y * 17.0 + 4.0));
+    let warm_h = rain_hash(cell.x * 5.9 + cell.y * 41.3 + 3.0);
+    let jx = rain_hash(cell.x * 7.3 + cell.y * 13.1 + 1.0);
+    let jy = rain_hash(cell.x * 3.7 + cell.y * 29.3 + 2.0);
+    let cx = (cell.x + 0.1 + jx * 0.8) / SF_COLS;
+    let cy = (cell.y + 0.1 + jy * 0.8) / SF_ROWS;
     let band = 1.0 - smoothstep(SF_BAND_BOT, SF_BAND_BOT + 0.04, cy);
+    let r = (0.0016 + jx * 0.0012) * (1.0 + big * 1.3) * SF_ASPECT;
     let d = distance(vec2<f32>(uv.x * SF_ASPECT, uv.y), vec2<f32>(cx * SF_ASPECT, cy));
-    let r = (0.0016 + h * 0.0020) * SF_ASPECT;
-    let spot = 1.0 - smoothstep(r * 0.3, r, d);
+    let spot = 1.0 - smoothstep(r * 0.15, r, d);
     let k = 1.0 + floor(h * 3.0);   // {1,2,3}/8 Hz
     let s = 0.5 + 0.5 * sin(t * STAR_W * k + h * 6.2831853);
     let tw = s * s * (3.0 - 2.0 * s);
-    return spot * on * band * tw * 0.14;   // 明灭增量克制 (基星亮度之上再加)
+    return star_color(warm_h) * spot * on * band * tw * 0.28;
 }
 
 // 流星: 周期性斜向流星 (rain_time 连续触发, ~24s 一颗, 存续 ~1.4s)。
@@ -429,11 +449,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // 星闪 + 流星随 starry_intensity (包络×权重) 沉降, 暂停 500ms 回静态星野。
         color = vec4<f32>(
             color.rgb
-                + vec3<f32>(
-                    star_field(in.uv) * u.starry_base
-                        + (star_twinkle(in.uv, u.time) + meteor(in.uv, u.rain_time))
-                            * u.starry_intensity,
-                ),
+                + star_field(in.uv) * u.starry_base
+                + (star_twinkle(in.uv, u.time) + vec3<f32>(meteor(in.uv, u.rain_time)))
+                    * u.starry_intensity,
             color.a,
         );
     }
