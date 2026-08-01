@@ -75,6 +75,77 @@
 - **Scope:** S
 - **Status:** 三篇草稿完成(为什么十年磨著作 / 场景动效 18 次迭代 / 数据即护城河); 待用户校订后发布
 
+## 里程碑 1:沉浸世界定位落地(2026-08-01 竞品定位校验反推)
+
+> 依据 `docs/ideas/pomodoro-competitor-memo.md` 裁决: 定位从「番茄钟」改为「专注陪伴的沉浸世界」, 用体验层回应功能层; 旗舰版清单须兑现, ¥68 才有实物。本里程碑 = 把「旗舰」从 spec 变成实物 + 品牌出仓。**年度报告边界已裁定: 原始数据 + 基础统计免费, 深度洞察(年度报告)付费。**
+
+### Task E: 统计增强 · 年度报告(旗舰版统计增强兑现)
+
+- **Description:** 数据层 MVP(今日/本周/累计)→ 月度/年度深度洞察(聚焦时长、轮次、场景分布、趋势)。复用 `focus-history.json` 十年演进格式,不新造数据格式。**年度报告 = 旗舰版付费**(2026-08-01 用户裁定),原始数据 + 基础统计保持免费。
+- **Acceptance criteria:**
+  - [x] 年度/月度报告视图(时长/轮次/场景分布/趋势)
+  - [x] 报告入口按旗舰边界门控(本期不实现真实支付,语义先行;「旗舰」角标作语义标记)
+  - [x] 旧数据可读,format_version 兼容不新增分支(纯读聚合,无格式改动)
+- **Verification:** `cargo test --example pomodoro` 全绿 + benchmark 双门槛不破(数据层在 example 侧)。
+- **Dependencies:** 年度报告边界裁定(✅ 2026-08-01 用户裁定: 旗舰)。
+- **Files:** `examples/pomodoro/stats.rs`(增强), `examples/pomodoro/main.rs`
+- **Scope:** M
+- **Status:** ✅ 2026-08-01 完成 (fmt + clippy 零警告 + pomodoro 196 + lib 239 + 集成 58 全绿; 人工面板核验待用户)
+
+### Task F: 深度定制(旗舰版清单补全)
+
+- **Description:** 默认计时方案、每场景音景开关、主题细节。让「旗舰」有实物——裁决: ¥68 全押体验层,清单必须兑现。
+- **Acceptance criteria:**
+  - [ ] 每场景音景开关(场景/环境音独立可关)
+  - [ ] 默认计时方案(设置面板)
+  - [ ] 主题细节(`src/theme.rs` token)
+- **Verification:** `cargo test` 全绿 + showcase 复用。
+- **Dependencies:** None
+- **Files:** `examples/pomodoro/*.rs`, `src/theme.rs`
+- **Scope:** M
+- **Status:** ⏳ 待启动
+
+### Task G: 建造实录发布(里程碑 0 Task D 剩余)
+
+- **Description:** 校订 + 发布第 1-3 篇(仓库外: 博客/公众号)。思想史复利第一笔本金出仓,"沉浸世界"品牌叙事的外部可见面。
+- **Acceptance criteria:**
+  - [ ] 用户校订完成
+  - [ ] 第 1-3 篇发布可见
+- **Verification:** 发布可见。
+- **Dependencies:** None(可并行于 Task E/F)
+- **Files:** 仓库外(发布)
+- **Scope:** S
+- **Status:** ⏳ 草稿已完成,待校订发布
+
+### Task H: 数据同步 spec(裂缝 2 前置补位)
+
+- **Description:** 界定云端边界、同步内容、数据格式复用(格式已是十年设计)、与订阅留口的关系。**不建后端**。
+- **Acceptance criteria:**
+  - [ ] spec 界定同步范围与格式复用方式(`docs/specs/companion-flagship-sync.md`)
+  - [ ] 明确与订阅留口(买断 ¥68 + 订阅双轨)的关系
+- **Verification:** 用户审阅。
+- **Dependencies:** None
+- **Files:** `docs/specs/companion-flagship-sync.md`(新)
+- **Scope:** S
+- **Status:** ⏳ 待启动
+
+### Task I: 沉浸世界补全 · 4 新场景(星夜/雪原/沙漠/云海)
+
+- **Description:** 里程碑 1「沉浸世界」的实物主体——现 5 场景补 4 个新极,凑齐 9 场景。2026-08-01 interview-me 裁定(用户通过): **星夜**(夜·宇宙)、**雪原**(冷·白·静)、**沙漠·暮**(辽阔·干暖)、**云海·日出**(升维·天际)。原则: 极不重叠——每加一个场景,世界多一种心境。每场景走现有 pipeline: 背景图 + ScenePalette + 环境音 + 动效包络 + 对比度护栏。
+- **Acceptance criteria:**
+  - [ ] 4 新场景入 `scenes.rs`(SCENES 数组 5→9;**追加到尾部,保持索引 0-4 不动**,motion.rs 硬编码常量 RAIN/BONFIRE/SEA/MOUNTAIN/FOREST 才不失效)
+  - [ ] 每场景背景图 + 调色板(护栏: 大字 ≥3:1、控件 ≥4:1,与 export-scenes.py 同规则)
+  - [ ] 每场景环境音(ambient.rs SCENE_AUDIO 4 条新音源)+ 动效包络(motion.rs)
+  - [ ] ◀/▶ 循环覆盖 9 个场景(现逻辑 `% SCENES.len()`,自动覆盖;**不做** 1-9 快捷键——Task A 终审已去)
+  - [ ] 每场景动效 spec(范式见 `docs/CONTEXT/scenes-guidelines.md`)
+  - [ ] 用户终审 4 新场景动效通过
+  - [ ] 免费/旗舰边界不变(免费=篝火 1 个,9 个全在旗舰)
+- **Verification:** `cargo test --example pomodoro` 全绿 + 用户终审 + benchmark 双门槛不破。
+- **Dependencies:** None(与 E/F/H 并行);场景开发范式参考 Task A 归档(山/森林终审)
+- **Files:** `examples/pomodoro/scenes.rs`, `examples/pomodoro/ambient.rs`, `examples/pomodoro/motion.rs`; `assets/scenes/{starry,snow,desert,cloudsea}.png`, `assets/audio/{starry,snow,desert,cloudsea}.ogg`; `docs/specs/pomodoro-scene-motion-*.md`(新)
+- **Scope:** M
+- **Status:** ⏳ 待启动 (2026-08-01 裁定通过, 顺序未定)
+
 ## 战略决策(已定)
 
 - **剪贴板历史管理器顺延**: 从"第二 POC"降级为"引擎复用验证"(第 2 件产品);优先级让给旗舰数据层——它是数据复利的第一笔本金,拖得越晚,用户积累的专注历史越少。

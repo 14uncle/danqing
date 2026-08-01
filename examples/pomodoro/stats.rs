@@ -12,6 +12,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use chrono::{Datelike, Local, TimeZone};
 use serde::{Deserialize, Serialize};
 
 /// 当前历史文件格式版本。
@@ -66,6 +67,19 @@ fn default_format_version() -> u32 {
     FORMAT_VERSION
 }
 
+/// 某本地年的年度摘要 (深度洞察, 旗舰版; 纯读聚合, 不触碰写路径)。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct YearSummary {
+    /// 专注总秒数。
+    pub total_secs: u64,
+    /// 会话数。
+    pub session_count: u32,
+    /// 活跃天数 (本地日期去重)。
+    pub active_days: u32,
+    /// 按 `scene_index` 索引的专注秒数。
+    pub scene_secs: Vec<u64>,
+}
+
 impl FocusHistory {
     /// 空历史。
     pub fn new() -> Self {
@@ -91,6 +105,48 @@ impl FocusHistory {
         self.sessions
             .iter()
             .fold((0u32, 0u64), |(c, f), s| (c + 1, f + s.focused_secs))
+    }
+
+    /// 某本地年的年度摘要: 过滤 `completed_ts` 落在该年的记录。
+    /// 纯读聚合, 不新增写/导出路径 (`refuse_overwrite` 保护不受影响)。
+    pub fn year_summary(&self, year: u32) -> YearSummary {
+        let mut scene_secs: Vec<u64> = Vec::new();
+        let mut active_days = std::collections::HashSet::new();
+        let mut summary = YearSummary::default();
+        for s in &self.sessions {
+            if local_ym(s.completed_ts).0 != year {
+                continue;
+            }
+            summary.total_secs += s.focused_secs;
+            summary.session_count += 1;
+            active_days.insert(local_ymd(s.completed_ts));
+            if s.scene_index >= scene_secs.len() {
+                scene_secs.resize(s.scene_index + 1, 0);
+            }
+            scene_secs[s.scene_index] += s.focused_secs;
+        }
+        summary.active_days = active_days.len() as u32;
+        summary.scene_secs = scene_secs;
+        summary
+    }
+
+    /// 近 N 个日历月逐月专注秒数: 按 (year, month) 升序, 缺月补零,
+    /// 末项为 `now_wall` 所在月。`now_wall` 入参保证测试不依赖系统时钟。
+    pub fn month_trend(&self, now_wall: u64, months: u32) -> Vec<(u32, u32, u64)> {
+        let (now_y, now_m) = local_ym(now_wall);
+        let end = now_y as i64 * 12 + i64::from(now_m) - 1;
+        let start = end - i64::from(months) + 1;
+        (start..=end)
+            .map(|idx| {
+                let (y, m) = ((idx / 12) as u32, (idx % 12 + 1) as u32);
+                let secs = self
+                    .sessions
+                    .iter()
+                    .filter(|s| local_ym(s.completed_ts) == (y, m))
+                    .fold(0u64, |acc, s| acc + s.focused_secs);
+                (y, m, secs)
+            })
+            .collect()
     }
 
     /// CSV 明文导出 (首行表头, 供 Excel/文本查看)。
@@ -219,6 +275,20 @@ pub fn load_history_from_path(path: &Path) -> Option<FocusHistory> {
     Some(history)
 }
 
+/// epoch 秒 → 本地 (year, month)。出界/不可解析回退 (0, 0)。
+fn local_ym(ts: u64) -> (u32, u32) {
+    let (y, m, _) = local_ymd(ts);
+    (y, m)
+}
+
+/// epoch 秒 → 本地 (year, month, day)。出界/不可解析回退 (0, 0, 0)。
+fn local_ymd(ts: u64) -> (u32, u32, u32) {
+    match Local.timestamp_opt(ts as i64, 0).single() {
+        Some(dt) => (dt.year() as u32, dt.month(), dt.day()),
+        None => (0, 0, 0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,6 +303,15 @@ mod tests {
             round_in_cycle: 1,
             completed: true,
         }
+    }
+
+    /// 构造本地时间戳 (正午, 避开 DST 边界歧义)。构造与断言同用 Local, 时区自洽。
+    fn local_ts(y: i32, m: u32, d: u32) -> u64 {
+        Local
+            .with_ymd_and_hms(y, m, d, 12, 0, 0)
+            .single()
+            .expect("构造本地时间戳")
+            .timestamp() as u64
     }
 
     #[test]
@@ -497,5 +576,99 @@ mod tests {
         let loaded = load_history_from_path(&path).expect("应能加载");
         assert_eq!(loaded.sessions.len(), 1);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn year_summary_filters_by_year() {
+        let mut history = FocusHistory::new();
+        history.push(record(local_ts(2025, 6, 15)));
+        history.push(record(local_ts(2026, 6, 15)));
+        let s25 = history.year_summary(2025);
+        assert_eq!(s25.session_count, 1);
+        assert_eq!(s25.total_secs, 1500);
+        assert_eq!(s25.active_days, 1);
+        let s26 = history.year_summary(2026);
+        assert_eq!(s26.session_count, 1);
+        assert_eq!(s26.total_secs, 1500);
+        let s24 = history.year_summary(2024);
+        assert_eq!(s24.session_count, 0);
+        assert_eq!(s24.total_secs, 0);
+        assert_eq!(s24.active_days, 0);
+        assert!(s24.scene_secs.is_empty(), "空年份无场景分布");
+    }
+
+    #[test]
+    fn year_summary_cross_year_boundary() {
+        // 2025-12-31 与 2026-01-01 记录互不串年。
+        let mut history = FocusHistory::new();
+        history.push(record(local_ts(2025, 12, 31)));
+        history.push(record(local_ts(2026, 1, 1)));
+        assert_eq!(history.year_summary(2025).session_count, 1);
+        assert_eq!(history.year_summary(2026).session_count, 1);
+    }
+
+    #[test]
+    fn year_summary_active_days_dedup() {
+        let mut history = FocusHistory::new();
+        history.push(record(local_ts(2026, 3, 1)));
+        history.push(record(local_ts(2026, 3, 1)));
+        history.push(record(local_ts(2026, 3, 2)));
+        let s = history.year_summary(2026);
+        assert_eq!(s.session_count, 3);
+        assert_eq!(s.active_days, 2, "同日去重, 异日累加");
+    }
+
+    #[test]
+    fn year_summary_scene_distribution() {
+        let mut history = FocusHistory::new();
+        let mut r0 = record(local_ts(2026, 3, 1));
+        r0.scene_index = 0;
+        let mut r2 = record(local_ts(2026, 3, 2));
+        r2.scene_index = 2;
+        history.push(r0);
+        history.push(r2);
+        let s = history.year_summary(2026);
+        assert_eq!(s.scene_secs, vec![1500, 0, 1500], "按 scene_index 归位");
+    }
+
+    #[test]
+    fn month_trend_zero_fills_and_ends_at_now_month() {
+        let now = local_ts(2026, 3, 15);
+        let mut history = FocusHistory::new();
+        history.push(record(local_ts(2026, 1, 10)));
+        history.push(record(local_ts(2026, 3, 5)));
+        let trend = history.month_trend(now, 3);
+        assert_eq!(trend, vec![(2026, 1, 1500), (2026, 2, 0), (2026, 3, 1500)]);
+    }
+
+    #[test]
+    fn month_trend_cross_year() {
+        let now = local_ts(2026, 2, 10);
+        let mut history = FocusHistory::new();
+        history.push(record(local_ts(2025, 12, 20)));
+        history.push(record(local_ts(2026, 1, 5)));
+        let trend = history.month_trend(now, 4);
+        assert_eq!(
+            trend,
+            vec![
+                (2025, 11, 0),
+                (2025, 12, 1500),
+                (2026, 1, 1500),
+                (2026, 2, 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_history_aggregations_zero() {
+        let history = FocusHistory::new();
+        let s = history.year_summary(2026);
+        assert_eq!(s.session_count, 0);
+        assert_eq!(s.total_secs, 0);
+        assert_eq!(s.active_days, 0);
+        assert!(s.scene_secs.is_empty());
+        let trend = history.month_trend(local_ts(2026, 1, 15), 12);
+        assert_eq!(trend.len(), 12);
+        assert!(trend.iter().all(|&(_, _, secs)| secs == 0), "缺月补零");
     }
 }

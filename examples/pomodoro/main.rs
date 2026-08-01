@@ -29,6 +29,8 @@ mod tray;
 #[path = "../common/log.rs"]
 mod example_log;
 
+use chrono::Datelike;
+
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -66,12 +68,14 @@ const SAVE_THROTTLE: Duration = Duration::from_secs(1);
 const FADE_EASING: Easing = Easing::EaseInOut;
 /// 设置面板卡片宽度。
 const SETTINGS_CARD_WIDTH: f32 = 300.0;
+/// 报告面板卡片宽度 (略宽于统计卡, 容纳近 12 月趋势)。
+const REPORT_CARD_WIDTH: f32 = 360.0;
 /// 设置面板标题与关闭按钮间距。
 const SETTINGS_HEADER_GAP: f32 = 150.0;
 /// 设置面板步进器数值显示宽度。
 const STEPPER_VALUE_WIDTH: f32 = 72.0;
-/// 减号按钮相对标签的偏移量: 把 [-] 从标签右侧推开 20px (视觉微调)。
-const STEPPER_MINUS_OFFSET: f32 = 20.0;
+/// 减号按钮相对标签的偏移量: 把 [-] 从标签右侧推开 15px (视觉微调)。
+const STEPPER_MINUS_OFFSET: f32 = 15.0;
 
 /// 番茄钟应用状态。
 struct PomodoroApp {
@@ -118,6 +122,8 @@ struct PomodoroApp {
     settings_open: bool,
     /// 统计面板是否打开。
     stats_open: bool,
+    /// 年度报告面板是否打开 (旗舰版深度洞察)。
+    report_open: bool,
     /// 专注会话历史 (数据层: 自然完成的 Focus 记录)。
     history: FocusHistory,
     /// 历史脏旗标: 完成记录后置位, 与状态共用 1Hz 节流落盘。
@@ -126,6 +132,10 @@ struct PomodoroApp {
     export_notice: Option<String>,
     /// 提示过期时刻 (注入时间轴, now >= 此值后隐藏)。
     export_notice_until: Duration,
+    /// 面板关闭后要恢复焦点的按钮 id (一次性; 框架应用后经 [`App::focus_restored`] 清除)。
+    restore_focus_to: Option<&'static str>,
+    /// 导出 CSV 是否已存在 (启动时查一次, 导出成功后置位; 控制「打开所在目录」按钮)。
+    export_file_exists: bool,
 }
 
 /// 应用消息。
@@ -161,8 +171,12 @@ enum Msg {
     ResetConfig,
     /// 打开 / 关闭统计面板。
     ToggleStats,
+    /// 打开 / 关闭年度报告面板 (旗舰版深度洞察)。
+    ToggleReport,
     /// 导出专注数据为 CSV (明文, 固定路径)。
     ExportCsv,
+    /// 打开导出 CSV 所在目录 (已导出过时可用)。
+    OpenExportDir,
 }
 
 impl PomodoroApp {
@@ -191,10 +205,13 @@ impl PomodoroApp {
             is_maximized: false,
             settings_open: false,
             stats_open: false,
+            report_open: false,
             history: stats::load_history(),
             history_dirty: false,
             export_notice: None,
             export_notice_until: Duration::ZERO,
+            restore_focus_to: None,
+            export_file_exists: export_csv_path().map(|p| p.exists()).unwrap_or(false),
         }
     }
 
@@ -258,10 +275,13 @@ impl PomodoroApp {
             is_maximized: false,
             settings_open: false,
             stats_open: false,
+            report_open: false,
             history: stats::load_history(),
             history_dirty: false,
             export_notice: None,
             export_notice_until: Duration::ZERO,
+            restore_focus_to: None,
+            export_file_exists: export_csv_path().map(|p| p.exists()).unwrap_or(false),
         }
     }
 
@@ -366,22 +386,27 @@ impl PomodoroApp {
 
     /// 执行 CSV 导出并设置面板提示 (用户点击必须有可见反馈, 3s 后过期)。
     /// `path = None` 表示无配置目录 (导出失败)。
-    fn run_export_csv(&mut self, path: Option<std::path::PathBuf>) {
-        let notice = match path {
+    /// 执行 CSV 导出并设置面板提示 (用户点击必须有可见反馈, 3s 后过期)。
+    /// `path = None` 表示无配置目录 (导出失败)。返回是否成功
+    /// (供调用方决定是否在文件管理器中显示导出文件)。
+    fn run_export_csv(&mut self, path: Option<std::path::PathBuf>) -> bool {
+        let (ok, notice) = match path {
             Some(path) => match stats::export_csv_to(&path, &self.history) {
                 Ok(()) => {
                     log::info!("专注数据已导出: {}", path.display());
-                    "已导出 CSV ✓".to_string()
+                    self.export_file_exists = true; // 已导出过: 显示「打开所在目录」按钮
+                    (true, "已导出 CSV ✓".to_string())
                 }
                 Err(reason) => {
                     log::warn!("导出 CSV 失败: {reason}");
-                    format!("导出失败: {reason}")
+                    (false, format!("导出失败: {reason}"))
                 }
             },
-            None => "导出失败: 无配置目录".to_string(),
+            None => (false, "导出失败: 无配置目录".to_string()),
         };
         self.export_notice = Some(notice);
         self.export_notice_until = self.now + Duration::from_secs(3);
+        ok
     }
 }
 
@@ -414,12 +439,12 @@ impl App for PomodoroApp {
                 }
             }
             Msg::ToggleSettings => {
-                log::info!(
-                    "ToggleSettings: before={}, after={}",
-                    self.settings_open,
-                    !self.settings_open
-                );
+                // 关闭设置面板: 焦点回到「设置」按钮 (一次性, 见 focus_request)。
+                if self.settings_open {
+                    self.restore_focus_to = Some("settings-button");
+                }
                 self.stats_open = false;
+                self.report_open = false;
                 self.settings_open = !self.settings_open;
             }
             Msg::IncFocus => self.adjust_config(Phase::Focus, 60),
@@ -432,12 +457,42 @@ impl App for PomodoroApp {
                 self.timer.update_config(timer::TimerConfig::default());
             }
             Msg::ToggleStats => {
+                // 关闭统计面板: 焦点回到「统计」按钮 (一次性, 见 focus_request)。
+                if self.stats_open {
+                    self.restore_focus_to = Some("stats-button");
+                }
                 self.settings_open = false;
+                self.report_open = false;
                 self.stats_open = !self.stats_open;
             }
+            Msg::ToggleReport => {
+                // 关闭报告面板: 焦点回到「报告」按钮 (一次性, 见 focus_request)。
+                if self.report_open {
+                    self.restore_focus_to = Some("report-button");
+                }
+                self.settings_open = false;
+                self.stats_open = false;
+                self.report_open = !self.report_open;
+            }
             Msg::ExportCsv => {
-                let path = dirs::config_dir().map(|d| d.join("danqing").join("focus-history.csv"));
-                self.run_export_csv(path);
+                let path = export_csv_path();
+                let exported = self.run_export_csv(path.clone());
+                if exported {
+                    // 导出成功: 在系统文件管理器中显示文件 (回答「导到哪了」)。
+                    if let Some(path) = path {
+                        reveal_in_file_manager(&path);
+                    }
+                }
+            }
+            Msg::OpenExportDir => {
+                // 已导出过的按钮: 直接打开导出文件所在目录 (文件若被外部删除则只记日志)。
+                if let Some(path) = export_csv_path() {
+                    if path.exists() {
+                        reveal_in_file_manager(&path);
+                    } else {
+                        log::warn!("导出文件不存在, 跳过打开目录: {}", path.display());
+                    }
+                }
             }
         }
     }
@@ -457,8 +512,11 @@ impl App for PomodoroApp {
                             Padding::new(Edges::ZERO, settings_panel(t)),
                         )
                         .child(Padding::new(Edges::ZERO, stats_panel(t)))
+                        .child(Padding::new(Edges::ZERO, report_panel(t)))
                         .bind(|s: &PomodoroApp| {
-                            if s.stats_open {
+                            if s.report_open {
+                                3
+                            } else if s.stats_open {
                                 2
                             } else if s.settings_open {
                                 1
@@ -481,10 +539,17 @@ impl App for PomodoroApp {
         {
             if self.settings_open {
                 self.settings_open = false;
+                self.restore_focus_to = Some("settings-button");
                 self.state_dirty = true;
             }
             if self.stats_open {
                 self.stats_open = false;
+                self.restore_focus_to = Some("stats-button");
+                self.state_dirty = true;
+            }
+            if self.report_open {
+                self.report_open = false;
+                self.restore_focus_to = Some("report-button");
                 self.state_dirty = true;
             }
         }
@@ -627,6 +692,14 @@ impl App for PomodoroApp {
 
     fn maximized_changed(&mut self, is_maximized: bool) {
         self.is_maximized = is_maximized;
+    }
+
+    fn focus_request(&self) -> Option<&'static str> {
+        self.restore_focus_to
+    }
+
+    fn focus_restored(&mut self) {
+        self.restore_focus_to = None;
     }
 }
 
@@ -808,8 +881,10 @@ fn control_pill(t: SceneTheme) -> impl widget::Widget {
                 .child(primary_button(t))
                 .child(ghost_button(t, "跳", Msg::Skip))
                 .child(ghost_button(t, "后", Msg::NextScene))
-                .child(ghost_button(t, "统计", Msg::ToggleStats))
-                .child(ghost_button(t, "设置", Msg::ToggleSettings)),
+                // 面板关闭后焦点回锚点按钮 (按稳定 id, 见 focus_request)。
+                .child(ghost_button(t, "统计", Msg::ToggleStats).id("stats-button"))
+                .child(ghost_button(t, "报告", Msg::ToggleReport).id("report-button"))
+                .child(ghost_button(t, "设置", Msg::ToggleSettings).id("settings-button")),
         ))
 }
 
@@ -945,12 +1020,27 @@ fn stats_panel(t: SceneTheme) -> impl widget::Widget {
                                 let (count, secs) = s.history.total_stats();
                                 format!("{count} 次 · {}", format_duration(secs))
                             }))
-                            .child(ghost_button(t, "导出 CSV", Msg::ExportCsv))
+                            .child(export_actions(t))
                             .child(export_notice_row(t)),
                     )),
             )
             .fill_max(),
         )
+}
+
+/// 统计面板导出操作区: 「导出 CSV」按钮 + (已导出过时)「打开所在目录」按钮。
+/// 用 Switcher 按 `export_file_exists` 切换: 未导出过只显示导出按钮,
+/// 已导出过并排显示两个 (导出 + 打开所在目录), 面板高度恒定。
+fn export_actions(t: SceneTheme) -> impl widget::Widget {
+    Switcher::new()
+        .child(ghost_button(t, "导出 CSV", Msg::ExportCsv))
+        .child(
+            Row::new()
+                .gap(t.spacing_xs())
+                .child(ghost_button(t, "导出 CSV", Msg::ExportCsv))
+                .child(ghost_button(t, "打开所在目录", Msg::OpenExportDir)),
+        )
+        .bind(|s: &PomodoroApp| usize::from(s.export_file_exists))
 }
 
 /// 统计面板底部导出提示行: 固定高度, 无提示时留空 (面板高度恒定, 不抖动)。
@@ -1022,6 +1112,187 @@ fn format_duration(secs: u64) -> String {
     } else {
         format!("{secs} 秒")
     }
+}
+
+/// 导出 CSV 的固定路径 (OS 配置目录 + danqing/focus-history.csv)。
+fn export_csv_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("danqing").join("focus-history.csv"))
+}
+
+/// 在系统文件管理器中显示导出文件 (回答「导到哪了」)。
+/// Win: Explorer 定位文件; mac: Finder 定位; 其它平台: 打开所在目录。
+/// 导出本身已成功, 此处失败只记日志, 不影响导出结果。
+fn reveal_in_file_manager(path: &std::path::Path) {
+    if let Err(err) = reveal_attempt(path) {
+        log::warn!("在文件管理器中显示导出文件失败: {err}");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn reveal_attempt(path: &std::path::Path) -> std::io::Result<std::process::Child> {
+    std::process::Command::new("explorer")
+        .arg(format!("/select,{}", path.display()))
+        .spawn()
+}
+
+#[cfg(target_os = "macos")]
+fn reveal_attempt(path: &std::path::Path) -> std::io::Result<std::process::Child> {
+    std::process::Command::new("open")
+        .arg("-R")
+        .arg(path)
+        .spawn()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn reveal_attempt(path: &std::path::Path) -> std::io::Result<std::process::Child> {
+    let Some(dir) = path.parent() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "导出文件无父目录",
+        ));
+    };
+    std::process::Command::new("xdg-open").arg(dir).spawn()
+}
+
+/// 当前本地年份 (年度报告按年聚合的锚)。
+fn current_year() -> u32 {
+    chrono::Local::now().year() as u32
+}
+
+/// 年度报告面板浮层: 居中玻璃卡片, 旗舰版深度洞察
+/// (当前年汇总 + 场景分布 + 近 12 月趋势)。
+fn report_panel(t: SceneTheme) -> impl widget::Widget {
+    Stack::new()
+        .child(UiBox::new(Color::rgba(0.0, 0.0, 0.0, 0.35)).radius(0.0))
+        .child(
+            Center::new(
+                UiBox::new(Color::TRANSPARENT)
+                    .bind_color(|s: &PomodoroApp| s.palette().surface)
+                    .radius(t.radius_lg())
+                    .width(REPORT_CARD_WIDTH)
+                    .child(Padding::new(
+                        Edges::all(t.spacing_xl()),
+                        Column::new()
+                            .gap(t.spacing_lg())
+                            .child(report_header(t))
+                            .child(section_label(t, "本年"))
+                            .child(stat_row(t, "专注时长", |s| {
+                                format_duration(s.history.year_summary(current_year()).total_secs)
+                            }))
+                            .child(stat_row(t, "轮次", |s| {
+                                format!(
+                                    "{} 次",
+                                    s.history.year_summary(current_year()).session_count
+                                )
+                            }))
+                            .child(stat_row(t, "活跃天数", |s| {
+                                format!("{} 天", s.history.year_summary(current_year()).active_days)
+                            }))
+                            .child(section_label(t, "场景分布"))
+                            .child(scene_distribution_rows(t))
+                            .child(section_label(t, "近 12 月趋势"))
+                            .child(month_trend_rows(t)),
+                    )),
+            )
+            .fill_max(),
+        )
+}
+
+/// 报告面板分区标题。
+fn section_label(t: SceneTheme, text: &'static str) -> impl widget::Widget {
+    Text::new(text)
+        .font_size(t.font_size_small())
+        .bind_color(|s: &PomodoroApp| s.palette().text_secondary)
+}
+
+/// 报告面板标题行: "年度报告" + 旗舰角标 + 关闭按钮。
+fn report_header(t: SceneTheme) -> impl widget::Widget {
+    Row::new()
+        .cross_stretch()
+        .child(Center::new(
+            Row::new()
+                .gap(t.spacing_sm())
+                .child(
+                    Text::new("年度报告")
+                        .font_size(t.font_size_heading())
+                        .bind_color(|s: &PomodoroApp| s.palette().text_primary),
+                )
+                .child(
+                    Text::new("旗舰")
+                        .font_size(t.font_size_small())
+                        .bind_color(|s: &PomodoroApp| s.palette().accent),
+                ),
+        ))
+        .child(
+            UiBox::new(Color::TRANSPARENT)
+                .width(SETTINGS_HEADER_GAP)
+                .height(1.0),
+        )
+        .child(
+            close_button::CloseButton::new()
+                .on_click(|| Msg::ToggleReport)
+                .bind_color(|s: &PomodoroApp| s.palette().text_primary)
+                .bind_hover_color(|s: &PomodoroApp| s.palette().accent),
+        )
+}
+
+/// 场景分布: 5 场景各一行 (名 + 本年专注时长; 无记录显示 "—")。
+fn scene_distribution_rows(t: SceneTheme) -> impl widget::Widget {
+    Column::new()
+        .gap(t.spacing_xs())
+        .child(scene_row(t, 0))
+        .child(scene_row(t, 1))
+        .child(scene_row(t, 2))
+        .child(scene_row(t, 3))
+        .child(scene_row(t, 4))
+}
+
+fn scene_row(t: SceneTheme, idx: usize) -> impl widget::Widget {
+    stat_row(t, SCENES[idx].name, move |s| {
+        let secs = s
+            .history
+            .year_summary(current_year())
+            .scene_secs
+            .get(idx)
+            .copied()
+            .unwrap_or(0);
+        if secs > 0 {
+            format_duration(secs)
+        } else {
+            "—".to_string()
+        }
+    })
+}
+
+/// 近 12 月趋势: 逐月一行 (YYYY-MM + 当月专注时长)。
+fn month_trend_rows(t: SceneTheme) -> impl widget::Widget {
+    (0..12).fold(Column::new().gap(t.spacing_xs()), |col, idx| {
+        col.child(trend_row(t, idx))
+    })
+}
+
+fn trend_row(t: SceneTheme, idx: usize) -> impl widget::Widget {
+    Row::new()
+        .cross_stretch()
+        .child(Center::new(
+            Text::bind(move |s: &PomodoroApp| {
+                let trend = s.history.month_trend(current_wall_secs(), 12);
+                let (y, m, _) = trend[idx];
+                format!("{y}-{m:02}")
+            })
+            .font_size(t.font_size_body())
+            .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
+        ))
+        .fill(UiBox::new(Color::TRANSPARENT), 1)
+        .child(Center::new(
+            Text::bind(move |s: &PomodoroApp| {
+                let trend = s.history.month_trend(current_wall_secs(), 12);
+                let (_, _, secs) = trend[idx];
+                format_duration(secs)
+            })
+            .font_size(t.font_size_body())
+            .bind_color(|s: &PomodoroApp| s.palette().text_primary),
+        ))
 }
 
 fn main() -> ExitCode {
@@ -1838,6 +2109,53 @@ mod tests {
         assert!(!app.stats_open, "打开设置应关闭统计");
     }
 
+    // === 年度报告面板 (2026-08-01 里程碑 1 Task E) ===
+
+    #[test]
+    fn toggle_report_flips_state() {
+        let mut app = PomodoroApp::new_default();
+        assert!(!app.report_open);
+        app.update(Msg::ToggleReport);
+        assert!(app.report_open);
+        app.update(Msg::ToggleReport);
+        assert!(!app.report_open);
+    }
+
+    #[test]
+    fn report_settings_stats_mutually_exclusive() {
+        let mut app = PomodoroApp::new_default();
+        app.update(Msg::ToggleReport);
+        assert!(app.report_open);
+        app.update(Msg::ToggleStats);
+        assert!(app.stats_open);
+        assert!(!app.report_open, "打开统计应关闭报告");
+        app.update(Msg::ToggleReport);
+        assert!(app.report_open);
+        assert!(!app.stats_open, "打开报告应关闭统计");
+        app.update(Msg::ToggleSettings);
+        assert!(app.settings_open);
+        assert!(!app.report_open, "打开设置应关闭报告");
+    }
+
+    #[test]
+    fn escape_closes_report() {
+        let mut app = PomodoroApp::new_default();
+        app.update(Msg::ToggleReport);
+        assert!(app.report_open);
+        app.event(&Event::Key {
+            key: Key::Named(NamedKey::Escape),
+            pressed: true,
+            shift: false,
+            ctrl: false,
+        });
+        assert!(!app.report_open, "Esc 应关闭报告面板");
+        assert_eq!(
+            app.focus_request(),
+            Some("report-button"),
+            "关闭报告应请求焦点回到「报告」按钮"
+        );
+    }
+
     #[test]
     fn format_duration_human_readable() {
         assert_eq!(format_duration(0), "0 秒");
@@ -1865,7 +2183,10 @@ mod tests {
         let dir = std::env::temp_dir().join("danqing-test-export-notice");
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("focus-history.csv");
-        app.run_export_csv(Some(path.clone()));
+        assert!(
+            app.run_export_csv(Some(path.clone())),
+            "成功导出应返回 true"
+        );
         assert!(
             app.export_notice
                 .as_deref()
@@ -1887,7 +2208,7 @@ mod tests {
         let mut app = fresh_app_with_empty_history();
         app.history.refuse_overwrite = true; // 受保护历史 → 拒绝导出
         app.now = Duration::from_secs(5);
-        app.run_export_csv(None);
+        assert!(!app.run_export_csv(None), "失败导出应返回 false");
         assert!(
             app.export_notice
                 .as_deref()
@@ -1911,6 +2232,48 @@ mod tests {
             backdrop_light: Color::WHITE,
             backdrop_dark: Color::BLACK,
         })
+    }
+
+    // === 面板关闭后焦点回归 (2026-08-01) ===
+
+    #[test]
+    fn closing_stats_panel_requests_focus_restore_to_anchor() {
+        let mut app = fresh_app_with_empty_history();
+        app.update(Msg::ToggleStats); // 打开
+        assert!(app.stats_open);
+        assert!(app.focus_request().is_none(), "打开面板时不应请求恢复焦点");
+        app.update(Msg::ToggleStats); // 关闭
+        assert!(!app.stats_open);
+        assert_eq!(
+            app.focus_request(),
+            Some("stats-button"),
+            "关闭统计后面板焦点应请求回到统计按钮"
+        );
+        app.focus_restored();
+        assert!(app.focus_request().is_none(), "恢复应用后应清除一次性请求");
+    }
+
+    #[test]
+    fn closing_settings_panel_requests_focus_restore_to_anchor() {
+        let mut app = fresh_app_with_empty_history();
+        app.update(Msg::ToggleSettings);
+        app.update(Msg::ToggleSettings); // 关闭
+        assert_eq!(app.focus_request(), Some("settings-button"));
+    }
+
+    #[test]
+    fn escape_close_requests_focus_restore() {
+        // Escape 关闭路径同样应请求焦点回归 (焦点为空时由应用层关闭面板)。
+        let mut app = fresh_app_with_empty_history();
+        app.update(Msg::ToggleStats);
+        app.event(&Event::Key {
+            key: Key::Named(NamedKey::Escape),
+            pressed: true,
+            shift: false,
+            ctrl: false,
+        });
+        assert!(!app.stats_open, "Escape 应关闭统计面板");
+        assert_eq!(app.focus_request(), Some("stats-button"));
     }
 
     #[test]
