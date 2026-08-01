@@ -101,8 +101,8 @@ pub const SCENES: [SceneSpec; 9] = [
             text_secondary: Color::from_srgb8(80, 95, 110),
             surface: Color::rgba(1.0, 1.0, 1.0, 0.55),
             surface_input: Color::rgba(1.0, 1.0, 1.0, 0.85),
-            backdrop_light: Color::from_srgb8(219, 229, 236),
-            backdrop_dark: Color::from_srgb8(206, 219, 229),
+            backdrop_light: Color::from_srgb8(212, 226, 235),
+            backdrop_dark: Color::from_srgb8(177, 194, 209),
         },
     },
     SceneSpec {
@@ -129,8 +129,8 @@ pub const SCENES: [SceneSpec; 9] = [
             text_secondary: Color::from_srgb8(120, 85, 95),
             surface: Color::rgba(1.0, 1.0, 1.0, 0.5),
             surface_input: Color::rgba(1.0, 1.0, 1.0, 0.8),
-            backdrop_light: Color::from_srgb8(243, 226, 214),
-            backdrop_dark: Color::from_srgb8(211, 160, 138),
+            backdrop_light: Color::from_srgb8(250, 232, 216),
+            backdrop_dark: Color::from_srgb8(175, 124, 124),
         },
     },
 ];
