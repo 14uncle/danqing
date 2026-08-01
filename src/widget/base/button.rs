@@ -283,6 +283,12 @@ impl Widget for Button {
         true
     }
 
+    /// 重置焦点视觉: 清除焦点环与按压态 (面板隐藏时被容器调用)。
+    fn reset_focus(&mut self) {
+        self.focused = false;
+        self.pressed = false;
+    }
+
     fn children(&self) -> &[Node] {
         std::slice::from_ref(&self.child)
     }

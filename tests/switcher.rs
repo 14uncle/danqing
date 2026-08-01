@@ -97,6 +97,53 @@ fn focus_in_hidden_panel_is_cleared_after_switch() {
     assert!(focus.current().is_none());
 }
 
+/// 渲染的矩形实例数: 聚焦环 (虚线边框) 由大量小矩形组成, 计数可区分有/无环。
+fn ring_count(
+    tree: &mut danqing::widget::Node,
+    area: Rect,
+    texts: &mut danqing::TextBatch,
+) -> usize {
+    let mut rects = danqing::RectBatch::new();
+    tree.paint(area, &mut rects, texts);
+    rects.len()
+}
+
+#[test]
+fn switching_panel_clears_previous_focus_ring() {
+    // 回归: 面板切换后旧面板按钮的焦点环必须清除。FocusOut 经 Switcher 的
+    // 可见切片无法送达隐藏面板, 故 active 变化时 Switcher 主动 reset_focus;
+    // 否则重开面板会残留上一会话的焦点环 (渲染矩形数不回归基线)。
+    let mut tree = node(
+        Column::new().child(
+            Switcher::new()
+                .child(Button::new(Text::new("A")).on_click(|| "a"))
+                .child(Button::new(Text::new("B")).on_click(|| "b"))
+                .bind(|s: &Nav| s.active),
+        ),
+    );
+    let mut texts = danqing::TextBatch::new();
+    let area = Rect::new(Point::ZERO, Size::new(300.0, 80.0));
+    tree.sync(&Nav { active: 0 });
+    tree.layout(Constraints::tight(area.size), &mut texts);
+
+    // 面板 0 激活、未聚焦: 基线 = 按钮 A 的填充矩形数。
+    let baseline = ring_count(&mut tree, area, &mut texts);
+
+    // 聚焦按钮 A (模拟 handler 派发 FocusIn): 出现焦点环 → 矩形数增加。
+    let mut msgs = Vec::new();
+    event_at_path(&mut tree, &[0, 0], &Event::FocusIn, area, &mut msgs);
+    let focused = ring_count(&mut tree, area, &mut texts);
+    assert!(focused > baseline, "聚焦后应多出焦点环矩形");
+
+    // 切到面板 1 再切回面板 0: 按钮 A 的焦点环必须已被清除。
+    tree.sync(&Nav { active: 1 });
+    tree.layout(Constraints::tight(area.size), &mut texts);
+    tree.sync(&Nav { active: 0 });
+    tree.layout(Constraints::tight(area.size), &mut texts);
+    let after = ring_count(&mut tree, area, &mut texts);
+    assert_eq!(after, baseline, "面板切走再切回后不应残留焦点环");
+}
+
 #[test]
 fn event_at_path_reaches_active_child_through_visible_slice() {
     let mut tree = build_tree(0);
