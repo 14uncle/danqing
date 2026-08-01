@@ -70,6 +70,8 @@ const SETTINGS_CARD_WIDTH: f32 = 300.0;
 const SETTINGS_HEADER_GAP: f32 = 150.0;
 /// 设置面板步进器数值显示宽度。
 const STEPPER_VALUE_WIDTH: f32 = 72.0;
+/// 减号按钮相对标签的偏移量: 把 [-] 从标签右侧推开 20px (视觉微调)。
+const STEPPER_MINUS_OFFSET: f32 = 20.0;
 
 /// 番茄钟应用状态。
 struct PomodoroApp {
@@ -888,6 +890,8 @@ fn stepper_row(
                 .font_size(t.font_size_body())
                 .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
         ))
+        // 减号右移 STEPPER_MINUS_OFFSET: [-] 不贴标签, 与 [+][数值] 保持呼吸。
+        .child(UiBox::new(Color::TRANSPARENT).width(STEPPER_MINUS_OFFSET))
         .child(Center::new(ghost_button(t, "-", dec_msg)))
         .child(
             UiBox::new(Color::TRANSPARENT)
