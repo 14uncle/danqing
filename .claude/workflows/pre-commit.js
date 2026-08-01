@@ -8,34 +8,40 @@ export const meta = {
   ],
 }
 
+// 每个 agent 用结构化结果报告成败, 聚合只读布尔值。
+// (2026-08-01 修复: 旧版用 !includes('warn')/!includes('error') 对自由文本做子串判断,
+// clippy 报告必含 "warnings"/"errors" 字样, 导致全绿也恒报失败。)
+const RESULT_SCHEMA = {
+  type: 'object',
+  properties: {
+    passed: { type: 'boolean', description: '该门验证是否通过' },
+    detail: { type: 'string', description: '通过时的简短摘要; 失败时的完整错误输出' },
+  },
+  required: ['passed', 'detail'],
+}
+
 phase('Format')
-const fmtOk = await agent(
-  'Run `cargo fmt --check` and report the result. If it fails, report which files are not formatted.',
-  { label: 'fmt-check' }
+const fmt = await agent(
+  'Run `cargo fmt --check`. If it fails, list which files are not formatted in detail.',
+  { label: 'fmt-check', schema: RESULT_SCHEMA }
 )
-log(`fmt: ${fmtOk}`)
-
 phase('Clippy')
-const clippyOk = await agent(
-  'Run `cargo clippy -- -D warnings` and report the result. If it fails, extract and report every warning/error.',
-  { label: 'clippy' }
+const clippy = await agent(
+  'Run `cargo clippy -- -D warnings`. If it fails, list every warning/error in detail.',
+  { label: 'clippy', schema: RESULT_SCHEMA }
 )
-log(`clippy: ${clippyOk}`)
-
 phase('Test')
-const testOk = await agent(
-  'Run `cargo test --lib --tests` and report the result. If any test fails, extract and report the failure details.',
-  { label: 'test' }
+const test = await agent(
+  'Run `cargo test --lib --tests`. If any test fails, include the failure details in detail.',
+  { label: 'test', schema: RESULT_SCHEMA }
 )
-log(`test: ${testOk}`)
 
-const allPassed = [fmtOk, clippyOk, testOk].every(r =>
-  r && (typeof r === 'string' ? !r.includes('FAIL') && !r.includes('error') && !r.includes('warn') : true)
-)
+// agent 中途失败/被跳过返回 null, `r?.passed === true` 对 null 安全地判为不通过。
+const allPassed = [fmt, clippy, test].every(r => r?.passed === true)
 
 return {
   passed: allPassed,
-  fmt: fmtOk,
-  clippy: clippyOk,
-  test: testOk,
+  fmt: fmt?.detail ?? fmt,
+  clippy: clippy?.detail ?? clippy,
+  test: test?.detail ?? test,
 }
