@@ -122,6 +122,10 @@ struct PomodoroApp {
     history: FocusHistory,
     /// 历史脏旗标: 完成记录后置位, 与状态共用 1Hz 节流落盘。
     history_dirty: bool,
+    /// 导出 CSV 结果提示 (Some = 显示中)。
+    export_notice: Option<String>,
+    /// 提示过期时刻 (注入时间轴, now >= 此值后隐藏)。
+    export_notice_until: Duration,
 }
 
 /// 应用消息。
@@ -189,6 +193,8 @@ impl PomodoroApp {
             stats_open: false,
             history: stats::load_history(),
             history_dirty: false,
+            export_notice: None,
+            export_notice_until: Duration::ZERO,
         }
     }
 
@@ -254,6 +260,8 @@ impl PomodoroApp {
             stats_open: false,
             history: stats::load_history(),
             history_dirty: false,
+            export_notice: None,
+            export_notice_until: Duration::ZERO,
         }
     }
 
@@ -355,6 +363,26 @@ impl PomodoroApp {
         }
         self.history_dirty = true;
     }
+
+    /// 执行 CSV 导出并设置面板提示 (用户点击必须有可见反馈, 3s 后过期)。
+    /// `path = None` 表示无配置目录 (导出失败)。
+    fn run_export_csv(&mut self, path: Option<std::path::PathBuf>) {
+        let notice = match path {
+            Some(path) => match stats::export_csv_to(&path, &self.history) {
+                Ok(()) => {
+                    log::info!("专注数据已导出: {}", path.display());
+                    "已导出 CSV ✓".to_string()
+                }
+                Err(reason) => {
+                    log::warn!("导出 CSV 失败: {reason}");
+                    format!("导出失败: {reason}")
+                }
+            },
+            None => "导出失败: 无配置目录".to_string(),
+        };
+        self.export_notice = Some(notice);
+        self.export_notice_until = self.now + Duration::from_secs(3);
+    }
 }
 
 impl App for PomodoroApp {
@@ -408,26 +436,8 @@ impl App for PomodoroApp {
                 self.stats_open = !self.stats_open;
             }
             Msg::ExportCsv => {
-                if let Some(dir) = dirs::config_dir() {
-                    let path = dir.join("danqing").join("focus-history.csv");
-                    if self.history.refuse_overwrite {
-                        // 受保护历史 (未来版本文件): 会话已被清空, 导出空 CSV 会误导用户。
-                        log::warn!(
-                            "检测到更高版本的历史文件, 当前会话数据未加载, 跳过导出: {}",
-                            path.display()
-                        );
-                    } else {
-                        // 全新机器上 danqing 目录可能不存在, 先建目录再写。
-                        if let Err(err) = std::fs::create_dir_all(dir.join("danqing")) {
-                            log::warn!("创建导出目录失败：{err}");
-                        } else {
-                            match std::fs::write(&path, self.history.export_csv()) {
-                                Ok(()) => log::info!("专注数据已导出: {}", path.display()),
-                                Err(err) => log::warn!("导出 CSV 失败：{err}"),
-                            }
-                        }
-                    }
-                }
+                let path = dirs::config_dir().map(|d| d.join("danqing").join("focus-history.csv"));
+                self.run_export_csv(path);
             }
         }
     }
@@ -929,11 +939,27 @@ fn stats_panel(t: SceneTheme) -> impl widget::Widget {
                                 let (count, secs) = s.history.total_stats();
                                 format!("{count} 次 · {}", format_duration(secs))
                             }))
-                            .child(ghost_button(t, "导出 CSV", Msg::ExportCsv)),
+                            .child(ghost_button(t, "导出 CSV", Msg::ExportCsv))
+                            .child(export_notice_row(t)),
                     )),
             )
             .fill_max(),
         )
+}
+
+/// 统计面板底部导出提示行: 固定高度, 无提示时留空 (面板高度恒定, 不抖动)。
+/// 点击「导出 CSV」后短暂显示结果 (成功 ✓ / 失败原因), 3s 后淡出。
+fn export_notice_row(t: SceneTheme) -> impl widget::Widget {
+    UiBox::new(Color::TRANSPARENT)
+        .height(24.0)
+        .child(Center::new(
+            Text::bind(|s: &PomodoroApp| match &s.export_notice {
+                Some(notice) if s.now < s.export_notice_until => notice.clone(),
+                _ => String::new(),
+            })
+            .font_size(t.font_size_small())
+            .bind_color(|s: &PomodoroApp| s.palette().accent),
+        ))
 }
 
 /// 统计面板标题行："专注统计" + 固定间距 + 关闭按钮。
@@ -1813,5 +1839,55 @@ mod tests {
         assert_eq!(format_duration(60), "1 分钟");
         assert_eq!(format_duration(3661), "1 小时 1 分");
         assert_eq!(format_duration(5400), "1 小时 30 分");
+    }
+
+    // === 导出 CSV 反馈 (2026-08-01) ===
+
+    #[test]
+    fn export_csv_success_sets_visible_notice() {
+        let mut app = fresh_app_with_empty_history();
+        app.history.push(SessionRecord {
+            started_ts: 100,
+            completed_ts: 1600,
+            planned_secs: 1500,
+            focused_secs: 1500,
+            scene_index: 0,
+            round_in_cycle: 1,
+            completed: true,
+        });
+        app.now = Duration::from_secs(100);
+        let dir = std::env::temp_dir().join("danqing-test-export-notice");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("focus-history.csv");
+        app.run_export_csv(Some(path.clone()));
+        assert!(
+            app.export_notice
+                .as_deref()
+                .is_some_and(|n| n == "已导出 CSV ✓"),
+            "成功导出应设置可见提示: {:?}",
+            app.export_notice
+        );
+        assert_eq!(
+            app.export_notice_until,
+            Duration::from_secs(103),
+            "3s 后过期"
+        );
+        assert!(path.exists(), "导出文件应已写入");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_csv_failure_sets_notice_with_reason() {
+        let mut app = fresh_app_with_empty_history();
+        app.history.refuse_overwrite = true; // 受保护历史 → 拒绝导出
+        app.now = Duration::from_secs(5);
+        app.run_export_csv(None);
+        assert!(
+            app.export_notice
+                .as_deref()
+                .is_some_and(|n| n.starts_with("导出失败")),
+            "失败应设置含原因的提示: {:?}",
+            app.export_notice
+        );
     }
 }

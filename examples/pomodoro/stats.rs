@@ -138,6 +138,19 @@ pub fn save_history(history: &FocusHistory) -> io::Result<()> {
     save_history_to_path(&path, history)
 }
 
+/// 导出历史为 CSV 到指定路径。失败返回用户可读的短原因 (静态文案,
+/// 面板直接显示; 完整 OS 错误由调用方记录日志)。
+pub fn export_csv_to(path: &Path, history: &FocusHistory) -> Result<(), &'static str> {
+    if history.refuse_overwrite {
+        return Err("检测到更高版本数据, 拒绝导出");
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|_| "创建导出目录失败")?;
+    }
+    std::fs::write(path, history.export_csv()).map_err(|_| "导出写入失败")?;
+    Ok(())
+}
+
 /// 加载历史 (应用入口, 带降级数据保护)。
 /// - 文件缺失 → 空历史 (可写)
 /// - 文件存在且可解析 → 正常加载; 未来大版本拒读且拒写
@@ -407,6 +420,64 @@ mod tests {
         assert_eq!(lines.len(), 2, "首行表头 + 一行数据");
         assert!(lines[0].starts_with("started_ts,"));
         assert_eq!(lines[1], "0,100,1500,1500,0,1,1");
+    }
+
+    #[test]
+    fn export_csv_writes_file_and_reports_ok() {
+        let dir = std::env::temp_dir().join("danqing-test-export-ok");
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("focus-history.csv");
+        let mut history = FocusHistory::new();
+        history.push(record(100));
+        let result = export_csv_to(&path, &history);
+        assert_eq!(result, Ok(()));
+        let csv = fs::read_to_string(&path).expect("导出文件应存在");
+        assert!(csv.starts_with("started_ts,"), "应有表头");
+        assert!(csv.contains("0,100,1500,1500,0,1,1"), "应有一行数据");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_refuses_future_version_without_touching_file() {
+        let dir = std::env::temp_dir().join("danqing-test-export-refuse");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("focus-history.csv");
+        fs::write(&path, "sentinel").unwrap();
+        let mut history = FocusHistory::new();
+        history.refuse_overwrite = true;
+        history.push(record(42));
+        let result = export_csv_to(&path, &history);
+        assert!(result.is_err(), "受保护历史应拒绝导出");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "sentinel",
+            "拒绝导出时不得触碰原文件"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_fails_when_parent_path_is_a_file() {
+        let dir = std::env::temp_dir().join("danqing-test-export-parent-file");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("blocker"), "file").unwrap();
+        let path = dir.join("blocker").join("sub").join("focus-history.csv");
+        let history = FocusHistory::new();
+        assert_eq!(export_csv_to(&path, &history), Err("创建导出目录失败"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_fails_when_target_is_a_directory() {
+        let dir = std::env::temp_dir().join("danqing-test-export-dir-target");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("focus-history.csv")).unwrap();
+        let path = dir.join("focus-history.csv");
+        let history = FocusHistory::new();
+        assert_eq!(export_csv_to(&path, &history), Err("导出写入失败"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
