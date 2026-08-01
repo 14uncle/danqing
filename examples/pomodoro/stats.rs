@@ -155,7 +155,9 @@ impl FocusHistory {
     /// 时长转 mm:ss、轮次转 "N/4"。机器可读的原始字段在 `focus-history.json`,
     /// CSV 是给人看的, 不保留裸 Unix 秒 / 数字索引。
     pub fn export_csv(&self) -> String {
-        let mut out = String::from("开始时间,完成时间,计划时长,实际专注,场景,轮次\n");
+        // UTF-8 BOM (\u{FEFF}): Excel 打开无 BOM 的 UTF-8 CSV 会按 ANSI 解码导致中文乱码,
+        // BOM 让 Excel 识别 UTF-8 编码。
+        let mut out = String::from("\u{FEFF}开始时间,完成时间,计划时长,实际专注,场景,轮次\n");
         for s in &self.sessions {
             out.push_str(&format!(
                 "{},{},{},{},{},{}\n",
@@ -526,8 +528,8 @@ mod tests {
         let lines: Vec<&str> = csv.lines().collect();
         assert_eq!(lines.len(), 2, "首行表头 + 一行数据");
         assert!(
-            lines[0].starts_with("开始时间,"),
-            "表头应为人读: {:?}",
+            lines[0].starts_with("\u{FEFF}开始时间,"),
+            "表头应带 UTF-8 BOM 且人读: {:?}",
             lines[0]
         );
         let row = lines[1];
@@ -547,7 +549,10 @@ mod tests {
         let result = export_csv_to(&path, &history);
         assert_eq!(result, Ok(()));
         let csv = fs::read_to_string(&path).expect("导出文件应存在");
-        assert!(csv.starts_with("开始时间,"), "应有表头");
+        assert!(
+            csv.starts_with("\u{FEFF}开始时间,"),
+            "应有表头 (含 UTF-8 BOM)"
+        );
         assert!(csv.contains(SCENES[0].name), "应有一行数据 (场景名)");
         let _ = fs::remove_dir_all(&dir);
     }
