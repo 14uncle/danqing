@@ -66,11 +66,13 @@
 
 - **Description:** 连载建造实录,每周一篇。不是营销,是思想史复利的第一笔本金(记录设计决策与踩坑)。
 - **Acceptance criteria:**
-  - [ ] 第 1-3 篇发布(记录设计决策与踩坑)
+  - [x] 第 1-3 篇草稿 (2026-08-01: `docs/chronicle/{01-why-ten-years,02-eighteen-iterations,03-data-is-the-moat}.md`)
+  - [ ] 第 1-3 篇发布 (仓库外: 博客/公众号)
 - **Verification:** 发布可见。
 - **Dependencies:** None
-- **Files:** 输出在仓库外(个人博客/公众号等),决策纪要可回写 `docs/`
+- **Files:** 草稿在 `docs/chronicle/`(可回写); 发布在仓库外
 - **Scope:** S
+- **Status:** 三篇草稿完成(为什么十年磨著作 / 场景动效 18 次迭代 / 数据即护城河); 待用户校订后发布
 
 ## 战略决策(已定)
 
