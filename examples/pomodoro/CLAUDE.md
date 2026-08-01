@@ -23,6 +23,7 @@
 | `flash.rs` | 完成反馈视觉脉冲 | 头部满→尾部透明,600ms |
 | `hint.rs` | 快捷键提示浮层 | Fade-in/out overlay |
 | `today.rs` | "今日完成"计数 | 日期边界检测+自动复位 |
+| `stats.rs` | 专注会话历史(数据层) | 独立存储 `focus-history.json`; format_version 版本化 + 字段 serde default 前后兼容 + 未来版本拒读; CSV 导出 |
 | `tray.rs` | 系统托盘菜单 | winit 0.30 tray API |
 
 ## 关键模式

@@ -133,6 +133,9 @@ pub struct TickReport {
     pub advanced: bool,
     /// 本帧自然完成的专注阶段数 (huge overshoot 可能 >1)。
     pub focus_completions: u8,
+    /// 最后一次自然完成的专注在大循环内的轮次 (1..=CYCLE_LENGTH)。
+    /// 无完成时为 0。供会话历史记录「轮次」字段 (2026-08-01 数据层新增)。
+    pub completed_round: u8,
 }
 
 /// 番茄钟状态机。
@@ -276,6 +279,8 @@ impl Pomodoro {
             let deadline = self.deadline.unwrap_or(now);
             if self.phase == Phase::Focus {
                 report.focus_completions += 1;
+                // 记录本次完成的轮次 (pre-advance 的 completed_focus + 1)。
+                report.completed_round = self.completed_focus + 1;
             }
             let (next_phase, next_count) = self.phase.next(self.completed_focus);
             self.phase = next_phase;
@@ -660,6 +665,47 @@ mod tests {
         let report = p.tick(secs(100));
         assert!(!report.advanced);
         assert_eq!(report.focus_completions, 0);
+        assert_eq!(report.completed_round, 0, "无完成时 completed_round 应为 0");
+    }
+
+    #[test]
+    fn completed_round_reflects_round_within_cycle() {
+        // 完成 2 个 Focus (第 1、2 轮): completed_round 应分别为 1、2。
+        let mut p = Pomodoro::new();
+        p.toggle(secs(0));
+        let r1 = p.tick(secs(DEFAULT_FOCUS_SECS));
+        assert_eq!(r1.focus_completions, 1);
+        assert_eq!(r1.completed_round, 1);
+        let r2 = p.tick(secs(
+            DEFAULT_FOCUS_SECS + DEFAULT_BREAK_SECS + DEFAULT_FOCUS_SECS,
+        ));
+        assert_eq!(r2.focus_completions, 1);
+        assert_eq!(r2.completed_round, 2);
+    }
+
+    #[test]
+    fn completed_round_fourth_focus_is_four() {
+        // 第 4 轮 Focus 完成 → LongBreak, completed_round 应为 4 (非清零后的 0)。
+        let mut p = Pomodoro::new();
+        p.toggle(secs(0));
+        let mut now = 0u64;
+        for _ in 0..3 {
+            run_short_cycle(&mut p, &mut now);
+        }
+        now += DEFAULT_FOCUS_SECS;
+        let report = p.tick(secs(now));
+        assert_eq!(p.phase(), Phase::LongBreak);
+        assert_eq!(report.completed_round, 4);
+    }
+
+    #[test]
+    fn completed_round_multi_completion_reports_last_round() {
+        // huge overshoot 一次跨 2 个 Focus: completed_round 为最后一次的轮次。
+        let mut p = Pomodoro::new();
+        p.toggle(secs(0));
+        let report = p.tick(secs(3300)); // F + B + F
+        assert_eq!(report.focus_completions, 2);
+        assert_eq!(report.completed_round, 2);
     }
 
     #[test]

@@ -21,6 +21,7 @@ mod hint;
 mod motion;
 mod scenes;
 mod state;
+mod stats;
 mod timer;
 mod today;
 mod tray;
@@ -45,6 +46,7 @@ use flash::FlashOverlay;
 use hint::ShortcutHintOverlay;
 use scenes::SCENES;
 use state::{PomodoroState, RunState, current_wall_secs, load_state, save_state};
+use stats::{FocusHistory, SessionRecord};
 use timer::{Phase, Pomodoro, Run};
 use tray::build_menu;
 
@@ -112,6 +114,12 @@ struct PomodoroApp {
     is_maximized: bool,
     /// 设置面板是否打开。
     settings_open: bool,
+    /// 统计面板是否打开。
+    stats_open: bool,
+    /// 专注会话历史 (数据层: 自然完成的 Focus 记录)。
+    history: FocusHistory,
+    /// 历史脏旗标: 完成记录后置位, 与状态共用 1Hz 节流落盘。
+    history_dirty: bool,
 }
 
 /// 应用消息。
@@ -145,6 +153,10 @@ enum Msg {
     DecLongBreak,
     /// 重置计时配置为默认值 (25/5/15)。
     ResetConfig,
+    /// 打开 / 关闭统计面板。
+    ToggleStats,
+    /// 导出专注数据为 CSV (明文, 固定路径)。
+    ExportCsv,
 }
 
 impl PomodoroApp {
@@ -172,6 +184,9 @@ impl PomodoroApp {
             window_sender: None,
             is_maximized: false,
             settings_open: false,
+            stats_open: false,
+            history: stats::load_history(),
+            history_dirty: false,
         }
     }
 
@@ -234,6 +249,9 @@ impl PomodoroApp {
             window_sender: None,
             is_maximized: false,
             settings_open: false,
+            stats_open: false,
+            history: stats::load_history(),
+            history_dirty: false,
         }
     }
 
@@ -246,6 +264,12 @@ impl PomodoroApp {
                 self.last_save_at = self.now;
             }
             Err(err) => log::warn!("flush 状态失败：{err}"),
+        }
+        if self.history_dirty {
+            match stats::save_history(&self.history) {
+                Ok(()) => self.history_dirty = false,
+                Err(err) => log::warn!("flush 专注历史失败：{err}"),
+            }
         }
     }
 
@@ -302,6 +326,33 @@ impl PomodoroApp {
         }
         self.timer.update_config(config);
     }
+
+    /// 将自然完成的专注写为会话记录 (每完成一条)。
+    ///
+    /// 专注时长取计划时长 (自然完成 = 计时器从满量跑到 0, 实际专注恒等于计划,
+    /// 暂停冻结 remaining 不计入); 开始时刻由「完成时刻 - 计划时长」推得, 保证
+    /// 记录自洽 (focused ≤ completed - started)。huge overshoot 一次多条时按
+    /// 完成时刻倒排错开 (i=0 为批次内最早), 轮次钳到 ≥1 (跨周期边界时无法还原
+    /// 上一周期的轮次, 不做越界值)。
+    fn record_focus_sessions(&mut self, count: u8, round: u8) {
+        let completed_ts = current_wall_secs();
+        let planned_secs = self.timer.config().focus_secs;
+        let scene_index = self.fader.current();
+        for i in 0..count {
+            let offset = count - 1 - i;
+            let completed = completed_ts.saturating_sub(u64::from(offset) * planned_secs);
+            self.history.push(SessionRecord {
+                started_ts: completed.saturating_sub(planned_secs),
+                completed_ts: completed,
+                planned_secs,
+                focused_secs: planned_secs,
+                scene_index,
+                round_in_cycle: round.saturating_sub(offset).max(1),
+                completed: true,
+            });
+        }
+        self.history_dirty = true;
+    }
 }
 
 impl App for PomodoroApp {
@@ -338,6 +389,7 @@ impl App for PomodoroApp {
                     self.settings_open,
                     !self.settings_open
                 );
+                self.stats_open = false;
                 self.settings_open = !self.settings_open;
             }
             Msg::IncFocus => self.adjust_config(Phase::Focus, 60),
@@ -348,6 +400,32 @@ impl App for PomodoroApp {
             Msg::DecLongBreak => self.adjust_config(Phase::LongBreak, -60),
             Msg::ResetConfig => {
                 self.timer.update_config(timer::TimerConfig::default());
+            }
+            Msg::ToggleStats => {
+                self.settings_open = false;
+                self.stats_open = !self.stats_open;
+            }
+            Msg::ExportCsv => {
+                if let Some(dir) = dirs::config_dir() {
+                    let path = dir.join("danqing").join("focus-history.csv");
+                    if self.history.refuse_overwrite {
+                        // 受保护历史 (未来版本文件): 会话已被清空, 导出空 CSV 会误导用户。
+                        log::warn!(
+                            "检测到更高版本的历史文件, 当前会话数据未加载, 跳过导出: {}",
+                            path.display()
+                        );
+                    } else {
+                        // 全新机器上 danqing 目录可能不存在, 先建目录再写。
+                        if let Err(err) = std::fs::create_dir_all(dir.join("danqing")) {
+                            log::warn!("创建导出目录失败：{err}");
+                        } else {
+                            match std::fs::write(&path, self.history.export_csv()) {
+                                Ok(()) => log::info!("专注数据已导出: {}", path.display()),
+                                Err(err) => log::warn!("导出 CSV 失败：{err}"),
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -366,7 +444,16 @@ impl App for PomodoroApp {
                             // FocusOut 无法送达隐藏面板内的旧焦点。
                             Padding::new(Edges::ZERO, settings_panel(t)),
                         )
-                        .bind(|s: &PomodoroApp| if s.settings_open { 1 } else { 0 }),
+                        .child(Padding::new(Edges::ZERO, stats_panel(t)))
+                        .bind(|s: &PomodoroApp| {
+                            if s.stats_open {
+                                2
+                            } else if s.settings_open {
+                                1
+                            } else {
+                                0
+                            }
+                        }),
                 )
                 .child(flash_overlay_widget())
                 .child(shortcut_hint_overlay_widget()),
@@ -382,6 +469,10 @@ impl App for PomodoroApp {
         {
             if self.settings_open {
                 self.settings_open = false;
+                self.state_dirty = true;
+            }
+            if self.stats_open {
+                self.stats_open = false;
                 self.state_dirty = true;
             }
         }
@@ -400,7 +491,7 @@ impl App for PomodoroApp {
                 sender.phase_advanced();
             }
         }
-        // 今日计数：自然完成的专注才计 (skip 不产生 focus_completions);
+        // 今日计数 + 会话记录：自然完成的专注才计 (skip 不产生 focus_completions);
         // 跨日先归零再累加，并标脏触发 1Hz 节流持久化。
         if report.focus_completions > 0 {
             let today = today::today_string();
@@ -409,6 +500,11 @@ impl App for PomodoroApp {
                     + u32::from(report.focus_completions);
             self.today_date = today;
             self.state_dirty = true;
+            // 会话记录：每个自然完成记一条。专注时长取计划时长——自然完成意味着
+            // 计时器从满量跑到 0 (暂停冻结 remaining), 实际专注恒等于计划时长;
+            // 故无需逐帧累计 (dt 累加在 huge overshoot 下会把冻结/休息期摊进专注,
+            // 恢复中途的 started_ts 也不真实)。开始时刻由「完成 - 计划」推得, 记录自洽。
+            self.record_focus_sessions(report.focus_completions, report.completed_round);
         }
         // 跨日归零 (1Hz 节流): 常驻应用过午夜后, 不等下次完成即刷新副标「今日 N」。
         if self.now.saturating_sub(self.last_date_check) >= SAVE_THROTTLE {
@@ -420,17 +516,30 @@ impl App for PomodoroApp {
                 self.state_dirty = true;
             }
         }
-        // 1Hz 节流落盘：状态变更后，距上次保存 ≥ 1s 才写。
-        if self.state_dirty && self.now.saturating_sub(self.last_save_at) >= SAVE_THROTTLE {
-            match save_state(&self.snapshot_state()) {
-                Ok(()) => {
-                    self.last_save_at = self.now;
-                    self.state_dirty = false;
-                }
-                Err(err) => {
+        // 1Hz 节流落盘：状态或会话历史变更后，距上次保存 ≥ 1s 才写。
+        if (self.state_dirty || self.history_dirty)
+            && self.now.saturating_sub(self.last_save_at) >= SAVE_THROTTLE
+        {
+            let mut all_ok = true;
+            if self.state_dirty {
+                if let Err(err) = save_state(&self.snapshot_state()) {
                     log::warn!("保存状态失败：{err}");
-                    self.last_save_at = self.now; // 节流，避免 60fps 重复刷写
+                    all_ok = false;
                 }
+            }
+            if self.history_dirty {
+                if let Err(err) = stats::save_history(&self.history) {
+                    log::warn!("保存专注历史失败：{err}");
+                    all_ok = false;
+                }
+            }
+            if all_ok {
+                self.state_dirty = false;
+                self.history_dirty = false;
+                self.last_save_at = self.now;
+            } else {
+                // 失败保留 dirty, 下次到达节流间隔时重试; 同时更新 last_save_at 避免 60fps 重复刷写。
+                self.last_save_at = self.now;
             }
         }
         // 环境音：与视觉淡化同源 (from/to/fade), 300ms 增益包络;
@@ -687,6 +796,7 @@ fn control_pill(t: SceneTheme) -> impl widget::Widget {
                 .child(primary_button(t))
                 .child(ghost_button(t, "跳", Msg::Skip))
                 .child(ghost_button(t, "后", Msg::NextScene))
+                .child(ghost_button(t, "统计", Msg::ToggleStats))
                 .child(ghost_button(t, "设置", Msg::ToggleSettings)),
         ))
 }
@@ -789,6 +899,93 @@ fn stepper_row(
                 )),
         )
         .child(Center::new(ghost_button(t, "+", inc_msg)))
+}
+
+/// 统计面板浮层：居中玻璃卡片，展示 今日 / 本周 / 累计 专注 + 导出按钮。
+fn stats_panel(t: SceneTheme) -> impl widget::Widget {
+    Stack::new()
+        .child(UiBox::new(Color::rgba(0.0, 0.0, 0.0, 0.35)).radius(0.0))
+        .child(
+            Center::new(
+                UiBox::new(Color::TRANSPARENT)
+                    .bind_color(|s: &PomodoroApp| s.palette().surface)
+                    .radius(t.radius_lg())
+                    .width(SETTINGS_CARD_WIDTH)
+                    .child(Padding::new(
+                        Edges::all(t.spacing_xl()),
+                        Column::new()
+                            .gap(t.spacing_lg())
+                            .child(stats_header(t))
+                            .child(stat_row(t, "今日", |s| format!("{} 次", s.today_count)))
+                            .child(stat_row(t, "近 7 天", |s| {
+                                let (count, secs) = s.history.week_stats(current_wall_secs());
+                                format!("{count} 次 · {}", format_duration(secs))
+                            }))
+                            .child(stat_row(t, "累计", |s| {
+                                let (count, secs) = s.history.total_stats();
+                                format!("{count} 次 · {}", format_duration(secs))
+                            }))
+                            .child(ghost_button(t, "导出 CSV", Msg::ExportCsv)),
+                    )),
+            )
+            .fill_max(),
+        )
+}
+
+/// 统计面板标题行："专注统计" + 固定间距 + 关闭按钮。
+fn stats_header(t: SceneTheme) -> impl widget::Widget {
+    Row::new()
+        .cross_stretch()
+        .child(Center::new(
+            Text::new("专注统计")
+                .font_size(t.font_size_heading())
+                .bind_color(|s: &PomodoroApp| s.palette().text_primary),
+        ))
+        .child(
+            UiBox::new(Color::TRANSPARENT)
+                .width(SETTINGS_HEADER_GAP)
+                .height(1.0),
+        )
+        .child(
+            close_button::CloseButton::new()
+                .on_click(|| Msg::ToggleStats)
+                .bind_color(|s: &PomodoroApp| s.palette().text_primary)
+                .bind_hover_color(|s: &PomodoroApp| s.palette().accent),
+        )
+}
+
+/// 单行统计：标签靠左 + 值靠右。
+fn stat_row(
+    t: SceneTheme,
+    label: &'static str,
+    value_fn: impl Fn(&PomodoroApp) -> String + 'static,
+) -> impl widget::Widget {
+    Row::new()
+        .cross_stretch()
+        .child(Center::new(
+            Text::new(label)
+                .font_size(t.font_size_body())
+                .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
+        ))
+        .fill(UiBox::new(Color::TRANSPARENT), 1)
+        .child(Center::new(
+            Text::bind(move |s: &PomodoroApp| value_fn(s))
+                .font_size(t.font_size_body())
+                .bind_color(|s: &PomodoroApp| s.palette().text_primary),
+        ))
+}
+
+/// 秒数 → 人读时长 ("X 小时 Y 分" / "Y 分钟" / "Z 秒")。
+fn format_duration(secs: u64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600) / 60;
+    if h > 0 {
+        format!("{h} 小时 {m} 分")
+    } else if m > 0 {
+        format!("{m} 分钟")
+    } else {
+        format!("{secs} 秒")
+    }
 }
 
 fn main() -> ExitCode {
@@ -1415,5 +1612,200 @@ mod tests {
         });
         app.update(Msg::DecFocus);
         assert_eq!(app.timer.config().focus_secs, 60);
+    }
+
+    // === 数据层: 专注会话记录 (2026-08-01 里程碑 0 Task C) ===
+
+    fn fresh_app_with_empty_history() -> PomodoroApp {
+        let mut app = PomodoroApp::new_default();
+        app.history = FocusHistory::new();
+        app
+    }
+
+    /// 以 0.5s 步进从当前 now 继续推进 (模拟逐帧运行, 毫秒累加可测)。
+    fn advance(app: &mut PomodoroApp, by_secs: u64) {
+        let step = Duration::from_millis(500);
+        let target = app.now + Duration::from_secs(by_secs);
+        let mut elapsed = app.now;
+        while elapsed < target {
+            elapsed += step;
+            let ctx = AnimationCtx::new(std::time::Instant::now(), elapsed);
+            app.tick(&ctx);
+        }
+    }
+
+    #[test]
+    fn completion_records_focus_session() {
+        let mut app = fresh_app_with_empty_history();
+        app.last_save_at = Duration::from_secs(25 * 60); // 防测试触发真实落盘
+        app.ambient_player.disable_for_test(); // 防测试触碰音频设备
+        app.timer.toggle(app.now);
+        advance(&mut app, 25 * 60);
+        assert_eq!(app.history.sessions.len(), 1);
+        let s = &app.history.sessions[0];
+        assert_eq!(s.round_in_cycle, 1);
+        assert_eq!(s.planned_secs, 25 * 60);
+        assert_eq!(s.scene_index, 0);
+        assert!(
+            s.focused_secs.abs_diff(25 * 60) <= 2,
+            "专注时长≈计划时长: {}",
+            s.focused_secs
+        );
+        assert!(s.started_ts > 0 && s.started_ts <= s.completed_ts);
+        assert!(s.completed);
+        assert!(app.history_dirty, "完成记录应标脏历史以触发落盘");
+    }
+
+    #[test]
+    fn completion_records_current_scene_and_round() {
+        let mut app = fresh_app_with_empty_history();
+        app.last_save_at = Duration::from_secs(25 * 60);
+        app.ambient_player.disable_for_test();
+        app.fader.switch_to(motion::SEA_SCENE, app.now);
+        app.timer.toggle(app.now);
+        advance(&mut app, 25 * 60);
+        let s = &app.history.sessions[0];
+        assert_eq!(s.scene_index, motion::SEA_SCENE);
+        assert_eq!(s.round_in_cycle, 1);
+    }
+
+    #[test]
+    fn fourth_focus_records_round_four_and_enters_long_break() {
+        let mut app = fresh_app_with_empty_history();
+        app.last_save_at = Duration::from_secs(10 * 3600);
+        app.ambient_player.disable_for_test();
+        app.timer.toggle(app.now);
+        for round in 1..=4u8 {
+            let start_len = app.history.sessions.len();
+            advance(&mut app, 25 * 60);
+            assert_eq!(app.history.sessions.len(), start_len + 1);
+            let s = app.history.sessions.last().expect("应有会话");
+            assert_eq!(s.round_in_cycle, round, "第 {round} 轮轮次应正确");
+            if round < 4 {
+                advance(&mut app, 5 * 60);
+            }
+        }
+        assert_eq!(app.timer.phase(), Phase::LongBreak);
+        assert_eq!(app.history.sessions.len(), 4);
+    }
+
+    #[test]
+    fn skip_does_not_record_session() {
+        let mut app = fresh_app_with_empty_history();
+        app.last_save_at = Duration::from_secs(60 * 60);
+        app.ambient_player.disable_for_test();
+        app.timer.toggle(app.now);
+        app.update(Msg::Skip); // skip 出 Focus: 不算完成, 不记录
+        advance(&mut app, 60);
+        assert!(app.history.sessions.is_empty(), "skip 不应产生会话记录");
+    }
+
+    #[test]
+    fn paused_focus_excludes_pause_from_focused_secs() {
+        let mut app = fresh_app_with_empty_history();
+        app.last_save_at = Duration::from_secs(10 * 3600);
+        app.ambient_player.disable_for_test();
+        app.timer.toggle(app.now);
+        advance(&mut app, 10 * 60); // 专注 10 分钟
+        app.timer.toggle(app.now); // 暂停
+        advance(&mut app, 30 * 60); // 暂停 30 分钟 (不累计)
+        app.timer.toggle(app.now); // 恢复
+        advance(&mut app, 15 * 60); // 再专注 15 分钟 → 完成 (25min 总额)
+        let s = &app.history.sessions[0];
+        assert_eq!(
+            s.focused_secs,
+            25 * 60,
+            "专注时长 = 计划时长 (暂停不摊入): {}",
+            s.focused_secs
+        );
+    }
+
+    #[test]
+    fn huge_overshoot_records_each_completion_chronologically() {
+        // C2 回归: 单帧跨 2 个 Focus (F + B + F = 3300s)。每条必须自洽 (专注 = 计划时长),
+        // 轮次按时间序 [1, 2], 完成时刻单调, 不得把冻结/休息期摊进专注。
+        let mut app = fresh_app_with_empty_history();
+        app.last_save_at = Duration::from_secs(10 * 3600);
+        app.ambient_player.disable_for_test();
+        app.timer.toggle(app.now);
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_secs(3300));
+        app.tick(&ctx);
+        assert_eq!(app.history.sessions.len(), 2);
+        assert_eq!(app.today_count, 2, "今日计数应与会话数一致");
+        let s0 = &app.history.sessions[0];
+        let s1 = &app.history.sessions[1];
+        assert_eq!(s0.round_in_cycle, 1, "最早完成应为第 1 轮");
+        assert_eq!(s1.round_in_cycle, 2, "最近完成应为第 2 轮");
+        assert_eq!(s0.focused_secs, 25 * 60, "专注时长 = 计划时长");
+        assert_eq!(s1.focused_secs, 25 * 60);
+        assert!(s0.completed_ts <= s1.completed_ts, "完成时刻应单调递增");
+        for s in &app.history.sessions {
+            assert!(
+                s.focused_secs <= s.completed_ts.saturating_sub(s.started_ts),
+                "记录必须自洽 (专注 ≤ 完成-开始): {}",
+                s.focused_secs
+            );
+        }
+    }
+
+    #[test]
+    fn completion_without_prior_running_frames_still_records() {
+        // I3 回归: 无 running+Focus 帧即完成 (如恢复 Paused+Focus 后立即跨终点),
+        // 也必须记录 — 记录不依赖会话追踪。
+        let mut app = fresh_app_with_empty_history();
+        app.last_save_at = Duration::from_secs(10 * 3600);
+        app.ambient_player.disable_for_test();
+        app.timer = timer::Pomodoro::restore(
+            Phase::Focus,
+            Run::Paused,
+            Duration::from_secs(1),
+            None,
+            0,
+            timer::TimerConfig::default(),
+        );
+        app.timer.toggle(app.now); // 恢复运行
+        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_secs(1));
+        app.tick(&ctx);
+        assert_eq!(app.history.sessions.len(), 1, "无追踪帧也应记录");
+        assert_eq!(app.today_count, 1);
+        let s = &app.history.sessions[0];
+        assert!(
+            s.focused_secs <= s.completed_ts.saturating_sub(s.started_ts),
+            "恢复场景记录也须自洽"
+        );
+    }
+
+    // === 统计面板 (2026-08-01) ===
+
+    #[test]
+    fn toggle_stats_flips_state() {
+        let mut app = PomodoroApp::new_default();
+        assert!(!app.stats_open);
+        app.update(Msg::ToggleStats);
+        assert!(app.stats_open);
+        app.update(Msg::ToggleStats);
+        assert!(!app.stats_open);
+    }
+
+    #[test]
+    fn stats_and_settings_mutually_exclusive() {
+        let mut app = PomodoroApp::new_default();
+        app.update(Msg::ToggleSettings);
+        assert!(app.settings_open);
+        app.update(Msg::ToggleStats);
+        assert!(app.stats_open);
+        assert!(!app.settings_open, "打开统计应关闭设置");
+        app.update(Msg::ToggleSettings);
+        assert!(app.settings_open);
+        assert!(!app.stats_open, "打开设置应关闭统计");
+    }
+
+    #[test]
+    fn format_duration_human_readable() {
+        assert_eq!(format_duration(0), "0 秒");
+        assert_eq!(format_duration(45), "45 秒");
+        assert_eq!(format_duration(60), "1 分钟");
+        assert_eq!(format_duration(3661), "1 小时 1 分");
+        assert_eq!(format_duration(5400), "1 小时 30 分");
     }
 }
