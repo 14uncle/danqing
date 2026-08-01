@@ -96,6 +96,8 @@ pub struct WindowConfig {
     pub close_behavior: CloseBehavior,
     /// LOGO 名称 (对应 `assets/logo/{name}_*.png`)。默认 `"logo"`。
     pub logo_name: String,
+    /// 初始是否最大化。默认 `false` (普通尺寸 + 居中)。
+    pub maximized: bool,
 }
 
 impl Default for WindowConfig {
@@ -112,6 +114,7 @@ impl Default for WindowConfig {
             border_thickness: 1.0,
             close_behavior: CloseBehavior::Exit,
             logo_name: "logo".into(),
+            maximized: false,
         }
     }
 }
@@ -180,6 +183,12 @@ pub fn run(config: WindowConfig) -> Result<(), WindowError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 默认不最大化 (普通尺寸 + 居中); 需要全屏启动的示例显式设 `maximized: true`。
+    #[test]
+    fn default_config_is_not_maximized() {
+        assert!(!WindowConfig::default().maximized);
+    }
 
     /// 冒烟测试：仅创建事件循环 (链接触发 shim 生成的导入库)。
     /// 若导入库损坏，本测试会以访问违规崩溃。

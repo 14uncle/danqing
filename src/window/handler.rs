@@ -430,7 +430,8 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             .with_title(&self.config.title)
             .with_visible(false)
             .with_window_icon(load_window_icon(&self.config.logo_name))
-            .with_inner_size(LogicalSize::new(window_width, window_height));
+            .with_inner_size(LogicalSize::new(window_width, window_height))
+            .with_maximized(self.config.maximized);
         if let Some(pos) = position {
             attrs = attrs.with_position(pos);
         }

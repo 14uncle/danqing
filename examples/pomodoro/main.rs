@@ -1028,6 +1028,8 @@ fn run() -> anyhow::Result<()> {
         // 常驻型应用：关闭按钮 / Alt+F4 只隐藏窗口，进程由托盘 / 全局热键退出。
         close_behavior: danqing::CloseBehavior::Hide,
         logo_name: "pomodoro".into(),
+        // 专注陪伴型工具：启动即全屏沉浸 (场景大图为主角), 最大化契合视觉契约。
+        maximized: true,
         ..WindowConfig::default()
     };
     danqing::run_app(config, &mut app)?;
