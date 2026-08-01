@@ -42,15 +42,9 @@ def _spectrum(freqs: np.ndarray, kind: str) -> np.ndarray:
         low = 1.0 / (1.0 + (freqs / 220.0) ** 2.0)
         air = (freqs / 1200.0) ** 1.2 / (1.0 + (freqs / 1200.0) ** 2.0) * 0.35
         return np.clip(low * 0.9 + air, 0.0, 1.0)
-    if kind == "lake":  # 晨雾湖泊: very quiet low rumble + faint air (晨间静水)
-        low = 1.0 / (1.0 + (freqs / 150.0) ** 2.0)
-        air = (freqs / 900.0) ** 1.3 / (1.0 + (freqs / 900.0) ** 2.0) * 0.25
-        return np.clip(low * 0.8 + air, 0.0, 1.0)
     if kind == "desert":  # 沙漠: dry mid-band wind, slight grain
         mid = 1.0 / (1.0 + (freqs / 1300.0) ** 1.4)
         return np.clip(mid, 0.0, 1.0)
-    if kind == "wheat":  # 麦田黄昏: gentle warm mid-band wind (麦浪)
-        return 1.0 / (1.0 + (freqs / 900.0) ** 1.4)
     raise ValueError(kind)
 
 
@@ -124,12 +118,8 @@ def _encode_ogg(wav: Path, out: Path) -> None:
 SCENES = [
     # 星夜 夜风: 最安静, 低频细语 + 一丝空气感。
     {"key": "starry", "kind": "night", "seed": 0x51A1, "rms_target": 0.05, "depth": 0.55},
-    # 晨雾湖泊: 极静低鸣 + 微空气 (晨间静水)。
-    {"key": "lake", "kind": "lake", "seed": 0x52A1, "rms_target": 0.05, "depth": 0.40},
     # 沙漠 干风: 干爽中段风声。
     {"key": "desert", "kind": "desert", "seed": 0x53A1, "rms_target": 0.08, "depth": 0.55},
-    # 麦田黄昏: 温柔中段风 (麦浪)。
-    {"key": "wheat", "kind": "wheat", "seed": 0x54A1, "rms_target": 0.06, "depth": 0.50},
 ]
 
 

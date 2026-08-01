@@ -22,17 +22,15 @@ use std::time::Duration;
 
 use rodio::Source;
 
-/// 场景音源路径 (与 `scenes::SCENES` 索引对齐：篝火/海/雨/山/森林/星夜/晨雾湖泊/沙漠/麦田黄昏)。
-pub const SCENE_AUDIO: [&str; 9] = [
+/// 场景音源路径 (与 `scenes::SCENES` 索引对齐：篝火/海/雨/山/森林/星夜/沙漠)。
+pub const SCENE_AUDIO: [&str; 7] = [
     "assets/audio/bonfire.ogg",
     "assets/audio/sea.ogg",
     "assets/audio/rain.ogg",
     "assets/audio/mountain.ogg",
     "assets/audio/forest.ogg",
     "assets/audio/starry.ogg",
-    "assets/audio/lake.ogg",
     "assets/audio/desert.ogg",
-    "assets/audio/wheat.ogg",
 ];
 
 /// 环境音目标音量 (固定，无设置 UI)。

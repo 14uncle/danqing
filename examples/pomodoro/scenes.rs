@@ -6,7 +6,7 @@
 use danqing::{Color, ScenePalette, SceneSpec};
 
 /// POC 场景清单 (数组顺序即 ◀/▶ 切换顺序)。
-pub const SCENES: [SceneSpec; 9] = [
+pub const SCENES: [SceneSpec; 7] = [
     SceneSpec {
         name: "篝火",
         image: "assets/scenes/bonfire.png",
@@ -92,20 +92,6 @@ pub const SCENES: [SceneSpec; 9] = [
         },
     },
     SceneSpec {
-        name: "晨雾湖泊",
-        image: "assets/scenes/lake.png",
-        palette: ScenePalette {
-            base: Color::from_srgb8(208, 220, 230),
-            accent: Color::from_srgb8(120, 165, 185),
-            text_primary: Color::from_srgb8(35, 45, 55),
-            text_secondary: Color::from_srgb8(85, 100, 112),
-            surface: Color::rgba(1.0, 1.0, 1.0, 0.55),
-            surface_input: Color::rgba(1.0, 1.0, 1.0, 0.85),
-            backdrop_light: Color::from_srgb8(232, 227, 219),
-            backdrop_dark: Color::from_srgb8(191, 196, 201),
-        },
-    },
-    SceneSpec {
         name: "沙漠",
         image: "assets/scenes/desert.png",
         palette: ScenePalette {
@@ -117,20 +103,6 @@ pub const SCENES: [SceneSpec; 9] = [
             surface_input: Color::rgba(1.0, 1.0, 1.0, 0.8),
             backdrop_light: Color::from_srgb8(217, 167, 121),
             backdrop_dark: Color::from_srgb8(169, 124, 106),
-        },
-    },
-    SceneSpec {
-        name: "麦田黄昏",
-        image: "assets/scenes/wheat.png",
-        palette: ScenePalette {
-            base: Color::from_srgb8(200, 148, 88),
-            accent: Color::from_srgb8(255, 210, 140),
-            text_primary: Color::from_srgb8(60, 38, 28),
-            text_secondary: Color::from_srgb8(125, 90, 62),
-            surface: Color::rgba(1.0, 1.0, 1.0, 0.5),
-            surface_input: Color::rgba(1.0, 1.0, 1.0, 0.8),
-            backdrop_light: Color::from_srgb8(239, 196, 139),
-            backdrop_dark: Color::from_srgb8(200, 153, 119),
         },
     },
 ];
@@ -149,7 +121,7 @@ mod tests {
 
     #[test]
     fn all_scenes_pass_contrast_guards() {
-        assert_eq!(SCENES.len(), 9, "沉浸世界应有 9 个场景");
+        assert_eq!(SCENES.len(), 7, "沉浸世界应有 7 个场景");
         for spec in &SCENES {
             let p = &spec.palette;
             for (label, backdrop) in [

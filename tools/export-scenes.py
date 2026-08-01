@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """Export danqing Phase 2 scene assets (pomodoro POC).
 
-Nine procedural scenes spanning dark/bright families:
+Seven procedural scenes spanning dark/bright families:
     bonfire   篝火 (dark, warm fire glow)
     sea       海   (bright, cyan)
     rain      雨   (gray-blue)
     mountain  山   (neutral dusk, ridgelines)
     forest    森林 (misty conifer green, treelines + fog bands)
-    starry    星夜 (deep indigo night, starfield + moon glow + dark hills)
-    snowfield 雪原 (pale cold sky, snow plain drifts + faint far hills)
-    desert    沙漠 (dusk sand, setting sun glow + rolling dunes)
-    cloudsea  云海 (sunrise sky, rolling cloud sea above horizon)
+    starry    星夜 (deep indigo night, starfield + dark hills)
+    desert    沙漠 (dusk sand, setting sun glow + diagonal dunes)
 
 Each scene PNG bakes: multi-stop vertical gradient + radial glow +
 center readability veil + scene-specific details.
@@ -523,43 +521,6 @@ SCENES = [
         },
     },
     {
-        "key": "lake",
-        "name": "晨雾湖泊",
-        # 晨雾镜面湖: 淡蓝天空 → 远山淡影 (地平线) + 晨雾 → 湖面暖光; 中央亮, 深字。
-        "stops": [
-            (0.00, (188, 204, 220)),
-            (0.30, (208, 220, 230)),
-            (0.52, (232, 224, 214)),
-            (0.68, (212, 222, 228)),
-            (1.00, (192, 208, 218)),
-        ],
-        "glow": {"color": (255, 236, 210), "center": (0.5, 0.44), "radius": 0.26, "peak": 85},
-        "ridges": [
-            {"base_y": 0.44, "amp": 0.035, "color": (170, 186, 200), "alpha": 150, "seed": 0x601},
-            {"base_y": 0.50, "amp": 0.03, "color": (182, 196, 208), "alpha": 135, "seed": 0x602},
-        ],
-        "mist": [
-            {"y": 0.52, "height": 0.08, "color": (238, 242, 242), "alpha": 60},
-            {"y": 0.64, "height": 0.10, "color": (230, 236, 240), "alpha": 55},
-            {"y": 0.78, "height": 0.12, "color": (224, 232, 238), "alpha": 50},
-        ],
-        "waves": [
-            {"base_y": 0.72, "amp": 0.012, "freq": 3.0, "phase": 0.0,
-             "color": (206, 219, 227), "alpha": 80},
-            {"base_y": 0.85, "amp": 0.018, "freq": 2.4, "phase": 1.3,
-             "color": (198, 214, 224), "alpha": 90},
-        ],
-        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 0},
-        "palette": {
-            "base": (208, 220, 230),
-            "accent": (120, 165, 185),
-            "text_primary": (35, 45, 55),
-            "text_secondary": (85, 100, 112),
-            "surface": ((255, 255, 255), 0.55),
-            "surface_input": ((255, 255, 255), 0.85),
-        },
-    },
-    {
         "key": "desert",
         "name": "沙漠",
         # 暮色天空 → 暖沙地; 中央保持亮 (低垂落日暖光), 深字对比度随落日抬升。
@@ -587,36 +548,6 @@ SCENES = [
             "accent": (255, 200, 130),
             "text_primary": (58, 34, 26),
             "text_secondary": (120, 84, 60),
-            "surface": ((255, 255, 255), 0.50),
-            "surface_input": ((255, 255, 255), 0.80),
-        },
-    },
-    {
-        "key": "wheat",
-        "name": "麦田黄昏",
-        # 暖金麦田 + 低垂落日 + 麦浪剪影; 中央为暖金天空+落日 (深字对比度), 麦浪在下方。
-        "stops": [
-            (0.00, (110, 84, 108)),
-            (0.30, (176, 126, 106)),
-            (0.52, (224, 170, 110)),
-            (0.75, (210, 148, 86)),
-            (1.00, (178, 118, 66)),
-        ],
-        "glow": {"color": (255, 224, 170), "center": (0.5, 0.48), "radius": 0.30, "peak": 130},
-        "waves": [
-            {"base_y": 0.72, "amp": 0.05, "freq": 3.5, "phase": 0.0,
-             "color": (196, 138, 74), "alpha": 200},
-            {"base_y": 0.84, "amp": 0.06, "freq": 3.0, "phase": 1.2,
-             "color": (170, 112, 60), "alpha": 230},
-            {"base_y": 0.96, "amp": 0.05, "freq": 2.5, "phase": 2.4,
-             "color": (148, 94, 52), "alpha": 255},
-        ],
-        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 0},
-        "palette": {
-            "base": (200, 148, 88),
-            "accent": (255, 210, 140),
-            "text_primary": (60, 38, 28),
-            "text_secondary": (125, 90, 62),
             "surface": ((255, 255, 255), 0.50),
             "surface_input": ((255, 255, 255), 0.80),
         },
@@ -715,7 +646,7 @@ mod tests {
 
     #[test]
     fn all_scenes_pass_contrast_guards() {
-        assert_eq!(SCENES.len(), 9, "沉浸世界应有 9 个场景");
+        assert_eq!(SCENES.len(), 7, "沉浸世界应有 7 个场景");
         for spec in &SCENES {
             let p = &spec.palette;
             for (label, backdrop) in [
