@@ -76,7 +76,7 @@ app.rs
 
 - `examples/showcase.rs` — 持续生长,以用代测
 - `examples/pomodoro/` — 番茄钟 POC
-  - `timer.rs` / `scenes.rs` / `fader.rs` / `flash.rs` / `audio.rs` / `state.rs` / `ambient.rs` / `motion.rs` / `today.rs` / `hint.rs` / `tray.rs` / `main.rs`
+  - `timer.rs` / `scenes.rs` / `fader.rs` / `flash.rs` / `audio.rs` / `state.rs` / `stats.rs` / `ambient.rs` / `motion.rs` / `today.rs` / `hint.rs` / `tray.rs` / `close_button.rs` / `main.rs`
 - `examples/common/log.rs` — 共享 `init_log`
 - `examples/minimal.rs` — 最小骨架
 - `examples/mem_probe.rs` — 内存探针

@@ -97,7 +97,7 @@ struct Uniforms {
 | 篝火 | `docs/specs/pomodoro-scene-motion-bonfire.md` | ✅ 已关闭 |
 | 海 | `docs/specs/pomodoro-scene-motion-sea.md` | ✅ 已关闭 |
 | 雨改造 | `docs/specs/pomodoro-scene-motion-rain-rework.md` | ✅ 已关闭 |
-| 山/森林 | `docs/specs/pomodoro-scene-motion-mountain-forest.md` | ⏳ 待人工终审 |
+| 山/森林 | `docs/specs/pomodoro-scene-motion-mountain-forest.md` | ✅ 已关闭 (2026-08-01 人工终审通过) |
 
 ## 相关 Memory
 
