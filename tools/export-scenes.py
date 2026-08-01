@@ -7,7 +7,7 @@ Six procedural scenes spanning dark/bright families:
     rain      雨   (gray-blue)
     mountain  山   (neutral dusk, ridgelines)
     forest    森林 (misty conifer green, treelines + fog bands)
-    starry    星夜 (deep indigo night, starfield + dark hills)
+    starry    星夜 (deep indigo night, dark hills; starfield is runtime-rendered)
 
 Each scene PNG bakes: multi-stop vertical gradient + radial glow +
 center readability veil + scene-specific details.
@@ -296,41 +296,6 @@ def build_embers(count: int, color: tuple, seed: int) -> Image.Image:
     return overlay.filter(ImageFilter.GaussianBlur(radius=0.6))
 
 
-def build_stars(cfg: dict) -> Image.Image:
-    """Starry night: deterministic scattered star dots (SS x for AA).
-
-    Small sparse stars (dim) + a few brighter ones. All dots are small and
-    sparse enough that the center-region 64x64 downsample (used by the
-    contrast guard) averages them away — the backdrop extremes stay on the
-    dark sky, so near-white countdown text keeps its contrast.
-    cfg: count, seed, band (y range), colors (dim/bright), big_frac.
-    """
-    w, h = WIDTH * SS, HEIGHT * SS
-    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    state = cfg["seed"]
-    band = cfg["band"]
-    colors = cfg["colors"]
-    big_frac = cfg.get("big_frac", 0.10)
-
-    def rnd() -> float:
-        nonlocal state
-        state = (state * 1103515245 + 12345) & 0x7FFFFFFF
-        return (state >> 16) / 32768.0
-
-    for _ in range(cfg["count"]):
-        x = w * rnd()
-        y = h * (band[0] + rnd() * (band[1] - band[0]))
-        big = rnd() < big_frac
-        r = (1.0 + rnd() * (1.6 if big else 0.9)) * SS
-        a = int((140 + rnd() * 115) if big else (50 + rnd() * 100))
-        col = colors[1] if rnd() < 0.22 else colors[0]
-        draw.ellipse([x - r, y - r, x + r, y + r], fill=(*col, a))
-    overlay = overlay.resize(SIZE, Image.LANCZOS)
-    return overlay.filter(ImageFilter.GaussianBlur(radius=0.4))
-
-
-
 def sample_center_extremes(img: Image.Image) -> tuple[tuple, tuple]:
     """Brightest/darkest colors (by luminance) in the center region, after all baking."""
     x0, y0 = int(CENTER_BOX[0] * WIDTH), int(CENTER_BOX[1] * HEIGHT)
@@ -493,18 +458,14 @@ SCENES = [
     {
         "key": "starry",
         "name": "星夜",
-        # 深靛蓝夜空 → 暗地; 中央保持暗, 保白字对比度。星点稀疏,
-        # 中心极值落在夜空本身 (无月亮)。
+        # 深靛蓝夜空 → 暗地; 中央保持暗, 保白字对比度。星点不烘焙 —
+        # 运行时由 shader 程序化渲染 (雨场景范式, starry_base 常驻)。
         "stops": [
             (0.00, (10, 12, 30)),
             (0.45, (22, 26, 52)),
             (0.72, (38, 42, 74)),
             (1.00, (16, 18, 40)),
         ],
-        "stars": {
-            "count": 170, "seed": 0x51A1, "band": (0.02, 0.80),
-            "colors": ((200, 212, 244), (255, 236, 190)), "big_frac": 0.10,
-        },
         "ridges": [
             {"base_y": 0.88, "amp": 0.06, "color": (12, 14, 32), "alpha": 235, "seed": 0x501},
             {"base_y": 0.97, "amp": 0.05, "color": (8, 9, 22), "alpha": 255, "seed": 0x502},
@@ -538,8 +499,6 @@ def build_scene(cfg: dict) -> Image.Image:
     if "embers" in cfg:
         e = cfg["embers"]
         img = Image.alpha_composite(img, build_embers(e["count"], e["color"], e["seed"]))
-    if "stars" in cfg:
-        img = Image.alpha_composite(img, build_stars(cfg["stars"]))
     if "mist" in cfg:
         img = Image.alpha_composite(img, build_mist(cfg["mist"]))
     v = cfg["veil"]

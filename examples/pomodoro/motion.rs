@@ -127,10 +127,17 @@ pub fn forest_intensity(from: usize, to: usize, fade: f32, envelope: f32) -> f32
 }
 
 /// 星夜效强度合成: 包络 × 星夜场景淡化权重。
-/// 星夜暂停时随既有 `MotionEnvelope` 500ms 归零, 视觉逐像素回静态星图
+/// 星夜暂停时随既有 `MotionEnvelope` 500ms 归零, 视觉逐像素回静态星野
 /// (星闪 additive 归零、流星消隐); 不复用雨独立时钟范式。
 pub fn starry_intensity(from: usize, to: usize, fade: f32, envelope: f32) -> f32 {
     envelope * scene_weight(STAR_SCENE, from, to, fade)
+}
+
+/// 星夜基础星野强度合成: 仅场景淡化权重 (不含包络)。
+/// 雨场景范式: 静态图去星, 星野运行时程序化渲染 — 按场景权重**常驻**,
+/// 暂停星野定格可见 (不随包络沉降; 星闪/流星才随包络归零)。
+pub fn starry_base(from: usize, to: usize, fade: f32) -> f32 {
+    scene_weight(STAR_SCENE, from, to, fade)
 }
 
 #[cfg(test)]
@@ -396,5 +403,16 @@ mod tests {
         let zero = envelope.gain(false, ms(1600));
         assert!(zero.abs() < 1e-6);
         assert_eq!(starry_intensity(STAR_SCENE, STAR_SCENE, 1.0, zero), 0.0);
+    }
+
+    #[test]
+    fn starry_base_weights_by_scene_only_no_envelope() {
+        // 基础星野按场景权重常驻, 不含包络 (雨场景范式 — 暂停星野定格可见)。
+        assert!((starry_base(STAR_SCENE, STAR_SCENE, 1.0) - 1.0).abs() < 1e-6);
+        assert!((starry_base(STAR_SCENE, 1, 0.5) - 0.5).abs() < 1e-6);
+        assert!((starry_base(1, STAR_SCENE, 0.5) - 0.5).abs() < 1e-6);
+        assert_eq!(starry_base(0, 1, 0.5), 0.0, "双非星夜恒 0");
+        // 包络不参与: 静止于星夜, fade=1, 权重恒 1 (无论包络是多少)。
+        assert_eq!(starry_base(STAR_SCENE, STAR_SCENE, 1.0), 1.0);
     }
 }

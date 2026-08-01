@@ -87,8 +87,8 @@ pub const SCENES: [SceneSpec; 6] = [
             text_secondary: Color::from_srgb8(185, 192, 220),
             surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
             surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
-            backdrop_light: Color::from_srgb8(49, 54, 77),
-            backdrop_dark: Color::from_srgb8(15, 18, 38),
+            backdrop_light: Color::from_srgb8(28, 32, 58),
+            backdrop_dark: Color::from_srgb8(16, 18, 39),
         },
     },
 ];
