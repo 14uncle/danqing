@@ -409,8 +409,8 @@ impl<A: App> Handler<'_, A> {
     /// 渲染一帧并 present (RedrawRequested 与启动预渲染共用)。
     ///
     /// 每帧心跳 → sync 绑定 → 焦点重建 → 布局 → 绘制 → 提交 wgpu。
-    /// 渲染失败返回 `false` 并退出事件循环。
-    fn render_frame(&mut self, event_loop: &ActiveEventLoop) -> bool {
+    /// 渲染失败时退出事件循环 (防御; Context::render 目前恒成功)。
+    fn render_frame(&mut self, event_loop: &ActiveEventLoop) {
         let frame_start = Instant::now();
         let mut rects = RectBatch::new();
         self.texts.clear();
@@ -460,19 +460,20 @@ impl<A: App> Handler<'_, A> {
             if let Some(frame) = self.app.background_frame() {
                 context.set_background_frame(frame);
             }
+            // Context::render 目前恒返回 true; 失败路径为防御 (退出事件循环)。
             if !context.render(&rects, &mut self.texts) {
                 event_loop.exit();
-                return false;
+                return;
             }
         }
         if !self.first_frame_done {
             self.first_frame_done = true;
-            log::info!("首帧渲染耗时：{:?}", frame_start.elapsed());
+            // 首次调用必为显示前的预渲染 (resume_window 先调再 set_visible)。
+            log::info!("预渲染首帧耗时：{:?}", frame_start.elapsed());
         }
         if let Some(window) = &self.window {
             window.request_redraw();
         }
-        true
     }
 }
 
@@ -547,6 +548,8 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 先持有窗口引用: 预渲染首帧需要查询 inner_size。
         self.window = Some(Arc::clone(&window));
         // 预渲染首帧: 隐藏时渲染 + present, 显示时直接见内容 — 避免首帧就绪前白屏。
+        // 平台注: 已在 Windows/DX12 验证。Wayland 上隐藏表面未映射, get_current_texture
+        // 返回 Outdated/Lost 导致预渲染帧被跳过 — 优雅退化为旧行为 (无白屏增益, 无崩溃)。
         self.render_frame(event_loop);
         window.set_visible(true);
         // 先以普通尺寸显示 (预渲染内容已在屏), 再最大化 — 而非在 create_window 设

@@ -146,6 +146,17 @@ impl FocusManager {
 
     fn collect(&mut self, node: &Node, prefix: &mut FocusPath) {
         if node.focusable() {
+            if let Some(id) = node.focus_id() {
+                // 重复 id 会让按名聚焦 (set_focus_by_id) 静默取第一个, 应用侧难以察觉。
+                debug_assert!(
+                    !self
+                        .chain_ids
+                        .iter()
+                        .flatten()
+                        .any(|existing| *existing == id),
+                    "焦点标识重复: {id} — 按名聚焦会静默取第一个, 请用唯一 id"
+                );
+            }
             self.chain.push(prefix.clone());
             self.chain_ids.push(node.focus_id());
         }
