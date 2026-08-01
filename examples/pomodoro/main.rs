@@ -901,7 +901,13 @@ fn stepper_row(
                 .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
         ))
         // 减号右移 STEPPER_MINUS_OFFSET: [-] 不贴标签, 与 [+][数值] 保持呼吸。
-        .child(UiBox::new(Color::TRANSPARENT).width(STEPPER_MINUS_OFFSET))
+        // 显式 height(1.0): 无子组件的 UiBox 未指定高度会取父约束上限 (Box::layout),
+        // 撑满窗体把步进行顶到窗体高 (回归: 设置卡片被撑到窗高只显示首行)。
+        .child(
+            UiBox::new(Color::TRANSPARENT)
+                .width(STEPPER_MINUS_OFFSET)
+                .height(1.0),
+        )
         .child(Center::new(ghost_button(t, "-", dec_msg)))
         .child(
             UiBox::new(Color::TRANSPARENT)
@@ -1888,6 +1894,46 @@ mod tests {
                 .is_some_and(|n| n.starts_with("导出失败")),
             "失败应设置含原因的提示: {:?}",
             app.export_notice
+        );
+    }
+
+    // === 设置面板布局回归 (2026-08-01) ===
+
+    /// 测试用主题 (任意调色板, 只验证布局几何)。
+    fn test_theme() -> SceneTheme {
+        SceneTheme::new(ScenePalette {
+            base: Color::BLACK,
+            accent: Color::WHITE,
+            text_primary: Color::WHITE,
+            text_secondary: Color::rgb(0.7, 0.7, 0.7),
+            surface: Color::rgba(1.0, 1.0, 1.0, 0.1),
+            surface_input: Color::rgba(1.0, 1.0, 1.0, 0.2),
+            backdrop_light: Color::WHITE,
+            backdrop_dark: Color::BLACK,
+        })
+    }
+
+    #[test]
+    fn stepper_row_height_tracks_content_not_window() {
+        // 回归: 减号前的 20px 占位 UiBox 若无显式高度, Box::layout 对未指定
+        // 维度取父约束上限 → 步进行被顶到窗体高, 设置卡片被撑到窗高只显示首行。
+        let t = test_theme();
+        let mut row = danqing::widget::node(stepper_row(
+            t,
+            "专注时长",
+            |_: &PomodoroApp| 25,
+            Msg::DecFocus,
+            Msg::IncFocus,
+        ));
+        let mut texts = danqing::TextBatch::new();
+        let size = row.layout(
+            danqing::Constraints::loose(Size::new(960.0, 640.0)),
+            &mut texts,
+        );
+        assert!(
+            size.height < 100.0,
+            "步进行高度应随内容 (控件高), 而非窗体高: {}",
+            size.height
         );
     }
 }
