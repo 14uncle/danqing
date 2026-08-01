@@ -49,10 +49,8 @@ def _spectrum(freqs: np.ndarray, kind: str) -> np.ndarray:
     if kind == "desert":  # 沙漠: dry mid-band wind, slight grain
         mid = 1.0 / (1.0 + (freqs / 1300.0) ** 1.4)
         return np.clip(mid, 0.0, 1.0)
-    if kind == "cloud":  # 云海: broad steady high wind, spacious
-        low = 1.0 / (1.0 + (freqs / 260.0) ** 2.0)
-        air = (freqs / 1800.0) ** 1.2 / (1.0 + (freqs / 1800.0) ** 2.0) * 0.9
-        return np.clip(low * 0.55 + air, 0.0, 1.0)
+    if kind == "fall":  # 瀑布: broadband white noise, slight HF rolloff (水声)
+        return 1.0 / (1.0 + (freqs / 4200.0) ** 1.5)
     raise ValueError(kind)
 
 
@@ -86,16 +84,17 @@ def _gust_envelope(seed: int, period: float = 9.0, depth: float = 0.55) -> np.nd
     return np.clip(env, 0.05, None)
 
 
-def _render(kind: str, seed: int, rms_target: float) -> np.ndarray:
-    """Stereo bed: independent L/R noise, shared gust envelope, normalized.
+def _render(kind: str, seed: int, rms_target: float, depth: float = 0.55) -> np.ndarray:
+    """Stereo bed: independent L/R noise, gust envelope, normalized.
 
     Normalized to a target RMS (not peak): different spectra have different
     crest factors, and peak-normalizing makes narrow-band hiss (snow) much
     louder than broad rumble (starry) for the same peak. Per-scene rms_target
-    carries the intended loudness hierarchy.
+    carries the intended loudness hierarchy. `depth` is the gust-envelope
+    modulation (0.12 ≈ steady for waterfall; 0.55 ≈ gusty wind).
     """
-    left = _colored_noise(kind, seed) * _gust_envelope(seed + 1, period=9.0)
-    right = _colored_noise(kind, seed + 7) * _gust_envelope(seed + 9, period=12.0)
+    left = _colored_noise(kind, seed) * _gust_envelope(seed + 1, period=9.0, depth=depth)
+    right = _colored_noise(kind, seed + 7) * _gust_envelope(seed + 9, period=12.0, depth=depth)
     for ch in (left, right):
         np.tanh(ch, out=ch)
         current = float(np.sqrt(np.mean(ch**2)))
@@ -124,20 +123,20 @@ def _encode_ogg(wav: Path, out: Path) -> None:
 
 SCENES = [
     # 星夜 夜风: 最安静, 低频细语 + 一丝空气感。
-    {"key": "starry", "kind": "night", "seed": 0x51A1, "rms_target": 0.05},
+    {"key": "starry", "kind": "night", "seed": 0x51A1, "rms_target": 0.05, "depth": 0.55},
     # 雪原 雪风: 轻空气嘶声, 克制。
-    {"key": "snowfield", "kind": "snow", "seed": 0x52A1, "rms_target": 0.06},
+    {"key": "snowfield", "kind": "snow", "seed": 0x52A1, "rms_target": 0.06, "depth": 0.55},
     # 沙漠 干风: 干爽中段风声, 比雪风更实。
-    {"key": "desert", "kind": "desert", "seed": 0x53A1, "rms_target": 0.08},
-    # 云海 高空风: 宽频谱持续风, 最饱满。
-    {"key": "cloudsea", "kind": "cloud", "seed": 0x54A1, "rms_target": 0.09},
+    {"key": "desert", "kind": "desert", "seed": 0x53A1, "rms_target": 0.08, "depth": 0.55},
+    # 瀑布 水声: 宽带白噪声, 稳态 (几乎无阵风), 最饱满。
+    {"key": "waterfall", "kind": "fall", "seed": 0x54A1, "rms_target": 0.09, "depth": 0.12},
 ]
 
 
 def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for s in SCENES:
-        bed = _render(s["kind"], s["seed"], s["rms_target"])
+        bed = _render(s["kind"], s["seed"], s["rms_target"], s.get("depth", 0.55))
         with tempfile.TemporaryDirectory() as tmp:
             wav = Path(tmp) / "bed.wav"
             _write_wav(wav, bed)
