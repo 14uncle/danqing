@@ -173,11 +173,13 @@ def build_ridges(layers: list[dict]) -> Image.Image:
 
 
 def build_waves(layers: list[dict]) -> Image.Image:
-    """Sea waves: sinusoidal silhouettes layered toward the bottom (SS x for AA).
+    """Sinusoidal silhouette banks layered toward the bottom (SS x for AA).
 
     Each layer: base_y/amp (height fractions), freq (cycles across width),
-    phase (radians), color, alpha. Filled below the curve like ridges,
-    but the sinusoid reads as swell instead of a mountain line.
+    phase (radians), color, alpha, optional diag (right-edge downward slant,
+    in y fractions — makes ridges run diagonally instead of horizontal, e.g.
+    desert dunes vs horizontal sea swell). Filled below the curve like
+    ridges, but the sinusoid reads as swell instead of a mountain line.
     """
     w, h = WIDTH * SS, HEIGHT * SS
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
@@ -187,72 +189,20 @@ def build_waves(layers: list[dict]) -> Image.Image:
         amp = layer["amp"] * h
         freq = layer["freq"]
         phase = layer.get("phase", 0.0)
+        diag = layer.get("diag", 0.0) * h
         steps = 160
         pts = [
             (
                 w * i / steps,
-                base_y + amp * math.sin(2.0 * math.pi * freq * i / steps + phase),
+                base_y
+                + amp * math.sin(2.0 * math.pi * freq * i / steps + phase)
+                + diag * (i / steps),
             )
             for i in range(steps + 1)
         ]
         draw.polygon(pts + [(w, h), (0, h)], fill=(*layer["color"], layer["alpha"]))
     overlay = overlay.resize(SIZE, Image.LANCZOS)
     return overlay.filter(ImageFilter.GaussianBlur(radius=1.2))
-
-
-def _hash_unit(v: int) -> float:
-    """Deterministic 0..1 hash of an integer (per-ridge variation)."""
-    x = (v * 1103515245 + 12345) & 0x7FFFFFFF
-    return ((x >> 16) & 0x7FFF) / 32768.0
-
-
-def build_dunes(layers: list[dict]) -> Image.Image:
-    """Smooth asymmetric sand dune ridges (SS x for AA).
-
-    Each layer: base_y/amp/freq/phase/skew/color/alpha/blur/shear/seed. The
-    profile is a smooth skewed bump — a long gentle windward climb (fraction
-    `skew` of the period) up to a rounded crest, then a shorter steeper slip
-    face; both sides cosine-eased so there are no hard corners (顺滑).
-    Each ridge gets a seeded height/phase jitter (so the field is not a
-    uniform repeating pattern) and the whole layer shears diagonally
-    (`shear`) — dunes, not ocean swell (build_waves' symmetric, parallel,
-    horizontal sinusoid banks).
-    """
-    w, h = WIDTH * SS, HEIGHT * SS
-    result = Image.new("RGBA", SIZE, (0, 0, 0, 0))
-    for layer in layers:
-        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        base_y = layer["base_y"] * h
-        amp = layer["amp"] * h
-        freq = layer["freq"]
-        phase = layer.get("phase", 0.0)
-        skew = layer.get("skew", 0.72)
-        shear = layer.get("shear", 0.0)
-        seed = layer.get("seed", 0xD00)
-        steps = 240
-        pts = []
-        # 扩展采样范围覆盖斜切偏移, 保证脊线剪切后仍铺满全宽 (不露画布边缘)。
-        x0 = -0.20 * w
-        x1 = 1.20 * w
-        for i in range(steps + 1):
-            x = x0 + (x1 - x0) * i / steps
-            ridge = int(x / w * freq)
-            j = _hash_unit(ridge + seed)
-            amp_i = amp * (0.72 + 0.56 * j)  # 每道沙丘高度不同
-            t = (x / w * freq + phase + 0.35 * j) % 1.0
-            if t < skew:
-                prof = 0.5 - 0.5 * math.cos(math.pi * t / skew)  # 平滑缓坡
-            else:
-                prof = 0.5 + 0.5 * math.cos(math.pi * (t - skew) / (1.0 - skew))  # 平滑陡面
-            y = base_y - amp_i * prof
-            xs = x + shear * (base_y - y)  # 斜向剪切: 脊线倾斜, 非水平平行
-            pts.append((xs, y))
-        draw.polygon(pts + [(w, h), (0, h)], fill=(*layer["color"], layer["alpha"]))
-        overlay = overlay.resize(SIZE, Image.LANCZOS)
-        overlay = overlay.filter(ImageFilter.GaussianBlur(radius=layer.get("blur", 1.0)))
-        result = Image.alpha_composite(result, overlay)
-    return result
 
 
 def build_trees(layers: list[dict]) -> Image.Image:
@@ -419,9 +369,11 @@ def build_snow_forest(layers: list[dict]) -> Image.Image:
             steps = 120
             mass = [(w * i / steps, baseline(w * i / steps)) for i in range(steps + 1)]
             draw.polygon(mass + [(w, h), (0, h)], fill=(*layer["ground"], layer["alpha"]))
-        # 密集重叠云杉 + 顶层雪帽。
-        x = -rnd() * 50 * SS
-        while x < w:
+        # 密集重叠云杉 + 顶层雪帽; 可限定横向范围 (x_lo/x_hi, 如底部两侧框景松)。
+        x_lo = layer.get("x_lo", 0.0)
+        x_hi = layer.get("x_hi", 1.0)
+        x = (x_lo - rnd() * 0.04) * w
+        while x < x_hi * w:
             th = (layer["h_min"] + rnd() * (layer["h_max"] - layer["h_min"])) * h
             by = baseline(x)
             half = th * (0.17 + rnd() * 0.07)
@@ -452,17 +404,20 @@ def build_snow_forest(layers: list[dict]) -> Image.Image:
 def build_waterfall(cfg: dict) -> Image.Image:
     """A green gorge with a central white cascade (SS x for AA).
 
-    Jagged dark cliff walls frame the sides; a light trapezoid cascade runs
-    down the center with vertical water streaks; a soft pool gathers at the
-    base. The cascade spans the center text region (bright), so dark text
-    keeps contrast; the dark cliffs stay outside it.
+    Jagged cliff walls (two-tone vertical gradient, darker below) frame the
+    sides; rocky ledges and moss poke the gorge edges above/below the center
+    text region. The cascade is a set of vertical water ribbons (varying
+    width/brightness) rather than one flat trapezoid; foam and a soft pool
+    gather at the base. The cascade spans the center region (bright) so dark
+    text keeps contrast; dark elements stay outside it.
     """
     w, h = WIDTH * SS, HEIGHT * SS
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     wall = cfg["wall"]
+    wall_deep = cfg["wall_deep"]
 
-    def cliff(edge_x: float, sign: int, seed: int) -> None:
+    def rnd_s(seed: int):
         state = seed
 
         def rnd() -> float:
@@ -470,27 +425,46 @@ def build_waterfall(cfg: dict) -> Image.Image:
             state = (state * 1103515245 + 12345) & 0x7FFFFFFF
             return (state >> 16) / 32768.0
 
+        return rnd
+
+    def cliff(edge_x: float, sign: int, seed: int) -> None:
+        rnd = rnd_s(seed)
+        # 上部岩壁 (较浅, 大气透视)。
         pts = [(0 if sign < 0 else w, 0), (edge_x * w + sign * 0.01 * rnd() * w, 0)]
-        n = 10
+        n = 6
         for i in range(1, n + 1):
             y = h * i / n
-            xx = edge_x * w + sign * (0.02 + rnd() * 0.05) * w
-            pts.append((xx, y))
+            pts.append((edge_x * w + sign * (0.02 + rnd() * 0.045) * w, y))
         pts.append((edge_x * w + sign * 0.02 * w, h))
         pts.append((0 if sign < 0 else w, h))
         draw.polygon(pts, fill=(*wall, cfg["wall_alpha"]))
+        # 下部岩壁 (更深, 叠加出纵向渐变)。
+        pts2 = [(0 if sign < 0 else w, h * 0.45), (edge_x * w + sign * 0.02 * w, h * 0.45)]
+        for i in range(1, n + 1):
+            y = h * (0.45 + 0.55 * i / n)
+            pts2.append((edge_x * w + sign * (0.03 + rnd() * 0.04) * w, y))
+        pts2.append((edge_x * w + sign * 0.02 * w, h))
+        pts2.append((0 if sign < 0 else w, h))
+        draw.polygon(pts2, fill=(*wall_deep, cfg["wall_alpha"]))
+        # 岩壁苔藓: 只在中央区上下 (y<0.32 或 y>0.68) 以免拉低深字对比。
+        for _ in range(10):
+            y = h * (0.12 + rnd() * 0.20) if rnd() < 0.5 else h * (0.70 + rnd() * 0.25)
+            xx = edge_x * w + sign * (0.01 + rnd() * 0.03) * w
+            r = (0.008 + rnd() * 0.012) * w
+            draw.ellipse([xx - r, y - r * 0.6, xx + r, y + r * 0.6], fill=(*cfg["moss"], cfg["wall_alpha"]))
+        # 突入瀑布的岩台 (同样避开中央区)。
+        for _ in range(3):
+            y = h * (0.14 + rnd() * 0.16) if rnd() < 0.5 else h * (0.72 + rnd() * 0.14)
+            x0 = edge_x * w + sign * 0.02 * w
+            x1 = x0 - sign * (0.05 + rnd() * 0.05) * w
+            draw.polygon(
+                [(x0, y), (x1, y), (x0, y + (0.02 + rnd() * 0.02) * h)],
+                fill=(*cfg["rock"], cfg["wall_alpha"]),
+            )
 
     cliff(cfg["wall_edge_l"], -1, cfg["seed_left"])
     cliff(cfg["wall_edge_r"], 1, cfg["seed_right"])
-    # 中央瀑布: 上窄下宽的梯形水幕。
-    cascade = [
-        (cfg["top_w0"] * w, cfg["top_y"] * h),
-        (cfg["top_w1"] * w, cfg["top_y"] * h),
-        (cfg["bot_w1"] * w, cfg["bot_y"] * h),
-        (cfg["bot_w0"] * w, cfg["bot_y"] * h),
-    ]
-    draw.polygon(cascade, fill=(*cfg["water"], cfg["water_alpha"]))
-    # 竖向水纹: 落在中央稳定带内。
+    # 水幕: 多条纵向水绦 (变宽/变亮), 非单一梯形。
     state = cfg["seed_streak"]
 
     def rnd2() -> float:
@@ -498,13 +472,43 @@ def build_waterfall(cfg: dict) -> Image.Image:
         state = (state * 1103515245 + 12345) & 0x7FFFFFFF
         return (state >> 16) / 32768.0
 
+    n_ribbon = cfg["ribbons"]
+    for k in range(n_ribbon):
+        t0 = k / n_ribbon
+        t1 = (k + 1) / n_ribbon
+        j0 = (rnd2() - 0.5) * 0.05
+        j1 = (rnd2() - 0.5) * 0.05
+        x0 = (cfg["top_w0"] + t0 * (cfg["top_w1"] - cfg["top_w0"]) + j0) * w
+        x1 = (cfg["top_w0"] + t1 * (cfg["top_w1"] - cfg["top_w0"]) + j0) * w
+        xb0 = (cfg["bot_w0"] + t0 * (cfg["bot_w1"] - cfg["bot_w0"]) + j1) * w
+        xb1 = (cfg["bot_w0"] + t1 * (cfg["bot_w1"] - cfg["bot_w0"]) + j1) * w
+        bright = 0.85 + rnd2() * 0.15
+        col = tuple(int(c * bright) for c in cfg["water"])
+        draw.polygon(
+            [
+                (x0, cfg["top_y"] * h),
+                (x1, cfg["top_y"] * h),
+                (xb1, cfg["bot_y"] * h),
+                (xb0, cfg["bot_y"] * h),
+            ],
+            fill=(*col, cfg["water_alpha"]),
+        )
+    # 竖向水纹细线 (较亮的落水线)。
     for _ in range(cfg["streaks"]):
         sx = (cfg["top_w0"] + 0.02 + rnd2() * (cfg["top_w1"] - cfg["top_w0"] - 0.04)) * w
-        a = int(60 + rnd2() * 130)
+        a = int(50 + rnd2() * 110)
         draw.line(
-            [(sx, cfg["top_y"] * h), (sx, cfg["bot_y"] * 0.98 * h)],
+            [(sx, cfg["top_y"] * h), (sx, cfg["bot_y"] * 0.96 * h)],
             fill=(*cfg["streak"], a),
-            width=int(1.2 * SS),
+            width=int(1.0 * SS),
+        )
+    # 底部水花 (泡沫点)。
+    for _ in range(cfg["foam"]):
+        fx = (0.32 + rnd2() * 0.36) * w
+        fy = (cfg["bot_y"] - 0.01 + rnd2() * 0.03) * h
+        fr = (0.008 + rnd2() * 0.014) * w
+        ImageDraw.Draw(overlay).ellipse(
+            [fx - fr, fy - fr * 0.5, fx + fr, fy + fr * 0.5], fill=(*cfg["foam_color"], 200)
         )
     # 底部水潭: 软椭圆。
     px, py = cfg["pool_x"] * w, cfg["pool_y"] * h
@@ -513,8 +517,7 @@ def build_waterfall(cfg: dict) -> Image.Image:
         [px - prx, py - pry, px + prx, py + pry], fill=(*cfg["pool"], 230)
     )
     overlay = overlay.resize(SIZE, Image.LANCZOS).filter(ImageFilter.GaussianBlur(radius=1.2))
-    pool = overlay  # pool blur 已含在整体模糊
-    return pool
+    return overlay
 
 
 def sample_center_extremes(img: Image.Image) -> tuple[tuple, tuple]:
@@ -708,32 +711,44 @@ SCENES = [
     {
         "key": "snowfield",
         "name": "针叶林雪原",
-        # 黄昏蓝灰天空 → 深色云杉雪林 (远层淡、近层深); 中央为暗林冠 (白字对比度),
-        # 雪帽在中央区上方, 地面为护栏极限内的阴影蓝雪。
+        # 亮冬景: 淡蓝天空 → 地平线松林 (深体白帽, 在中央区上方) → 亮雪原;
+        # 底部两侧大雪松框景 (在中央区 x 之外)。中央为雪, 深字对比度成立。
         "stops": [
-            (0.00, (46, 56, 78)),
-            (0.28, (82, 94, 116)),
-            (0.52, (112, 122, 136)),
-            (0.80, (126, 136, 148)),
-            (1.00, (112, 124, 138)),
+            (0.00, (196, 214, 228)),
+            (0.32, (214, 228, 238)),
+            (0.60, (226, 236, 243)),
+            (0.80, (234, 242, 247)),
+            (1.00, (228, 237, 243)),
         ],
-        "glow": {"color": (205, 220, 240), "center": (0.5, 0.10), "radius": 0.40, "peak": 40},
+        "glow": {"color": (255, 255, 255), "center": (0.5, 0.06), "radius": 0.40, "peak": 30},
+        "ridges": [
+            {"base_y": 0.22, "amp": 0.03, "color": (180, 200, 216), "alpha": 130, "seed": 0x901},
+        ],
         "snow_forest": [
-            {"base_y": 0.36, "und": 0.02, "freq": 2.4, "h_min": 0.06, "h_max": 0.10,
-             "body": (70, 88, 102), "snow": (192, 208, 226),
-             "alpha": 200, "blur": 2.0, "seed": 0x811},
-            {"base_y": 0.42, "und": 0.03, "freq": 2.0, "h_min": 0.14, "h_max": 0.20,
-             "body": (32, 48, 58), "snow": (236, 246, 254), "ground": (104, 118, 130),
-             "alpha": 255, "blur": 1.0, "seed": 0x812},
+            {"base_y": 0.30, "und": 0.015, "freq": 3.0, "h_min": 0.06, "h_max": 0.10,
+             "body": (42, 62, 68), "snow": (240, 248, 254),
+             "alpha": 230, "blur": 1.2, "seed": 0x901, "x_lo": 0.0, "x_hi": 1.0},
+            {"base_y": 0.88, "und": 0.01, "freq": 1.5, "h_min": 0.13, "h_max": 0.17,
+             "body": (34, 54, 62), "snow": (238, 248, 254),
+             "alpha": 255, "blur": 1.0, "seed": 0x902, "x_lo": 0.0, "x_hi": 0.30},
+            {"base_y": 0.88, "und": 0.01, "freq": 1.5, "h_min": 0.13, "h_max": 0.17,
+             "body": (34, 54, 62), "snow": (238, 248, 254),
+             "alpha": 255, "blur": 1.0, "seed": 0x903, "x_lo": 0.70, "x_hi": 1.0},
         ],
-        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 30},
+        "waves": [
+            {"base_y": 0.86, "amp": 0.03, "freq": 1.6, "phase": 0.0,
+             "color": (216, 230, 239), "alpha": 190},
+            {"base_y": 0.95, "amp": 0.035, "freq": 1.2, "phase": 1.8,
+             "color": (206, 224, 235), "alpha": 230},
+        ],
+        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 0},
         "palette": {
-            "base": (74, 84, 104),
-            "accent": (180, 205, 225),
-            "text_primary": (240, 246, 252),
-            "text_secondary": (186, 198, 214),
-            "surface": ((0, 0, 0), 0.25),
-            "surface_input": ((0, 0, 0), 0.38),
+            "base": (214, 228, 238),
+            "accent": (120, 160, 180),
+            "text_primary": (32, 42, 52),
+            "text_secondary": (80, 96, 110),
+            "surface": ((255, 255, 255), 0.55),
+            "surface_input": ((255, 255, 255), 0.85),
         },
     },
     {
@@ -749,13 +764,14 @@ SCENES = [
             (1.00, (150, 90, 60)),
         ],
         "glow": {"color": (255, 216, 168), "center": (0.5, 0.50), "radius": 0.34, "peak": 100},
-        "dunes": [
-            {"base_y": 0.70, "amp": 0.055, "freq": 2.2, "phase": 0.0, "skew": 0.70,
-             "shear": 0.32, "color": (170, 108, 70), "alpha": 200, "blur": 1.0, "seed": 0xD11},
-            {"base_y": 0.82, "amp": 0.065, "freq": 1.8, "phase": 0.5, "skew": 0.74,
-             "shear": 0.26, "color": (142, 88, 58), "alpha": 230, "blur": 0.8, "seed": 0xD12},
-            {"base_y": 0.94, "amp": 0.07, "freq": 1.4, "phase": 1.1, "skew": 0.78,
-             "shear": 0.20, "color": (120, 74, 48), "alpha": 255, "blur": 0.6, "seed": 0xD13},
+        # 回第一版整体 (亮暖), 仅沙丘脊线加斜向 (diag) 与海区分。
+        "waves": [
+            {"base_y": 0.76, "amp": 0.05, "freq": 1.6, "phase": 0.0, "diag": 0.14,
+             "color": (176, 116, 76), "alpha": 205},
+            {"base_y": 0.88, "amp": 0.06, "freq": 1.3, "phase": 1.5, "diag": 0.12,
+             "color": (146, 92, 60), "alpha": 235},
+            {"base_y": 0.98, "amp": 0.05, "freq": 1.1, "phase": 3.0, "diag": 0.10,
+             "color": (122, 76, 50), "alpha": 255},
         ],
         "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 0},
         "palette": {
@@ -780,14 +796,17 @@ SCENES = [
         ],
         "glow": {"color": (214, 242, 238), "center": (0.5, 0.30), "radius": 0.30, "peak": 55},
         "waterfall": {
-            "wall": (34, 56, 54), "wall_alpha": 255, "wall_edge_l": 0.32, "wall_edge_r": 0.68,
+            "wall": (48, 78, 72), "wall_deep": (28, 48, 46), "wall_alpha": 255,
+            "wall_edge_l": 0.32, "wall_edge_r": 0.68,
             "seed_left": 0xA11, "seed_right": 0xA12,
+            "moss": (40, 70, 58), "rock": (26, 42, 42),
             "top_w0": 0.36, "top_w1": 0.64, "top_y": 0.02,
             "bot_w0": 0.24, "bot_w1": 0.76, "bot_y": 0.90,
             "water": (226, 240, 246), "water_alpha": 240,
-            "streak": (196, 218, 228), "streaks": 12, "seed_streak": 0xA21,
+            "ribbons": 10, "streak": (200, 222, 232), "streaks": 14, "seed_streak": 0xA21,
+            "foam": 14, "foam_color": (250, 252, 252),
             "pool_x": 0.5, "pool_y": 0.90, "pool_rx": 0.34, "pool_ry": 0.08,
-            "pool": (198, 224, 232),
+            "pool": (190, 220, 230),
         },
         "mist": [
             {"y": 0.80, "height": 0.10, "color": (228, 242, 244), "alpha": 46},
@@ -824,8 +843,6 @@ def build_scene(cfg: dict) -> Image.Image:
         img = Image.alpha_composite(img, build_embers(e["count"], e["color"], e["seed"]))
     if "stars" in cfg:
         img = Image.alpha_composite(img, build_stars(cfg["stars"]))
-    if "dunes" in cfg:
-        img = Image.alpha_composite(img, build_dunes(cfg["dunes"]))
     if "snow_forest" in cfg:
         img = Image.alpha_composite(img, build_snow_forest(cfg["snow_forest"]))
     if "waterfall" in cfg:
