@@ -76,6 +76,8 @@ pub struct BackgroundFrame {
     pub mountain_intensity: f32,
     /// 森林动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火/海/山并存, 交叉淡化期间可同时非零)。
     pub forest_intensity: f32,
+    /// 星夜动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火/海/山/森林并存, 交叉淡化期间可同时非零)。
+    pub starry_intensity: f32,
 }
 
 impl BackgroundFrame {
@@ -93,6 +95,7 @@ impl BackgroundFrame {
             rain_time: 0.0,
             mountain_intensity: 0.0,
             forest_intensity: 0.0,
+            starry_intensity: 0.0,
         }
     }
 
@@ -124,6 +127,12 @@ impl BackgroundFrame {
     /// 设置森林动效强度; 强度夹到 0..1。
     pub fn with_forest(mut self, forest_intensity: f32) -> Self {
         self.forest_intensity = forest_intensity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 设置星夜动效强度; 强度夹到 0..1。
+    pub fn with_starry(mut self, starry_intensity: f32) -> Self {
+        self.starry_intensity = starry_intensity.clamp(0.0, 1.0);
         self
     }
 
@@ -594,6 +603,7 @@ impl BackgroundPipeline {
             rain_time: 0.0,
             mountain_intensity: 0.0,
             forest_intensity: 0.0,
+            starry_intensity: 0.0,
         });
         let Some((from, to, fade)) = resolve_frame(frame, self.scene_bytes.len()) else {
             return;
@@ -602,9 +612,9 @@ impl BackgroundPipeline {
         // 首次 draw 自动触发纹理上传;ensure_loaded 命中即 no-op, 不会重复加载。
         self.ensure_loaded(from);
         self.ensure_loaded(to);
-        // 场景层动效参数 (雨/火/海/山/森林强度 + 动效时间 + 雨钟)。
-        // time 取模 8s (雨/火/海频率对齐 MOTION_WRAP_SECS 公共周期);
-        // rain_time 不取模 (山/森林雾漂移需要连续时间, 雨层 fract 自带 wrap)。
+        // 场景层动效参数 (雨/火/海/山/森林/星夜强度 + 动效时间 + 雨钟)。
+        // time 取模 8s (雨/火/海/星闪频率对齐 MOTION_WRAP_SECS 公共周期);
+        // rain_time 不取模 (山/森林雾漂移 + 流星触发需要连续时间, 雨层 fract 自带 wrap)。
         let motion = [
             frame.rain_intensity,
             wrap_motion_time(frame.time),
@@ -613,6 +623,7 @@ impl BackgroundPipeline {
             frame.rain_time, // 非 wrap: 山/森林雾漂移需要连续时间, 避免 8s 重置跳变
             frame.mountain_intensity,
             frame.forest_intensity,
+            frame.starry_intensity,
         ];
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -666,7 +677,7 @@ impl BackgroundPipeline {
                 ScaleMode::Cover,
                 self.glow_opacity,
                 0.0,
-                [0.0; 7],
+                [0.0; 8],
             );
         }
         if let Some(noise) = &self.noise {
@@ -680,7 +691,7 @@ impl BackgroundPipeline {
                 ScaleMode::Stretch,
                 self.noise_opacity,
                 0.0,
-                [0.0; 7],
+                [0.0; 8],
             );
         }
     }
@@ -699,7 +710,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
-        motion: [f32; 7],
+        motion: [f32; 8],
     ) {
         // 淡化要求 from/to 同尺寸 (场景生成管线保证统一画布);
         // UV 按 from 纹理计算, 尺寸不一致时退回只画 from。
@@ -729,8 +740,8 @@ impl BackgroundPipeline {
     }
 
     /// 按缩放模式计算顶点与 UV, 写入指定层的顶点区段与 uniform buffer。
-    /// uniform 布局 (36B 有效, WGSL 16B 对齐为 48B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, 山强度, 森林强度]。
-    /// buffer 实际创建 48B (与 WGSL 自动对齐一致, 尾部 12B 是 padding, shader 不读)。
+    /// uniform 布局 (40B 有效, WGSL 16B 对齐为 48B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, 山强度, 森林强度, 星夜强度]。
+    /// buffer 实际创建 48B (与 WGSL 自动对齐一致, 尾部 8B 是 padding, shader 不读)。
     #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
@@ -742,7 +753,7 @@ impl BackgroundPipeline {
         scale: ScaleMode,
         opacity: f32,
         fade: f32,
-        motion: [f32; 7],
+        motion: [f32; 8],
     ) {
         let screen_w = target.width;
         let screen_h = target.height;
@@ -811,7 +822,7 @@ impl BackgroundPipeline {
             0,
             bytemuck::cast_slice(&[
                 opacity, fade, motion[0], motion[1], motion[2], motion[3], motion[4], motion[5],
-                motion[6],
+                motion[6], motion[7],
             ]),
         );
     }
@@ -1124,7 +1135,7 @@ mod tests {
         // ≤ buffer 大小 (UNIFORM_BUFFER_BYTES),且 buffer 必须 16B 对齐
         // (WGSL uniform 规范)。这是 2026-07-30 山/森林动效漏改触发的护栏 —
         // 之前 buffer 留 32B 但 cast_slice 写 36B,wgpu 启动即 panic。
-        const UNIFORM_FIELDS: usize = 9;
+        const UNIFORM_FIELDS: usize = 10;
         let payload_bytes = UNIFORM_FIELDS * std::mem::size_of::<f32>();
         assert!(
             UNIFORM_BUFFER_BYTES as usize >= payload_bytes,

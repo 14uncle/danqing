@@ -18,6 +18,7 @@ struct Uniforms {
     rain_time: f32,
     mountain_intensity: f32,
     forest_intensity: f32,
+    starry_intensity: f32,
 }
 
 // ---- 雨幕 (雨场景; 静态图已去丝, 雨全部由本段程序化渲染) ----
@@ -254,6 +255,60 @@ fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
     return FOREST_MIST_COLOR * pattern * band * FOREST_MIST_ALPHA;
 }
 
+// ---- 星夜动效 (星夜场景) ----
+// 星闪 (additive 闪烁点, 暗夜适用) + 偶发流星 (rain_time 长周期触发, 非 wrap)。
+// 星闪频率取 1/8 Hz 整数倍 (与 8s 公共周期对齐, 用 u.time);
+// 流星用 u.rain_time (连续累加, 周期触发, 不重置跳变)。
+const STAR_W: f32 = 0.7853982;  // 2π/8: 动效基频角速度 (1/8 Hz)
+
+// 星闪: 分列 hash, 位置固定, 亮度低频明灭 (频率档位 {1,2,3}/8 Hz), smoothstep 缓起缓落。
+// 星点是程序化闪烁层 (additive), 叠在静态星图上, 读作「星星在闪」。
+const TWINKLE_DENSITY: f32 = 240.0;   // 列密度 (960px 窗 ≈ 4px/列)
+const TWINKLE_RADIUS: f32 = 0.0028;   // 点半径 (纵向 uv; 960px 窗 ≈ 4px 直径)
+const TWINKLE_ASPECT: f32 = 1.5;      // 场景画布宽高比, 圆点修正
+const TWINKLE_BAND_TOP: f32 = 0.05;   // 星带上缘 (uv.y)
+const TWINKLE_BAND_BOT: f32 = 0.80;   // 星带下缘 (山脊上方)
+const TWINKLE_GAIN: f32 = 0.45;       // 点亮度上限 (additive; 暗夜下星星闪烁明显)
+const TWINKLE_ON: f32 = 0.55;         // hash > 此值的列才有星
+
+fn star_twinkle(uv: vec2<f32>, t: f32) -> f32 {
+    let col = floor(uv.x * TWINKLE_DENSITY);
+    let rnd = rain_hash(col * 1.37 + 131.0);   // 与雨/海/余烬不同种子
+    let on = step(TWINKLE_ON, rain_hash(col * 3.1 + 191.0));
+    let cx = (col + 0.3 + 0.4 * rnd) / TWINKLE_DENSITY;
+    let cy = TWINKLE_BAND_TOP + (TWINKLE_BAND_BOT - TWINKLE_BAND_TOP) * rain_hash(col * 3.1 + 173.0);
+    let k = 1.0 + floor(rnd * 3.0);   // {1,2,3}/8 Hz
+    let s = 0.5 + 0.5 * sin(t * STAR_W * k + rnd * 6.2831853);
+    let twinkle = s * s * (3.0 - 2.0 * s);
+    let d = distance(
+        vec2<f32>(uv.x * TWINKLE_ASPECT, uv.y),
+        vec2<f32>(cx * TWINKLE_ASPECT, cy),
+    );
+    let spot = 1.0 - smoothstep(TWINKLE_RADIUS * 0.15, TWINKLE_RADIUS, d);
+    return spot * on * twinkle * TWINKLE_GAIN;
+}
+
+// 流星: 周期性斜向流星 (rain_time 连续触发, ~24s 一颗, 存续 ~1.4s)。
+// 头部从右上斜向左下, 尾迹朝右上 (头部后方), 指数衰减。
+const METEOR_PERIOD: f32 = 24.0;
+const METEOR_HEAD: f32 = 0.9;   // 头部亮度
+
+fn meteor(uv: vec2<f32>, rt: f32) -> f32 {
+    let idx = floor(rt / METEOR_PERIOD);
+    let phase = rt - idx * METEOR_PERIOD;
+    if (phase >= 1.4) { return 0.0; }
+    let h = rain_hash(idx * 7.31 + 9.1);   // 该颗流星的水平位置 (确定性)
+    let life = phase / 1.4;
+    let head = vec2<f32>(0.80 - h * 0.50 - life * 0.28, 0.14 + h * 0.26 + life * 0.20);
+    let d = uv - head;
+    let dir = normalize(vec2<f32>(0.28, -0.20));   // 尾迹方向 (右上)
+    let along = dot(d, dir);
+    let perp = length(d - dir * along);
+    let trail = exp(-perp * 40.0) * exp(-clamp(along, 0.0, 4.0) * 5.0);
+    let core = exp(-dot(d, d) * 900.0);
+    return (trail * 0.5 + core * METEOR_HEAD) * (1.0 - life) * 1.6;
+}
+
 @group(0) @binding(0)
 var<uniform> u: Uniforms;
 
@@ -345,6 +400,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // 参考雨场景改造范式)。 t 同上, 用 u.rain_time 避免 8s wrap 跳变。
         color = vec4<f32>(
             color.rgb + forest_mist(in.uv, u.rain_time) * u.forest_intensity,
+            color.a,
+        );
+    }
+    if (u.starry_intensity > 0.0) {
+        // 星夜: 星闪 (additive, 暗夜适用, 频率取 1/8 Hz 整数倍) + 流星
+        // (rain_time 连续触发, 非 wrap, 避免 8s 重置跳变)。强度 0 时零贡献。
+        color = vec4<f32>(
+            color.rgb
+                + vec3<f32>((star_twinkle(in.uv, u.time) + meteor(in.uv, u.rain_time))
+                    * u.starry_intensity),
             color.a,
         );
     }
