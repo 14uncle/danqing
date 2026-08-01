@@ -1282,7 +1282,7 @@ fn trend_row(t: SceneTheme, idx: usize) -> impl widget::Widget {
                 let (y, m, _) = trend[idx];
                 format!("{y}-{m:02}")
             })
-            .font_size(t.font_size_body())
+            .font_size(t.font_size_small())
             .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
         ))
         .fill(UiBox::new(Color::TRANSPARENT), 1)
@@ -1292,7 +1292,7 @@ fn trend_row(t: SceneTheme, idx: usize) -> impl widget::Widget {
                 let (_, _, secs) = trend[idx];
                 format_duration(secs)
             })
-            .font_size(t.font_size_body())
+            .font_size(t.font_size_small())
             .bind_color(|s: &PomodoroApp| s.palette().text_primary),
         ))
 }
@@ -1325,12 +1325,6 @@ fn run() -> anyhow::Result<()> {
         }
         None => PomodoroApp::new_default(),
     };
-    log::info!(
-        "启动诊断: 专注历史 {} 条会话, format_version={}, history_path={:?}",
-        app.history.sessions.len(),
-        app.history.format_version,
-        stats::history_path(),
-    );
 
     let background = BackgroundConfig::with_scenes(SCENES.iter().map(|s| s.image))
         .scale(ScaleMode::Cover)
@@ -1356,59 +1350,6 @@ fn run() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn diag_report_panel_renders_values() {
-        use danqing::{Constraints, Point, Rect, Size};
-
-        // 空历史基线
-        let mut app_empty = fresh_app_with_empty_history();
-        app_empty.report_open = true;
-        let mut tree_empty = app_empty.view();
-        let mut texts_empty = danqing::TextBatch::new();
-        tree_empty.sync(&app_empty);
-        let size = tree_empty.layout(
-            Constraints::loose(Size::new(960.0, 640.0)),
-            &mut texts_empty,
-        );
-        let mut rects_empty = danqing::RectBatch::new();
-        tree_empty.paint(
-            Rect::new(Point::ZERO, size),
-            &mut rects_empty,
-            &mut texts_empty,
-        );
-        let empty_count = texts_empty.len();
-
-        // 12 条今天的会话
-        let mut app = fresh_app_with_empty_history();
-        let now = current_wall_secs();
-        for i in 0..12u64 {
-            let ts = now.saturating_sub(i * 100);
-            app.history.push(SessionRecord {
-                started_ts: ts - 1500,
-                completed_ts: ts,
-                planned_secs: 1500,
-                focused_secs: 1500,
-                scene_index: (i % 5) as usize,
-                round_in_cycle: 1,
-                completed: true,
-            });
-        }
-        app.report_open = true;
-        let mut tree = app.view();
-        let mut texts = danqing::TextBatch::new();
-        tree.sync(&app);
-        let size = tree.layout(Constraints::loose(Size::new(960.0, 640.0)), &mut texts);
-        let mut rects = danqing::RectBatch::new();
-        tree.paint(Rect::new(Point::ZERO, size), &mut rects, &mut texts);
-        let with_count = texts.len();
-
-        eprintln!("empty={empty_count} glyphs | with 12 sessions={with_count} glyphs");
-        assert!(
-            with_count > empty_count,
-            "有数据应产生更多字形: empty={empty_count}, with={with_count}"
-        );
-    }
 
     #[test]
     fn subtitle_running_focus_shows_round() {
