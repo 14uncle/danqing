@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Export danqing Phase 2 scene assets (pomodoro POC).
 
-Five procedural scenes spanning dark/bright families:
-    bonfire  篝火 (dark, warm fire glow)
-    sea      海   (bright, cyan)
-    rain     雨   (gray-blue)
-    mountain 山   (neutral dusk, ridgelines)
-    forest   森林 (misty conifer green, treelines + fog bands)
+Nine procedural scenes spanning dark/bright families:
+    bonfire   篝火 (dark, warm fire glow)
+    sea       海   (bright, cyan)
+    rain      雨   (gray-blue)
+    mountain  山   (neutral dusk, ridgelines)
+    forest    森林 (misty conifer green, treelines + fog bands)
+    starry    星夜 (deep indigo night, starfield + moon glow + dark hills)
+    snowfield 雪原 (pale cold sky, snow plain drifts + faint far hills)
+    desert    沙漠 (dusk sand, setting sun glow + rolling dunes)
+    cloudsea  云海 (sunrise sky, rolling cloud sea above horizon)
 
 Each scene PNG bakes: multi-stop vertical gradient + radial glow +
 center readability veil + scene-specific details.
@@ -196,6 +200,33 @@ def build_waves(layers: list[dict]) -> Image.Image:
     return overlay.filter(ImageFilter.GaussianBlur(radius=1.2))
 
 
+def build_bank(layer: dict) -> Image.Image:
+    """Single silhouette bank (SS x for AA) with per-layer blur.
+
+    Like build_waves but for one layer and with an explicit native-res
+    gaussian blur — used by build_clouds (cloud banks need a big soft blur;
+    build_waves stays byte-identical for the finalized sea scene).
+    """
+    w, h = WIDTH * SS, HEIGHT * SS
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    base_y = layer["base_y"] * h
+    amp = layer["amp"] * h
+    freq = layer["freq"]
+    phase = layer.get("phase", 0.0)
+    steps = 160
+    pts = [
+        (
+            w * i / steps,
+            base_y + amp * math.sin(2.0 * math.pi * freq * i / steps + phase),
+        )
+        for i in range(steps + 1)
+    ]
+    draw.polygon(pts + [(w, h), (0, h)], fill=(*layer["color"], layer["alpha"]))
+    overlay = overlay.resize(SIZE, Image.LANCZOS)
+    return overlay.filter(ImageFilter.GaussianBlur(radius=layer.get("blur", 8)))
+
+
 def build_trees(layers: list[dict]) -> Image.Image:
     """Forest treelines: dense rows of conifer triangles (SS x for AA).
 
@@ -288,6 +319,88 @@ def build_embers(count: int, color: tuple, seed: int) -> Image.Image:
         draw.ellipse([x - r, y - r, x + r, y + r], fill=(*color, a))
     overlay = overlay.resize(SIZE, Image.LANCZOS)
     return overlay.filter(ImageFilter.GaussianBlur(radius=0.6))
+
+
+def build_stars(cfg: dict) -> Image.Image:
+    """Starry night: deterministic scattered star dots (SS x for AA).
+
+    Small sparse stars (dim) + a few brighter ones. All dots are small and
+    sparse enough that the center-region 64x64 downsample (used by the
+    contrast guard) averages them away — the backdrop extremes stay on the
+    dark sky, so near-white countdown text keeps its contrast.
+    cfg: count, seed, band (y range), colors (dim/bright), big_frac.
+    """
+    w, h = WIDTH * SS, HEIGHT * SS
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    state = cfg["seed"]
+    band = cfg["band"]
+    colors = cfg["colors"]
+    big_frac = cfg.get("big_frac", 0.10)
+
+    def rnd() -> float:
+        nonlocal state
+        state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+        return (state >> 16) / 32768.0
+
+    for _ in range(cfg["count"]):
+        x = w * rnd()
+        y = h * (band[0] + rnd() * (band[1] - band[0]))
+        big = rnd() < big_frac
+        r = (1.0 + rnd() * (1.6 if big else 0.9)) * SS
+        a = int((140 + rnd() * 115) if big else (50 + rnd() * 100))
+        col = colors[1] if rnd() < 0.22 else colors[0]
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=(*col, a))
+    overlay = overlay.resize(SIZE, Image.LANCZOS)
+    return overlay.filter(ImageFilter.GaussianBlur(radius=0.4))
+
+
+def build_clouds(layers: list[dict]) -> Image.Image:
+    """Cloud sea (viewer above the clouds): solid bank + fluffy top bumps.
+
+    Each layer: base_y/amp/freq/phase/color/alpha/blur feed `build_bank`
+    (solid bank below a wavy top edge), plus `seed`/`r_min`/`r_max`/`step`
+    for overlapping elliptical bumps along the top edge — reads as one
+    continuous cloud field with a soft, irregular horizon rather than
+    isolated puffs. Layers composite far-to-near; far layers lighter/blurrier.
+    """
+    result = Image.new("RGBA", SIZE, (0, 0, 0, 0))
+    for layer in layers:
+        bank = build_bank(layer)
+        w, h = WIDTH * SS, HEIGHT * SS
+        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        state = layer["seed"]
+
+        def rnd() -> float:
+            nonlocal state
+            state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+            return (state >> 16) / 32768.0
+
+        base_y = layer["base_y"] * h
+        amp = layer["amp"] * h
+        freq = layer["freq"]
+        phase = layer.get("phase", 0.0)
+        r_min = layer.get("r_min", 0.08) * w
+        r_max = layer.get("r_max", 0.18) * w
+        step = w * layer.get("step", 0.10)
+        x = -r_max
+        i = 0
+        while x < w + r_max:
+            cy = base_y + amp * math.sin(2.0 * math.pi * freq * i * step / w + phase)
+            r = r_min + rnd() * (r_max - r_min)
+            a = int(layer["alpha"] * (0.75 + 0.25 * rnd()))
+            draw.ellipse(
+                [x - r, cy - r * 0.42, x + r, cy + r * 0.42],
+                fill=(*layer["color"], a),
+            )
+            x += step * (0.8 + rnd() * 0.6)
+            i += 1
+        overlay = overlay.resize(SIZE, Image.LANCZOS)
+        overlay = overlay.filter(ImageFilter.GaussianBlur(radius=layer.get("blur", 8)))
+        bank = Image.alpha_composite(bank, overlay)
+        result = Image.alpha_composite(result, bank)
+    return result
 
 
 def sample_center_extremes(img: Image.Image) -> tuple[tuple, tuple]:
@@ -449,6 +562,133 @@ SCENES = [
             "surface_input": ((0, 0, 0), 0.38),
         },
     },
+    {
+        "key": "starry",
+        "name": "星夜",
+        # 深靛蓝夜空 → 暗地; 中央保持暗, 保白字对比度。月亮在中央采样区外,
+        # 星点稀疏, 中心极值落在夜空本身。
+        "stops": [
+            (0.00, (10, 12, 30)),
+            (0.45, (22, 26, 52)),
+            (0.72, (38, 42, 74)),
+            (1.00, (16, 18, 40)),
+        ],
+        "glow": {"color": (235, 235, 250), "center": (0.72, 0.16), "radius": 0.14, "peak": 130},
+        "stars": {
+            "count": 170, "seed": 0x51A1, "band": (0.02, 0.80),
+            "colors": ((200, 212, 244), (255, 236, 190)), "big_frac": 0.10,
+        },
+        "ridges": [
+            {"base_y": 0.88, "amp": 0.06, "color": (12, 14, 32), "alpha": 235, "seed": 0x501},
+            {"base_y": 0.97, "amp": 0.05, "color": (8, 9, 22), "alpha": 255, "seed": 0x502},
+        ],
+        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 50},
+        "palette": {
+            "base": (22, 26, 52),
+            "accent": (255, 224, 160),
+            "text_primary": (246, 247, 255),
+            "text_secondary": (185, 192, 220),
+            "surface": ((0, 0, 0), 0.25),
+            "surface_input": ((0, 0, 0), 0.38),
+        },
+    },
+    {
+        "key": "snowfield",
+        "name": "雪原",
+        # 冷白天空 → 亮雪原; 中央保持亮, 保深字对比度。远处淡山 + 近处雪浪。
+        "stops": [
+            (0.00, (216, 226, 234)),
+            (0.42, (205, 218, 228)),
+            (0.60, (215, 226, 234)),
+            (0.75, (228, 236, 242)),
+            (1.00, (226, 234, 240)),
+        ],
+        "glow": {"color": (255, 255, 255), "center": (0.5, 0.08), "radius": 0.40, "peak": 25},
+        "ridges": [
+            {"base_y": 0.70, "amp": 0.05, "color": (198, 210, 220), "alpha": 120, "seed": 0x601},
+        ],
+        "waves": [
+            {"base_y": 0.82, "amp": 0.025, "freq": 1.5, "phase": 0.0,
+             "color": (230, 238, 244), "alpha": 190},
+            {"base_y": 0.93, "amp": 0.03, "freq": 1.2, "phase": 1.9,
+             "color": (238, 245, 250), "alpha": 230},
+        ],
+        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 0},
+        "palette": {
+            "base": (205, 218, 228),
+            "accent": (150, 185, 205),
+            "text_primary": (30, 40, 52),
+            "text_secondary": (80, 95, 110),
+            "surface": ((255, 255, 255), 0.55),
+            "surface_input": ((255, 255, 255), 0.85),
+        },
+    },
+    {
+        "key": "desert",
+        "name": "沙漠",
+        # 暮色天空 → 暖沙地; 中央保持亮 (低垂落日暖光), 深字对比度随落日抬升。
+        # 沙丘基线在中央采样区 (y 0.65) 之下, 避免最深沙影拉低 backdrop_dark。
+        "stops": [
+            (0.00, (98, 72, 98)),
+            (0.35, (150, 104, 92)),
+            (0.55, (196, 138, 92)),
+            (0.75, (172, 110, 72)),
+            (1.00, (150, 90, 60)),
+        ],
+        "glow": {"color": (255, 216, 168), "center": (0.5, 0.50), "radius": 0.34, "peak": 100},
+        "waves": [
+            {"base_y": 0.76, "amp": 0.05, "freq": 1.6, "phase": 0.0,
+             "color": (176, 116, 76), "alpha": 205},
+            {"base_y": 0.88, "amp": 0.06, "freq": 1.3, "phase": 1.5,
+             "color": (146, 92, 60), "alpha": 235},
+            {"base_y": 0.98, "amp": 0.05, "freq": 1.1, "phase": 3.0,
+             "color": (122, 76, 50), "alpha": 255},
+        ],
+        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 0},
+        "palette": {
+            "base": (172, 110, 72),
+            "accent": (255, 200, 130),
+            "text_primary": (58, 34, 26),
+            "text_secondary": (120, 84, 60),
+            "surface": ((255, 255, 255), 0.50),
+            "surface_input": ((255, 255, 255), 0.80),
+        },
+    },
+    {
+        "key": "cloudsea",
+        "name": "云海",
+        # 日出天空 (上靛下金) → 亮云海; 中央亮, 深字对比度成立。云层基线
+        # 0.58 起, 中央采样区下部为亮云带, 上部为亮日出天空。
+        "stops": [
+            (0.00, (52, 58, 100)),
+            (0.12, (96, 84, 124)),
+            (0.30, (200, 148, 134)),
+            (0.52, (248, 196, 150)),
+            (0.72, (255, 212, 168)),
+            (1.00, (216, 168, 146)),
+        ],
+        "glow": {"color": (255, 224, 184), "center": (0.5, 0.86), "radius": 0.42, "peak": 110},
+        "clouds": [
+            {"base_y": 0.60, "amp": 0.05, "freq": 2.0, "phase": 0.0,
+             "color": (236, 214, 206), "alpha": 190, "blur": 10,
+             "r_min": 0.08, "r_max": 0.16, "step": 0.10, "seed": 0xC01},
+            {"base_y": 0.74, "amp": 0.07, "freq": 1.6, "phase": 1.4,
+             "color": (246, 230, 220), "alpha": 230, "blur": 8,
+             "r_min": 0.09, "r_max": 0.20, "step": 0.11, "seed": 0xC02},
+            {"base_y": 0.90, "amp": 0.08, "freq": 1.2, "phase": 2.8,
+             "color": (252, 242, 232), "alpha": 255, "blur": 6,
+             "r_min": 0.10, "r_max": 0.24, "step": 0.12, "seed": 0xC03},
+        ],
+        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 0},
+        "palette": {
+            "base": (214, 168, 146),
+            "accent": (255, 210, 160),
+            "text_primary": (56, 32, 48),
+            "text_secondary": (120, 85, 95),
+            "surface": ((255, 255, 255), 0.50),
+            "surface_input": ((255, 255, 255), 0.80),
+        },
+    },
 ]
 
 
@@ -469,6 +709,10 @@ def build_scene(cfg: dict) -> Image.Image:
     if "embers" in cfg:
         e = cfg["embers"]
         img = Image.alpha_composite(img, build_embers(e["count"], e["color"], e["seed"]))
+    if "stars" in cfg:
+        img = Image.alpha_composite(img, build_stars(cfg["stars"]))
+    if "clouds" in cfg:
+        img = Image.alpha_composite(img, build_clouds(cfg["clouds"]))
     v = cfg["veil"]
     img = Image.alpha_composite(
         img, radial_overlay(v["color"], v["center"], v["radius"], v["peak"])
@@ -540,7 +784,7 @@ mod tests {
 
     #[test]
     fn all_scenes_pass_contrast_guards() {
-        assert_eq!(SCENES.len(), 5, "POC 应有 5 个场景");
+        assert_eq!(SCENES.len(), 9, "沉浸世界应有 9 个场景");
         for spec in &SCENES {
             let p = &spec.palette;
             for (label, backdrop) in [

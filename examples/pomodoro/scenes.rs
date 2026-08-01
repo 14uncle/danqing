@@ -6,7 +6,7 @@
 use danqing::{Color, ScenePalette, SceneSpec};
 
 /// POC 场景清单 (数组顺序即 ◀/▶ 切换顺序)。
-pub const SCENES: [SceneSpec; 5] = [
+pub const SCENES: [SceneSpec; 9] = [
     SceneSpec {
         name: "篝火",
         image: "assets/scenes/bonfire.png",
@@ -77,6 +77,62 @@ pub const SCENES: [SceneSpec; 5] = [
             backdrop_dark: Color::from_srgb8(62, 81, 68),
         },
     },
+    SceneSpec {
+        name: "星夜",
+        image: "assets/scenes/starry.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(22, 26, 52),
+            accent: Color::from_srgb8(255, 224, 160),
+            text_primary: Color::from_srgb8(246, 247, 255),
+            text_secondary: Color::from_srgb8(185, 192, 220),
+            surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
+            surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
+            backdrop_light: Color::from_srgb8(49, 54, 77),
+            backdrop_dark: Color::from_srgb8(15, 18, 38),
+        },
+    },
+    SceneSpec {
+        name: "雪原",
+        image: "assets/scenes/snowfield.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(205, 218, 228),
+            accent: Color::from_srgb8(150, 185, 205),
+            text_primary: Color::from_srgb8(30, 40, 52),
+            text_secondary: Color::from_srgb8(80, 95, 110),
+            surface: Color::rgba(1.0, 1.0, 1.0, 0.55),
+            surface_input: Color::rgba(1.0, 1.0, 1.0, 0.85),
+            backdrop_light: Color::from_srgb8(219, 229, 236),
+            backdrop_dark: Color::from_srgb8(206, 219, 229),
+        },
+    },
+    SceneSpec {
+        name: "沙漠",
+        image: "assets/scenes/desert.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(172, 110, 72),
+            accent: Color::from_srgb8(255, 200, 130),
+            text_primary: Color::from_srgb8(58, 34, 26),
+            text_secondary: Color::from_srgb8(120, 84, 60),
+            surface: Color::rgba(1.0, 1.0, 1.0, 0.5),
+            surface_input: Color::rgba(1.0, 1.0, 1.0, 0.8),
+            backdrop_light: Color::from_srgb8(217, 167, 121),
+            backdrop_dark: Color::from_srgb8(169, 124, 106),
+        },
+    },
+    SceneSpec {
+        name: "云海",
+        image: "assets/scenes/cloudsea.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(214, 168, 146),
+            accent: Color::from_srgb8(255, 210, 160),
+            text_primary: Color::from_srgb8(56, 32, 48),
+            text_secondary: Color::from_srgb8(120, 85, 95),
+            surface: Color::rgba(1.0, 1.0, 1.0, 0.5),
+            surface_input: Color::rgba(1.0, 1.0, 1.0, 0.8),
+            backdrop_light: Color::from_srgb8(243, 226, 214),
+            backdrop_dark: Color::from_srgb8(211, 160, 138),
+        },
+    },
 ];
 
 #[cfg(test)]
@@ -93,7 +149,7 @@ mod tests {
 
     #[test]
     fn all_scenes_pass_contrast_guards() {
-        assert_eq!(SCENES.len(), 5, "POC 应有 5 个场景");
+        assert_eq!(SCENES.len(), 9, "沉浸世界应有 9 个场景");
         for spec in &SCENES {
             let p = &spec.palette;
             for (label, backdrop) in [

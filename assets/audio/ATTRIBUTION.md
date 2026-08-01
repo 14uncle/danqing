@@ -12,6 +12,20 @@
 | `mountain.ogg` | 山 | wind whoosh loop (`wind woosh loop.ogg`) | SketchMan3 | https://opengameart.org/content/wind-whoosh-loop | CC0 |
 | `forest.ogg` | 森林 | Forest Ambience (`Forest_Ambience.mp3`) | TinyWorlds | https://opengameart.org/content/forest-ambience | CC0 |
 
+## 程序化音景 (2026-08-01, 9 场景补全)
+
+`starry` / `snowfield` / `desert` / `cloudsea` 四条为 **`tools/export-ambient.py` 程序化合成**的「风系」音景
+(星夜=夜风, 雪原=雪风, 沙漠=干风, 云海=高空风)。FFT 频谱整形噪声 + 缓阵风包络 + 接缝 crossfade,
+确定性、零外部资产、循环安全。**初版占位** —— 若终审听感不佳, 可换 OpenGameArt CC0 源
+(处理参数与下方一致) 后同步更新本表与 `tests/assets.rs` 体积护栏。
+
+| 文件 | 场景 | 生成方式 | 频谱 | RMS 目标 |
+|------|------|----------|------|----------|
+| `starry.ogg` | 星夜 | 程序化 (`tools/export-ambient.py`) | 深低鸣 + 微空气感 | 0.05 |
+| `snowfield.ogg` | 雪原 | 程序化 (同上) | 高频雪嘶声 | 0.06 |
+| `desert.ogg` | 沙漠 | 程序化 (同上) | 干爽中段风声 | 0.08 |
+| `cloudsea.ogg` | 云海 | 程序化 (同上) | 宽频谱高空风 | 0.09 |
+
 ## 处理参数
 
 ```
