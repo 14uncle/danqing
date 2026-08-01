@@ -298,9 +298,11 @@ fn star_field(uv: vec2<f32>) -> vec3<f32> {
     let cx = (cell.x + 0.1 + jx * 0.8) / SF_COLS;
     let cy = (cell.y + 0.1 + jy * 0.8) / SF_ROWS;
     let band = 1.0 - smoothstep(SF_BAND_BOT, SF_BAND_BOT + 0.04, cy);
-    let r = (0.0016 + jx * 0.0012) * (1.0 + big * 1.3) * SF_ASPECT;
+    // 半径在 aspect 修正空间 (d 已拉伸 x), 勿再乘 ASPECT。小星 2-4px 直径, 大星 5-8px
+    // (对齐原静态图 build_stars 半径: 普通 1-2px、大星 2-3px 原生像素)。
+    let r = (0.0012 + jx * 0.0006) * (1.0 + big * 1.1);
     let d = distance(vec2<f32>(uv.x * SF_ASPECT, uv.y), vec2<f32>(cx * SF_ASPECT, cy));
-    let spot = 1.0 - smoothstep(r * 0.15, r, d);   // 软边光晕 (非硬盘)
+    let spot = 1.0 - smoothstep(r * 0.3, r, d);   // 小软边 (非大光晕)
     let bright = (0.12 + jx * 0.18) * (1.0 + big * 1.2);
     return star_color(warm_h) * spot * on * band * bright;
 }
@@ -318,9 +320,10 @@ fn star_twinkle(uv: vec2<f32>, t: f32) -> vec3<f32> {
     let cx = (cell.x + 0.1 + jx * 0.8) / SF_COLS;
     let cy = (cell.y + 0.1 + jy * 0.8) / SF_ROWS;
     let band = 1.0 - smoothstep(SF_BAND_BOT, SF_BAND_BOT + 0.04, cy);
-    let r = (0.0016 + jx * 0.0012) * (1.0 + big * 1.3) * SF_ASPECT;
+    // 与 star_field 同半径 (小脆星, 非大光晕)。
+    let r = (0.0012 + jx * 0.0006) * (1.0 + big * 1.1);
     let d = distance(vec2<f32>(uv.x * SF_ASPECT, uv.y), vec2<f32>(cx * SF_ASPECT, cy));
-    let spot = 1.0 - smoothstep(r * 0.15, r, d);
+    let spot = 1.0 - smoothstep(r * 0.3, r, d);
     let k = 1.0 + floor(h * 3.0);   // {1,2,3}/8 Hz
     let s = 0.5 + 0.5 * sin(t * STAR_W * k + h * 6.2831853);
     let tw = s * s * (3.0 - 2.0 * s);
