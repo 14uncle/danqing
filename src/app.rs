@@ -100,4 +100,18 @@ pub trait App: Any {
     ///
     /// 默认空实现：不需要区分最大化 / 还原图标的应用无需关心。
     fn maximized_changed(&mut self, _is_maximized: bool) {}
+
+    /// 焦点为空时的恢复请求：返回组件稳定 id (见 [`crate::widget::Widget::focus_id`])，
+    /// 框架每帧在焦点为空且本方法返回 `Some` 时把焦点定位到该组件，
+    /// 随后回调 [`App::focus_restored`]。
+    ///
+    /// 典型用途：弹层面板关闭后，焦点回到打开面板的按钮 (关闭与恢复都发生在
+    /// 状态更新里，天然配对)。默认 `None` (不请求恢复)。
+    fn focus_request(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// 焦点恢复请求已被框架应用 (一次性语义)：实现者应清除请求状态。
+    /// 默认空实现。
+    fn focus_restored(&mut self) {}
 }

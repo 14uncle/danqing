@@ -570,6 +570,14 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     self.tree.sync(self.app);
                     self.tree.animate(&ctx);
                     self.focus.rebuild(&self.tree);
+                    // 焦点为空且应用请求恢复 (如面板关闭后回到打开面板的按钮):
+                    // 按名聚焦, 一次性 (应用后回调 focus_restored 清除请求)。
+                    if self.focus.current().is_none() {
+                        if let Some(id) = self.app.focus_request() {
+                            self.focus.set_focus_by_id(id);
+                            self.app.focus_restored();
+                        }
+                    }
                     let prev = self.focus.previous().map(|p| p.to_vec());
                     let curr = self.focus.current().map(|p| p.to_vec());
                     self.dispatch_focus_changes(prev.as_deref(), curr.as_deref());
