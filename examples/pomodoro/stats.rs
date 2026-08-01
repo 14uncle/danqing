@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 use chrono::{Datelike, Local, TimeZone};
 use serde::{Deserialize, Serialize};
 
+use crate::scenes::SCENES;
+
 /// 当前历史文件格式版本。
 pub const FORMAT_VERSION: u32 = 1;
 
@@ -149,24 +151,50 @@ impl FocusHistory {
             .collect()
     }
 
-    /// CSV 明文导出 (首行表头, 供 Excel/文本查看)。
+    /// CSV 明文导出 (首行表头, 供人阅读): 时间戳转本地时间、场景索引转名字、
+    /// 时长转 mm:ss、轮次转 "N/4"。机器可读的原始字段在 `focus-history.json`,
+    /// CSV 是给人看的, 不保留裸 Unix 秒 / 数字索引。
     pub fn export_csv(&self) -> String {
-        let mut out = String::from(
-            "started_ts,completed_ts,planned_secs,focused_secs,scene_index,round_in_cycle,completed\n",
-        );
+        let mut out = String::from("开始时间,完成时间,计划时长,实际专注,场景,轮次\n");
         for s in &self.sessions {
             out.push_str(&format!(
-                "{},{},{},{},{},{},{}\n",
-                s.started_ts,
-                s.completed_ts,
-                s.planned_secs,
-                s.focused_secs,
-                s.scene_index,
-                s.round_in_cycle,
-                if s.completed { 1 } else { 0 },
+                "{},{},{},{},{},{}\n",
+                format_ts(s.started_ts),
+                format_ts(s.completed_ts),
+                format_dur(s.planned_secs),
+                format_dur(s.focused_secs),
+                scene_name(s.scene_index),
+                round_label(s.round_in_cycle),
             ));
         }
         out
+    }
+}
+
+/// Unix 秒 → 本地时间 "YYYY-MM-DD HH:MM:SS" (无效时间戳兜底)。
+fn format_ts(ts: u64) -> String {
+    match Local.timestamp_opt(ts as i64, 0).single() {
+        Some(t) => t.format("%Y-%m-%d %H:%M:%S").to_string(),
+        None => "无效时间".into(),
+    }
+}
+
+/// 秒数 → "MM:SS" (分钟:秒, 与倒计时同刻度)。
+fn format_dur(secs: u64) -> String {
+    format!("{:02}:{:02}", secs / 60, secs % 60)
+}
+
+/// 场景索引 → 名字 (越界兜底 "未知")。
+fn scene_name(idx: usize) -> &'static str {
+    SCENES.get(idx).map(|s| s.name).unwrap_or("未知")
+}
+
+/// 轮次 → "N/循环长度" (0 表示无轮次语义, 显示占位)。
+fn round_label(round: u8) -> String {
+    if round == 0 {
+        "—".into()
+    } else {
+        format!("{round}/{}", super::timer::CYCLE_LENGTH)
     }
 }
 
@@ -491,14 +519,22 @@ mod tests {
     }
 
     #[test]
-    fn export_csv_has_header_and_rows() {
+    fn export_csv_is_human_readable() {
         let mut history = FocusHistory::new();
         history.push(record(100));
         let csv = history.export_csv();
         let lines: Vec<&str> = csv.lines().collect();
         assert_eq!(lines.len(), 2, "首行表头 + 一行数据");
-        assert!(lines[0].starts_with("started_ts,"));
-        assert_eq!(lines[1], "0,100,1500,1500,0,1,1");
+        assert!(
+            lines[0].starts_with("开始时间,"),
+            "表头应为人读: {:?}",
+            lines[0]
+        );
+        let row = lines[1];
+        assert!(row.contains("1970-"), "时间戳应转本地日期: {row}");
+        assert!(row.contains("25:00"), "时长应 mm:ss: {row}");
+        assert!(row.contains(SCENES[0].name), "场景应为人读名字: {row}");
+        assert!(row.contains("1/4"), "轮次应可见: {row}");
     }
 
     #[test]
@@ -511,8 +547,8 @@ mod tests {
         let result = export_csv_to(&path, &history);
         assert_eq!(result, Ok(()));
         let csv = fs::read_to_string(&path).expect("导出文件应存在");
-        assert!(csv.starts_with("started_ts,"), "应有表头");
-        assert!(csv.contains("0,100,1500,1500,0,1,1"), "应有一行数据");
+        assert!(csv.starts_with("开始时间,"), "应有表头");
+        assert!(csv.contains(SCENES[0].name), "应有一行数据 (场景名)");
         let _ = fs::remove_dir_all(&dir);
     }
 
