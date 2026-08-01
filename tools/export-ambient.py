@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Export danqing pomodoro ambient sound beds for the 4 new sky/wind scenes.
+"""Export danqing pomodoro ambient sound beds for procedurally added scenes.
 
-The 4 scenes added for the 9-scene immersive world are all "sky/air" realms
-(星夜 night breeze, 雪原 snow wind, 沙漠 dry desert wind, 云海 high-altitude
-wind). Rather than sourcing external CC0 clips, these are synthesized
-procedurally as a wind family: filtered noise (FFT-shaped) + slow gust
-envelope. Deterministic (fixed seeds), loop-safe (stationary noise + seam
-crossfade), zero external assets — mirrors the "procedural scenes" recipe of
-export-scenes.py.
+The scene added beyond the 5 CC0-sourced originals (星夜 night breeze) is
+synthesized procedurally rather than sourcing an external clip: filtered
+noise (FFT-shaped) + slow gust envelope. Deterministic (fixed seeds),
+loop-safe (stationary noise + seam crossfade), zero external assets —
+mirrors the "procedural scenes" recipe of export-scenes.py.
 
 Outputs:
-    assets/audio/{starry,snowfield,desert,cloudsea}.ogg   # OGG Vorbis q4
+    assets/audio/starry.ogg   # OGG Vorbis q4
 
 Dependencies:
     pip install numpy        # DSP
@@ -42,9 +40,6 @@ def _spectrum(freqs: np.ndarray, kind: str) -> np.ndarray:
         low = 1.0 / (1.0 + (freqs / 220.0) ** 2.0)
         air = (freqs / 1200.0) ** 1.2 / (1.0 + (freqs / 1200.0) ** 2.0) * 0.35
         return np.clip(low * 0.9 + air, 0.0, 1.0)
-    if kind == "desert":  # 沙漠: dry mid-band wind, slight grain
-        mid = 1.0 / (1.0 + (freqs / 1300.0) ** 1.4)
-        return np.clip(mid, 0.0, 1.0)
     raise ValueError(kind)
 
 
@@ -118,8 +113,6 @@ def _encode_ogg(wav: Path, out: Path) -> None:
 SCENES = [
     # 星夜 夜风: 最安静, 低频细语 + 一丝空气感。
     {"key": "starry", "kind": "night", "seed": 0x51A1, "rms_target": 0.05, "depth": 0.55},
-    # 沙漠 干风: 干爽中段风声。
-    {"key": "desert", "kind": "desert", "seed": 0x53A1, "rms_target": 0.08, "depth": 0.55},
 ]
 
 

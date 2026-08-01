@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Export danqing Phase 2 scene assets (pomodoro POC).
 
-Seven procedural scenes spanning dark/bright families:
+Six procedural scenes spanning dark/bright families:
     bonfire   篝火 (dark, warm fire glow)
     sea       海   (bright, cyan)
     rain      雨   (gray-blue)
     mountain  山   (neutral dusk, ridgelines)
     forest    森林 (misty conifer green, treelines + fog bands)
     starry    星夜 (deep indigo night, starfield + dark hills)
-    desert    沙漠 (dusk sand, setting sun glow + diagonal dunes)
 
 Each scene PNG bakes: multi-stop vertical gradient + radial glow +
 center readability veil + scene-specific details.
@@ -520,38 +519,6 @@ SCENES = [
             "surface_input": ((0, 0, 0), 0.38),
         },
     },
-    {
-        "key": "desert",
-        "name": "沙漠",
-        # 暮色天空 → 暖沙地; 中央保持亮 (低垂落日暖光), 深字对比度随落日抬升。
-        # 沙丘基线在中央采样区 (y 0.65) 之下, 避免最深沙影拉低 backdrop_dark。
-        "stops": [
-            (0.00, (98, 72, 98)),
-            (0.35, (150, 104, 92)),
-            (0.55, (196, 138, 92)),
-            (0.75, (172, 110, 72)),
-            (1.00, (150, 90, 60)),
-        ],
-        "glow": {"color": (255, 216, 168), "center": (0.5, 0.50), "radius": 0.34, "peak": 100},
-        # 回第一版整体 (亮暖), 仅沙丘脊线加斜向 (diag) 与海区分。
-        "waves": [
-            {"base_y": 0.76, "amp": 0.05, "freq": 1.6, "phase": 0.0, "diag": 0.14,
-             "color": (176, 116, 76), "alpha": 205},
-            {"base_y": 0.88, "amp": 0.06, "freq": 1.3, "phase": 1.5, "diag": 0.12,
-             "color": (146, 92, 60), "alpha": 235},
-            {"base_y": 0.98, "amp": 0.05, "freq": 1.1, "phase": 3.0, "diag": 0.10,
-             "color": (122, 76, 50), "alpha": 255},
-        ],
-        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 0},
-        "palette": {
-            "base": (172, 110, 72),
-            "accent": (255, 200, 130),
-            "text_primary": (58, 34, 26),
-            "text_secondary": (120, 84, 60),
-            "surface": ((255, 255, 255), 0.50),
-            "surface_input": ((255, 255, 255), 0.80),
-        },
-    },
 ]
 
 
@@ -646,7 +613,7 @@ mod tests {
 
     #[test]
     fn all_scenes_pass_contrast_guards() {
-        assert_eq!(SCENES.len(), 7, "沉浸世界应有 7 个场景");
+        assert_eq!(SCENES.len(), 6, "沉浸世界应有 6 个场景");
         for spec in &SCENES {
             let p = &spec.palette;
             for (label, backdrop) in [
