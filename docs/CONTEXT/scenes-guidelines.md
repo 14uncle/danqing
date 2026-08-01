@@ -98,6 +98,7 @@ struct Uniforms {
 | 海 | `docs/specs/pomodoro-scene-motion-sea.md` | ✅ 已关闭 |
 | 雨改造 | `docs/specs/pomodoro-scene-motion-rain-rework.md` | ✅ 已关闭 |
 | 山/森林 | `docs/specs/pomodoro-scene-motion-mountain-forest.md` | ✅ 已关闭 (2026-08-01 人工终审通过) |
+| 星夜 | `docs/specs/pomodoro-scene-motion-starry.md` | ⏳ 待用户终审 (2026-08-01 实现完成) |
 
 ## 相关 Memory
 
