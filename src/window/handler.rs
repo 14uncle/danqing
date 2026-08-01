@@ -692,6 +692,15 @@ impl<A: App> Handler<'_, A> {
         self.is_visible = false;
     }
 
+    /// 最大化窗口并同步应用层最大化状态 (标题栏图标据此切换 □/□□)。
+    /// 用于隐藏态阶段流转自动呼出时的"默认最大化"；手动 ToggleVisible 不走此路径。
+    fn maximize_window(&mut self) {
+        if let Some(window) = &self.window {
+            window.set_maximized(true);
+        }
+        self.app.maximized_changed(true);
+    }
+
     /// 显示窗口 + 抢焦点 + 重绘。winit 的 SW_SHOW 默认不抢焦点，
     /// 显式抢前台防止"已显示但被遮" (尤其在另一 app 后台时)。
     fn show_window(&self) {
@@ -723,11 +732,13 @@ impl<A: App> Handler<'_, A> {
             }
             WindowAppEvent::Quit => event_loop.exit(),
             WindowAppEvent::PhaseAdvanced => {
-                // 隐藏态时阶段流转 → 自动呼出 (用户可能没在电脑前，或在另一 app)
+                // 隐藏态时阶段流转 → 自动呼出 (用户可能没在电脑前，或在另一 app)，
+                // 默认最大化呼出 (沉浸主界面)。手动 ToggleVisible 不强制最大化。
                 if !self.is_visible {
                     self.is_visible = true;
-                    log::info!("阶段流转，自动呼出窗口");
+                    log::info!("阶段流转，自动呼出窗口 (默认最大化)");
                     self.show_window();
+                    self.maximize_window();
                 }
             }
         }
