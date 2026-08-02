@@ -15,7 +15,7 @@
 | `main.rs` | 入口、窗口、App trait、每帧 assemble | 常量定义: `FADE_DURATION`(800ms)、`FLASH_DURATION`(600ms)、`NOISE_OPACITY`(0.06)；`rain_clock` 暂停/恢复逻辑 |
 | `timer.rs` | 番茄钟核心: Phase/Focus/Break, 25/5 固定 | 纯逻辑,与 UI 解耦；`Run` enum: Idle/Running/Paused |
 | `state.rs` | 持久化: JSON → `%APPDATA%/danqing/pomodoro.json` | 跨重启恢复 deadline; `save_state` 节流 1s |
-| `scenes.rs` | 5 场景资产声明: 图片路径 + ScenePalette | **由 tools/export-scenes.py 生成,勿手改**；索引顺序: 篝火/海/雨/山/森林 |
+| `scenes.rs` | 6 场景资产声明: 图片路径 + ScenePalette | **由 tools/export-scenes.py 生成,勿手改**；索引顺序: 篝火/海/雨/山/森林/星夜 |
 | `fader.rs` | 场景交叉淡化状态机(纯逻辑) | from/to + progress + easing; 中途打断按 dominant 侧吸附 |
 | `motion.rs` | 场景动效强度策略(纯逻辑) | MotionEnvelope 500ms 线性 envelope；雨例外: 强度不含 envelope,仅雨钟受 envelope 推动 |
 | `ambient.rs` | 环境音混音器 + rodio 输出适配层 | from/to 双槽(与场景纹理 LRU 同构)；有 LoopingDecoder 绕过 rodio 0.22 `repeat_infinite` bug |
@@ -30,7 +30,7 @@
 
 ### 场景切换流程
 ```
-用户按 ◀/▶ (或快捷键 1-5)
+用户按 ◀/▶ (无 1-5 场景快捷键; 全局热键仅显隐/暂停/退出 3 个, 2026-08-01 终审裁定)
   → SceneFader::switch_to(target, now)
   → 每帧 fader.frame(now, easing) → (from, to, fade)
   → BackgroundConfig { from_scene, to_scene, fade }

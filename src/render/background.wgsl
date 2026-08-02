@@ -267,11 +267,14 @@ const STAR_W: f32 = 0.7853982;  // 2π/8: 动效基频角速度 (1/8 Hz)
 // 软边光晕 (非硬盘)。粗网格 + 大 jitter → 随机散布无网格感。
 const SF_COLS: f32 = 48.0;     // 粗网格列
 const SF_ROWS: f32 = 28.0;     // 粗网格行
-const SF_ON: f32 = 0.035;      // 有星格比例 (48×28×0.035 ≈ 47 颗, 用户裁定减四分之三)
+const SF_ON: f32 = 0.074;      // 有星格比例 (48×28×0.074 ≈ 100 颗, 对齐原静态图实际 ~80-170)。
+                               // step 约定: 下方用 step(1.0 - SF_ON, h) 得 P(on)=SF_ON (同 big/warm);
+                               // 若误写 step(SF_ON, h) 会反转成 P=1-SF_ON ≈ 1280 颗 (2026-08-02 修复)。
 const SF_BIG: f32 = 0.10;      // 大亮星比例 (对齐原 big_frac 0.10)
 const SF_WARM: f32 = 0.22;     // 暖星比例 (对齐原 colors 22%)
 const SF_ASPECT: f32 = 1.5;    // 场景画布宽高比, 圆点修正
 const SF_BAND_BOT: f32 = 0.80; // 星带下缘 (山脊上方)
+const SF_TWINKLE_AMP: f32 = 0.42; // 星闪明暗双向摆动幅度 (±; 原单向加亮 0.28 读作「静态」)
 
 fn star_cell(uv: vec2<f32>) -> vec2<f32> {
     return vec2<f32>(floor(uv.x * SF_COLS), floor(uv.y * SF_ROWS));
@@ -290,7 +293,7 @@ fn star_color(h: f32) -> vec3<f32> {
 fn star_field(uv: vec2<f32>) -> vec3<f32> {
     let cell = star_cell(uv);
     let h = rain_hash(cell.x * 137.0 + cell.y * 71.0 + 5.0);
-    let on = step(SF_ON, h);
+    let on = step(1.0 - SF_ON, h);
     let big = step(1.0 - SF_BIG, rain_hash(cell.x * 11.0 + cell.y * 17.0 + 4.0));
     let warm_h = rain_hash(cell.x * 5.9 + cell.y * 41.3 + 3.0);
     let jx = rain_hash(cell.x * 7.3 + cell.y * 13.1 + 1.0);
@@ -307,12 +310,13 @@ fn star_field(uv: vec2<f32>) -> vec3<f32> {
     return star_color(warm_h) * spot * on * band * bright;
 }
 
-// 星闪: 与基础星野同格, 亮度明灭 (频率档位 {1,2,3}/8 Hz), smoothstep 缓起缓落。
-// 明灭增量 0.28 — 明显可感 (原 0.14 几乎看不出, 用户反馈「静态」)。
+// 星闪: 与基础星野同格, 亮度明暗双向摆动 (频率档位 {2,3,4}/8 Hz → 周期 4s/2.67s/2s)。
+// 双极脉冲 sin ∈ [-1,1]: 星点亮度在 base ± SF_TWINKLE_AMP 间明暗呼吸 (明暗都动, 非单向加亮)。
+// 原 {1,2,3}/8 Hz + 单向加亮 0.28 太慢太弱, 用户目测「静态」(2026-08-02)。
 fn star_twinkle(uv: vec2<f32>, t: f32) -> vec3<f32> {
     let cell = star_cell(uv);
     let h = rain_hash(cell.x * 137.0 + cell.y * 71.0 + 5.0);
-    let on = step(SF_ON, h);
+    let on = step(1.0 - SF_ON, h);
     let big = step(1.0 - SF_BIG, rain_hash(cell.x * 11.0 + cell.y * 17.0 + 4.0));
     let warm_h = rain_hash(cell.x * 5.9 + cell.y * 41.3 + 3.0);
     let jx = rain_hash(cell.x * 7.3 + cell.y * 13.1 + 1.0);
@@ -324,10 +328,11 @@ fn star_twinkle(uv: vec2<f32>, t: f32) -> vec3<f32> {
     let r = (0.0012 + jx * 0.0006) * (1.0 + big * 1.1);
     let d = distance(vec2<f32>(uv.x * SF_ASPECT, uv.y), vec2<f32>(cx * SF_ASPECT, cy));
     let spot = 1.0 - smoothstep(r * 0.3, r, d);
-    let k = 1.0 + floor(h * 3.0);   // {1,2,3}/8 Hz
-    let s = 0.5 + 0.5 * sin(t * STAR_W * k + h * 6.2831853);
-    let tw = s * s * (3.0 - 2.0 * s);
-    return star_color(warm_h) * spot * on * band * tw * 0.28;
+    let freq_h = rain_hash(cell.x * 19.0 + cell.y * 23.0 + 8.0);  // 独立 hash → 频率真随机
+    let phase_h = rain_hash(cell.x * 31.0 + cell.y * 47.0 + 9.0); // 独立 hash → 相位真随机
+    let k = 2.0 + floor(freq_h * 3.0);  // {2,3,4}/8 Hz → 周期 4s/2.67s/2s
+    let pulse = sin(t * STAR_W * k + phase_h * 6.2831853);   // [-1,1] 双极: 明暗双向
+    return star_color(warm_h) * spot * on * band * pulse * SF_TWINKLE_AMP;
 }
 
 // 流星: 周期性斜向流星 (rain_time 连续触发, ~24s 一颗, 存续 ~1.4s)。

@@ -36,10 +36,14 @@ CROSS = int(SR * 0.3)  # seam crossfade samples
 
 def _spectrum(freqs: np.ndarray, kind: str) -> np.ndarray:
     """Amplitude response 0..1 for the FFT noise shaper, per scene kind."""
-    if kind == "night":  # 星夜: deep low rumble + whisper of air
-        low = 1.0 / (1.0 + (freqs / 220.0) ** 2.0)
-        air = (freqs / 1200.0) ** 1.2 / (1.0 + (freqs / 1200.0) ** 2.0) * 0.35
-        return np.clip(low * 0.9 + air, 0.0, 1.0)
+    if kind == "night":  # 星夜: 低中频风体 + 一丝低鸣, 硬切中高频嘶 (2026-08-02 重做)
+        # 原 220Hz 低通 + 1.2k-10k air 带通 → 实测中高频(>1k)占 ~45% 能量, 听成雨/风扇。
+        # 参考已通过的山风 (mountain.ogg 96% 能量在 200-1000Hz): 风体须落在笔记本扬声器
+        # 可闻段, 高频几乎为零。夜风更暗更柔: 以 ~450Hz 为心的低中带通 + 少量深低作底。
+        body = 1.0 / (1.0 + ((freqs - 450.0) / 380.0) ** 2.0)   # 低中带通 (风体)
+        low = 0.7 / (1.0 + (freqs / 160.0) ** 2.0)              # 深低鸣作底 (夜之暗)
+        hiss = 1.0 / (1.0 + (freqs / 1600.0) ** 6.0)            # 1.6k 以上硬切 (灭雨/风扇嘶)
+        return np.clip(body * 0.85 + low, 0.0, 1.0) * hiss
     raise ValueError(kind)
 
 
