@@ -158,13 +158,13 @@ const SEA_MASK_TOP: f32 = 0.55;        // 位移区纵向软入起点 (uv.y, 波
 const SEA_MASK_FULL: f32 = 0.72;       // 软入终点 (以下全量)
 const SEA_SWELL_GAIN: f32 = 0.015;     // 位移幅度上限 (纵向 uv; 960x640 窗 ≈ ±9.6px)
 
-// 碎点: 分列 hash, 位置基本不动, 亮度低频明灭 (频率档位 {1,2}/8 Hz, 整数倍)。
+// 碎点: 分列 hash, 位置基本不动, 亮度低频明灭 (频率档位 {2,3,4}/8 Hz → 周期 4s/2.67s/2s, 同星夜)。
 const GLINT_DENSITY: f32 = 120.0;      // 列密度 (960px 窗 ≈ 8px/列)
-const GLINT_RADIUS: f32 = 0.004;       // 点半径 (纵向 uv; 960px 窗 ≈ 5px 直径)
+const GLINT_RADIUS: f32 = 0.005;       // 点半径 (纵向 uv; 960px 窗 ≈ 6px 直径)
 const GLINT_ASPECT: f32 = 1.5;         // 场景画布宽高比 (1536×1024), 圆点修正
 const GLINT_BAND_TOP: f32 = 0.72;      // 散布带上缘 (uv.y, 对齐静态图第一叠波带)
 const GLINT_BAND_SPAN: f32 = 0.26;     // 散布带纵向跨度 (至 uv.y ≈ 0.98)
-const GLINT_GAIN: f32 = 0.14;          // 点亮度上限 (乘性提亮; 0.30 目测突兀, 调参轮 1)
+const GLINT_GAIN: f32 = 0.22;          // 点亮度上限 (乘性提亮; 0.14 太隐, 0.30 目测突兀)
 const GLINT_ON: f32 = 0.88;            // hash > 此值的列才有碎点 (~14 颗)
 
 // 波带涌动位移场: 返回纵向采样偏移 (uv 单位, 值域约 ±SWELL_GAIN)。
@@ -186,8 +186,8 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
     // 列内 x 抖动避免网格感; y 落在散布带内 (常量, 不漂移)。
     let cx = (col + 0.3 + 0.4 * rnd) / GLINT_DENSITY;
     let cy = GLINT_BAND_TOP + GLINT_BAND_SPAN * rain_hash(col * 3.1 + 113.0);
-    // 明灭频率取档位 {1,2}/8 Hz (整数倍, 保 8s 公共周期); smoothstep 缓起缓落。
-    let k = 1.0 + floor(rnd * 2.0);
+    // 明灭频率取档位 {2,3,4}/8 Hz (整数倍, 保 8s 公共周期); smoothstep 缓起缓落。
+    let k = 2.0 + floor(rnd * 3.0);
     let s = 0.5 + 0.5 * sin(t * SEA_W * k + rnd * 6.2831853);
     let twinkle = s * s * (3.0 - 2.0 * s);
     // 软圆点 (宽高比修正, 同余烬范式); 宽羽化边缘 (0.15R 起软) 避免硬点突兀感。
@@ -219,8 +219,8 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
 
 // ---- 山动效 (山场景) ----
 // 单层暖粉雾融入暮色。mask 0.50-0.88 集中在山脊上空。
-// alpha 0.22 (降自 0.45 — 山脊背景本已暖粉 ~170/255, additive 叠加后
-// 暖上加暖过饱和读作"黄沙"; 降 alpha 后雾薄融入不抢戏)。
+// alpha 0.30 (终审 0.45 → 0.22 消除黄沙, 0.22 太隐回提至明显可见区间 b977da6;
+// 山脊背景本已暖粉 ~170/255, additive 叠加勿再过饱和读作"黄沙")。
 // scale 3.0 (升自 2.0, 雾团 ~125-320px 更细腻不读作"沙粒")。
 const MOUNTAIN_MIST_Y_TOP: f32 = 0.50;
 const MOUNTAIN_MIST_Y_FULL: f32 = 0.80;
