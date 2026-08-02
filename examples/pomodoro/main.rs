@@ -1290,15 +1290,11 @@ fn report_header(t: SceneTheme) -> impl widget::Widget {
         )
 }
 
-/// 场景分布: 5 场景各一行 (名 + 本年专注时长; 无记录显示 "—")。
+/// 场景分布: 每个场景一行 (名 + 本年专注时长; 无记录显示 "—")。
 fn scene_distribution_rows(t: SceneTheme) -> impl widget::Widget {
-    Column::new()
-        .gap(t.spacing_xs())
-        .child(scene_row(t, 0))
-        .child(scene_row(t, 1))
-        .child(scene_row(t, 2))
-        .child(scene_row(t, 3))
-        .child(scene_row(t, 4))
+    (0..SCENES.len()).fold(Column::new().gap(t.spacing_xs()), |col, idx| {
+        col.child(scene_row(t, idx))
+    })
 }
 
 fn scene_row(t: SceneTheme, idx: usize) -> impl widget::Widget {
@@ -2491,6 +2487,20 @@ mod tests {
             size.height < 100.0,
             "步进行高度应随内容 (控件高), 而非窗体高: {}",
             size.height
+        );
+    }
+
+    #[test]
+    fn scene_distribution_rows_cover_all_scenes() {
+        // 回归: 报告面板场景分布曾硬编码 5 行, 星夜 (index 5) 被漏。
+        // 行数必须与 SCENES 对齐, 新增场景时自动跟随。
+        let t = test_theme();
+        let node = danqing::widget::node(scene_distribution_rows(t));
+        assert_eq!(
+            node.children().len(),
+            SCENES.len(),
+            "报告面板场景分布行数应与 SCENES 对齐 (当前 {} 场景)",
+            SCENES.len()
         );
     }
 }
