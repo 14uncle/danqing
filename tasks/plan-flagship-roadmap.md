@@ -98,12 +98,12 @@
 - **Acceptance criteria:**
   - [x] 每场景音景开关 — 用户裁定「全局环境音开关」(2026-08-02: 控制条「声音」按钮, AmbientMixer `enabled` 300ms 包络平滑静音/恢复, `sound_on` 持久化, 旧 JSON 默认 true)
   - [x] 默认计时方案 (2026-08-02: 用户裁定设置面板已有专注/短休/长休步进 + 持久化 + 重置即满足, 勾掉)
-  - [ ] 主题细节(`src/theme.rs` token)
-- **Verification:** `cargo test` 全绿 + showcase 复用。
+  - [x] 主题细节(`src/theme.rs` token) (2026-08-02: 新增 `scrim`/`radius_xl` token, 面板遮罩与控制条胶囊改用 token, 魔法值清零)
+- **Verification:** `cargo test` 全绿 (lib 241 + pomodoro 211 + 集成 8) + showcase 复用 (release 构建通过) + benchmark 双门槛 PASS (startup 850.8ms ≤1000ms / WS 182.2MB ≤360MB)。
 - **Dependencies:** None
 - **Files:** `examples/pomodoro/*.rs`, `src/theme.rs`
 - **Scope:** M
-- **Status:** 🔄 F1 完成, F3 待做 (2026-08-02)
+- **Status:** ✅ 2026-08-02 完成 (F1 全局环境音开关 + F3 去魔法值; F2 用户裁定已满足)
 
 ### Task G: 建造实录发布(里程碑 0 Task D 剩余)
 

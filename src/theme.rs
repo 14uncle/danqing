@@ -121,6 +121,8 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     fn traffic_minimize(&self) -> Color;
     /// macOS 红绿灯最大化按钮色。
     fn traffic_maximize(&self) -> Color;
+    /// 面板遮罩色 (浮层半透明罩, 压暗背景以突出浮层)。
+    fn scrim(&self) -> Color;
 
     /// 小字号 (如提示、标签)。
     fn font_size_small(&self) -> u16;
@@ -150,6 +152,8 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     fn radius_md(&self) -> f32;
     /// 大圆角 (如卡片)。
     fn radius_lg(&self) -> f32;
+    /// 超大圆角 (如全圆胶囊控件条)。
+    fn radius_xl(&self) -> f32;
 
     /// 小阴影 (如输入框)。
     fn shadow_sm(&self) -> Shadow;
@@ -243,6 +247,11 @@ impl Theme for LightTheme {
         Color::from_srgb8(40, 200, 64)
     }
 
+    fn scrim(&self) -> Color {
+        // 面板浮层遮罩: 固定深色半透明, 不随明暗主题漂移 (压暗任何背景都成立)。
+        Color::rgba(0.0, 0.0, 0.0, 0.35)
+    }
+
     fn font_size_small(&self) -> u16 {
         12
     }
@@ -285,6 +294,11 @@ impl Theme for LightTheme {
 
     fn radius_lg(&self) -> f32 {
         16.0
+    }
+
+    fn radius_xl(&self) -> f32 {
+        // 全圆胶囊 (如番茄钟底部玻璃控件条)。
+        28.0
     }
 
     fn shadow_sm(&self) -> Shadow {
@@ -476,6 +490,10 @@ impl Theme for SceneTheme {
         LightTheme.traffic_maximize()
     }
 
+    fn scrim(&self) -> Color {
+        LightTheme.scrim()
+    }
+
     fn font_size_small(&self) -> u16 {
         LightTheme.font_size_small()
     }
@@ -522,6 +540,10 @@ impl Theme for SceneTheme {
 
     fn radius_lg(&self) -> f32 {
         LightTheme.radius_lg()
+    }
+
+    fn radius_xl(&self) -> f32 {
+        LightTheme.radius_xl()
     }
 
     fn shadow_sm(&self) -> Shadow {
@@ -576,6 +598,7 @@ mod tests {
         assert!(theme.selection().a > 0.0);
         assert!(theme.caret().a > 0.0);
         assert!(theme.danger().a > 0.0);
+        assert!(theme.scrim().a > 0.0);
     }
 
     #[test]
@@ -619,6 +642,15 @@ mod tests {
         assert!(theme.radius_sm() >= 0.0);
         assert!(theme.radius_sm() < theme.radius_md());
         assert!(theme.radius_md() < theme.radius_lg());
+        assert!(theme.radius_lg() < theme.radius_xl());
+    }
+
+    #[test]
+    fn light_theme_scrim_is_dark_overlay() {
+        // 浮层遮罩: 近黑且半透明 — 压暗背景突出浮层, 又不全黑 (玻璃感护栏)。
+        let s = LightTheme.scrim();
+        assert!(s.r < 0.2 && s.g < 0.2 && s.b < 0.2, "遮罩应近黑: {s:?}");
+        assert!(s.a > 0.0 && s.a < 1.0, "遮罩应半透明: alpha={}", s.a);
     }
 
     #[test]
@@ -815,6 +847,8 @@ mod tests {
         assert_eq!(theme.font_size_display(), light.font_size_display());
         assert_eq!(theme.spacing_md(), light.spacing_md());
         assert_eq!(theme.radius_lg(), light.radius_lg());
+        assert_eq!(theme.radius_xl(), light.radius_xl());
+        assert_eq!(theme.scrim(), light.scrim());
         assert_eq!(theme.easing_standard(), light.easing_standard());
     }
 

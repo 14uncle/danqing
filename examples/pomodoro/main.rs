@@ -887,7 +887,7 @@ fn ghost_button(t: SceneTheme, label: &'static str, msg: Msg) -> Button {
 fn control_pill(t: SceneTheme) -> impl widget::Widget {
     UiBox::new(Color::TRANSPARENT)
         .bind_color(|s: &PomodoroApp| s.palette().surface)
-        .radius(28.0)
+        .radius(t.radius_xl())
         .child(Padding::new(
             Edges::symmetric(t.spacing_sm(), t.spacing_xs()),
             Row::new()
@@ -925,50 +925,48 @@ fn sound_toggle_button(t: SceneTheme) -> Button {
 /// 设置面板浮层：居中玻璃卡片，调整专注/短休/长休时长。
 fn settings_panel(t: SceneTheme) -> impl widget::Widget {
     // 半透明遮罩 + 居中玻璃卡片
-    Stack::new()
-        .child(UiBox::new(Color::rgba(0.0, 0.0, 0.0, 0.35)).radius(0.0))
-        .child(
-            Center::new(
-                UiBox::new(Color::TRANSPARENT)
-                    .bind_color(|s: &PomodoroApp| s.palette().surface)
-                    .radius(t.radius_lg())
-                    .width(SETTINGS_CARD_WIDTH)
-                    .child(Padding::new(
-                        Edges::all(t.spacing_xl()),
-                        Column::new()
-                            .gap(t.spacing_lg())
-                            .child(settings_header(t))
-                            .child(stepper_row(
-                                t,
-                                "专注时长",
-                                |s: &PomodoroApp| s.timer.config().focus_secs / 60,
-                                Msg::DecFocus,
-                                Msg::IncFocus,
-                            ))
-                            .child(stepper_row(
-                                t,
-                                "\u{3000}短休息",
-                                |s: &PomodoroApp| s.timer.config().break_secs / 60,
-                                Msg::DecBreak,
-                                Msg::IncBreak,
-                            ))
-                            .child(stepper_row(
-                                t,
-                                "\u{3000}长休息",
-                                |s: &PomodoroApp| s.timer.config().long_break_secs / 60,
-                                Msg::DecLongBreak,
-                                Msg::IncLongBreak,
-                            ))
-                            .child(ghost_button(t, "重置计时", Msg::ResetConfig))
-                            .child(
-                                Text::new("变更在下一阶段生效")
-                                    .font_size(t.font_size_small())
-                                    .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
-                            ),
-                    )),
-            )
-            .fill_max(),
+    Stack::new().child(UiBox::new(t.scrim()).radius(0.0)).child(
+        Center::new(
+            UiBox::new(Color::TRANSPARENT)
+                .bind_color(|s: &PomodoroApp| s.palette().surface)
+                .radius(t.radius_lg())
+                .width(SETTINGS_CARD_WIDTH)
+                .child(Padding::new(
+                    Edges::all(t.spacing_xl()),
+                    Column::new()
+                        .gap(t.spacing_lg())
+                        .child(settings_header(t))
+                        .child(stepper_row(
+                            t,
+                            "专注时长",
+                            |s: &PomodoroApp| s.timer.config().focus_secs / 60,
+                            Msg::DecFocus,
+                            Msg::IncFocus,
+                        ))
+                        .child(stepper_row(
+                            t,
+                            "\u{3000}短休息",
+                            |s: &PomodoroApp| s.timer.config().break_secs / 60,
+                            Msg::DecBreak,
+                            Msg::IncBreak,
+                        ))
+                        .child(stepper_row(
+                            t,
+                            "\u{3000}长休息",
+                            |s: &PomodoroApp| s.timer.config().long_break_secs / 60,
+                            Msg::DecLongBreak,
+                            Msg::IncLongBreak,
+                        ))
+                        .child(ghost_button(t, "重置计时", Msg::ResetConfig))
+                        .child(
+                            Text::new("变更在下一阶段生效")
+                                .font_size(t.font_size_small())
+                                .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
+                        ),
+                )),
         )
+        .fill_max(),
+    )
 }
 
 /// 设置面板标题行："计时设置" + 固定间距 + 关闭按钮。
@@ -1032,34 +1030,32 @@ fn stepper_row(
 
 /// 统计面板浮层：居中玻璃卡片，展示 今日 / 本周 / 累计 专注 + 导出按钮。
 fn stats_panel(t: SceneTheme) -> impl widget::Widget {
-    Stack::new()
-        .child(UiBox::new(Color::rgba(0.0, 0.0, 0.0, 0.35)).radius(0.0))
-        .child(
-            Center::new(
-                UiBox::new(Color::TRANSPARENT)
-                    .bind_color(|s: &PomodoroApp| s.palette().surface)
-                    .radius(t.radius_lg())
-                    .width(SETTINGS_CARD_WIDTH)
-                    .child(Padding::new(
-                        Edges::all(t.spacing_xl()),
-                        Column::new()
-                            .gap(t.spacing_lg())
-                            .child(stats_header(t))
-                            .child(stat_row(t, "今日", |s| format!("{} 次", s.today_count)))
-                            .child(stat_row(t, "近 7 天", |s| {
-                                let (count, secs) = s.history.week_stats(current_wall_secs());
-                                format!("{count} 次 · {}", format_duration(secs))
-                            }))
-                            .child(stat_row(t, "累计", |s| {
-                                let (count, secs) = s.history.total_stats();
-                                format!("{count} 次 · {}", format_duration(secs))
-                            }))
-                            .child(export_actions(t))
-                            .child(export_notice_row(t)),
-                    )),
-            )
-            .fill_max(),
+    Stack::new().child(UiBox::new(t.scrim()).radius(0.0)).child(
+        Center::new(
+            UiBox::new(Color::TRANSPARENT)
+                .bind_color(|s: &PomodoroApp| s.palette().surface)
+                .radius(t.radius_lg())
+                .width(SETTINGS_CARD_WIDTH)
+                .child(Padding::new(
+                    Edges::all(t.spacing_xl()),
+                    Column::new()
+                        .gap(t.spacing_lg())
+                        .child(stats_header(t))
+                        .child(stat_row(t, "今日", |s| format!("{} 次", s.today_count)))
+                        .child(stat_row(t, "近 7 天", |s| {
+                            let (count, secs) = s.history.week_stats(current_wall_secs());
+                            format!("{count} 次 · {}", format_duration(secs))
+                        }))
+                        .child(stat_row(t, "累计", |s| {
+                            let (count, secs) = s.history.total_stats();
+                            format!("{count} 次 · {}", format_duration(secs))
+                        }))
+                        .child(export_actions(t))
+                        .child(export_notice_row(t)),
+                )),
         )
+        .fill_max(),
+    )
 }
 
 /// 统计面板导出操作区: 「导出 CSV」按钮 + (已导出过时)「打开所在目录」按钮。
@@ -1196,40 +1192,38 @@ fn current_year() -> u32 {
 /// 年度报告面板浮层: 居中玻璃卡片, 旗舰版深度洞察
 /// (当前年汇总 + 场景分布 + 近 12 月趋势)。
 fn report_panel(t: SceneTheme) -> impl widget::Widget {
-    Stack::new()
-        .child(UiBox::new(Color::rgba(0.0, 0.0, 0.0, 0.35)).radius(0.0))
-        .child(
-            Center::new(
-                UiBox::new(Color::TRANSPARENT)
-                    .bind_color(|s: &PomodoroApp| s.palette().surface)
-                    .radius(t.radius_lg())
-                    .width(REPORT_CARD_WIDTH)
-                    .child(Padding::new(
-                        Edges::all(t.spacing_xl()),
-                        Column::new()
-                            .gap(t.spacing_lg())
-                            .child(report_header(t))
-                            .child(section_label(t, "本年"))
-                            .child(stat_row(t, "专注时长", |s| {
-                                format_duration(s.history.year_summary(current_year()).total_secs)
-                            }))
-                            .child(stat_row(t, "轮次", |s| {
-                                format!(
-                                    "{} 次",
-                                    s.history.year_summary(current_year()).session_count
-                                )
-                            }))
-                            .child(stat_row(t, "活跃天数", |s| {
-                                format!("{} 天", s.history.year_summary(current_year()).active_days)
-                            }))
-                            .child(section_label(t, "场景分布"))
-                            .child(scene_distribution_rows(t))
-                            .child(section_label(t, "近 12 月趋势"))
-                            .child(month_trend_rows(t)),
-                    )),
-            )
-            .fill_max(),
+    Stack::new().child(UiBox::new(t.scrim()).radius(0.0)).child(
+        Center::new(
+            UiBox::new(Color::TRANSPARENT)
+                .bind_color(|s: &PomodoroApp| s.palette().surface)
+                .radius(t.radius_lg())
+                .width(REPORT_CARD_WIDTH)
+                .child(Padding::new(
+                    Edges::all(t.spacing_xl()),
+                    Column::new()
+                        .gap(t.spacing_lg())
+                        .child(report_header(t))
+                        .child(section_label(t, "本年"))
+                        .child(stat_row(t, "专注时长", |s| {
+                            format_duration(s.history.year_summary(current_year()).total_secs)
+                        }))
+                        .child(stat_row(t, "轮次", |s| {
+                            format!(
+                                "{} 次",
+                                s.history.year_summary(current_year()).session_count
+                            )
+                        }))
+                        .child(stat_row(t, "活跃天数", |s| {
+                            format!("{} 天", s.history.year_summary(current_year()).active_days)
+                        }))
+                        .child(section_label(t, "场景分布"))
+                        .child(scene_distribution_rows(t))
+                        .child(section_label(t, "近 12 月趋势"))
+                        .child(month_trend_rows(t)),
+                )),
         )
+        .fill_max(),
+    )
 }
 
 /// 报告面板分区标题。
