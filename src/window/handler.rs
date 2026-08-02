@@ -36,7 +36,7 @@ use crate::{Point, Rect, Size};
 use super::event::{WindowAppEvent, convert_event};
 #[cfg(target_os = "windows")]
 use super::icon::apply_windows_undecorated_style;
-use super::icon::load_window_icon;
+use super::icon::{window_icons, with_taskbar_icon};
 
 /// winit 应用处理器，驱动窗口生命周期与事件分发。
 ///
@@ -496,11 +496,15 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 (m_pos.y as f64 + (m_size.height as f64 - window_height) / 2.0).max(0.0),
             )
         });
+        let (window_icon, taskbar_icon) = window_icons(&self.config.logo_name);
         let mut attrs = WindowAttributes::default()
             .with_title(&self.config.title)
             .with_visible(false)
-            .with_window_icon(load_window_icon(&self.config.logo_name))
             .with_inner_size(LogicalSize::new(window_width, window_height));
+        // 任务栏按钮图标取 ICON_BIG; winit 0.30 的 with_window_icon 只设 ICON_SMALL
+        // (标题栏), 不补 ICON_BIG 时任务栏偶发显示系统缺省图标 (见 icon::with_taskbar_icon)。
+        attrs = with_taskbar_icon(attrs, taskbar_icon);
+        attrs = attrs.with_window_icon(window_icon);
         // 显式居中位置 (同时是最大化窗口的还原位置: 取消最大化后回到屏幕中央)。
         // 注意: 不设 with_maximized —— winit 的 create_window 对 maximized 属性会调
         // set_maximized → ShowWindow(SW_MAXIMIZE), 无视 with_visible(false) 直接让

@@ -57,6 +57,32 @@ pub(super) fn load_window_icon(name: &str) -> Option<Icon> {
     }
 }
 
+/// 窗口图标对 (标题栏小图标, 任务栏大图标)。
+///
+/// Windows 上任务栏按钮图标首选 ICON_BIG, 而 winit 0.30 的 `with_window_icon` 只发
+/// `WM_SETICON(ICON_SMALL)` (标题栏/小图标); 不补 ICON_BIG 时任务栏偶发回退到
+/// 无内嵌图标的 exe 缺省图标 (2026-08-02 排查锁定)。两档用同一 PNG,
+/// 由调用方分别设到 `with_window_icon` / [`with_taskbar_icon`]。
+pub(super) fn window_icons(name: &str) -> (Option<Icon>, Option<Icon>) {
+    let icon = load_window_icon(name);
+    (icon.clone(), icon)
+}
+
+/// Windows 下把任务栏图标 (ICON_BIG) 挂到窗口属性上; 非 Windows 平台为 no-op。
+pub(super) fn with_taskbar_icon(
+    attrs: winit::window::WindowAttributes,
+    _icon: Option<Icon>,
+) -> winit::window::WindowAttributes {
+    #[cfg(target_os = "windows")]
+    {
+        use winit::platform::windows::WindowAttributesExtWindows;
+        if let Some(icon) = _icon {
+            return attrs.with_taskbar_icon(Some(icon));
+        }
+    }
+    attrs
+}
+
 /// 加载托盘图标 (16x16, Windows 任务栏首选尺寸)。
 ///
 /// 读取 `assets/logo/{name}_16.png`; 失败时记录警告并返回 `None`。
@@ -100,6 +126,16 @@ mod tests {
     fn load_window_icon_with_logo_name() {
         let icon = super::load_window_icon("logo");
         assert!(icon.is_some(), "应能通过名称 'logo' 加载窗口图标");
+    }
+
+    #[test]
+    fn window_icons_loads_both_slots_for_pomodoro() {
+        let (window_icon, taskbar_icon) = super::window_icons("pomodoro");
+        assert!(window_icon.is_some(), "窗口图标应可加载 (pomodoro)");
+        assert!(
+            taskbar_icon.is_some(),
+            "任务栏图标应可加载 (pomodoro): 缺失会回退到系统缺省图标"
+        );
     }
 
     #[test]
