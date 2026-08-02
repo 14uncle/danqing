@@ -85,6 +85,14 @@ pub struct PomodoroState {
     /// 长休息时长（秒）。缺省 15 分钟，向后兼容旧版 JSON。
     #[serde(default = "default_long_break_secs")]
     pub long_break_duration_secs: u64,
+    /// 全局环境音开关 (false = 静音所有场景音景)。
+    /// `serde(default = "default_sound_on")` 保证旧版 JSON 缺此字段时默认开 (true)。
+    #[serde(default = "default_sound_on")]
+    pub sound_on: bool,
+}
+
+fn default_sound_on() -> bool {
+    true
 }
 
 fn default_focus_secs() -> u64 {
@@ -188,6 +196,7 @@ mod tests {
             focus_duration_secs: 1500,
             break_duration_secs: 300,
             long_break_duration_secs: 900,
+            sound_on: true,
         };
         let json = serde_json::to_string(&original).unwrap();
         let back: PomodoroState = serde_json::from_str(&json).unwrap();
@@ -214,6 +223,7 @@ mod tests {
             focus_duration_secs: 1500,
             break_duration_secs: 300,
             long_break_duration_secs: 900,
+            sound_on: true,
         };
         save_to_path(&path, &original).unwrap();
         let loaded = load_from_path(&path).unwrap();
@@ -357,6 +367,34 @@ mod tests {
     }
 
     #[test]
+    fn load_old_state_without_sound_field_defaults_to_on() {
+        // 旧版 JSON 缺 sound_on 字段 (Task F 新增): 应默认 true (环境音默认开)。
+        let dir = std::env::temp_dir().join("danqing-test-old-sound");
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("pomodoro.json");
+        fs::create_dir_all(&dir).unwrap();
+        let old_json = r#"{
+            "phase": "Focus",
+            "run": "Idle",
+            "remaining_secs": 1500,
+            "current_scene": 0,
+            "saved_elapsed_secs": 0,
+            "saved_wall_secs": 0,
+            "has_seen_shortcut_hint": true,
+            "completed_focus": 1,
+            "today_date": "2026-08-01",
+            "today_count": 2,
+            "focus_duration_secs": 1500,
+            "break_duration_secs": 300,
+            "long_break_duration_secs": 900
+        }"#;
+        fs::write(&path, old_json).unwrap();
+        let loaded = load_from_path(&path).expect("旧版 JSON 应能加载");
+        assert!(loaded.sound_on, "缺 sound_on 字段时应默认 true");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn effective_now_offset_includes_wall_clock_delta() {
         let now_secs = current_wall_secs();
         let s = PomodoroState {
@@ -374,6 +412,7 @@ mod tests {
             focus_duration_secs: 1500,
             break_duration_secs: 300,
             long_break_duration_secs: 900,
+            sound_on: true,
         };
         let offset = s.effective_now_offset().as_secs();
         // 期望 ≈ saved_elapsed + (now - saved_wall) = 100 + 100 = 200

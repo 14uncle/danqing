@@ -107,6 +107,8 @@ struct PomodoroApp {
     ambient_mixer: ambient::AmbientMixer,
     /// 环境音播放器 (rodio 适配层: 懒初始化 + 双槽 + 静默降级)。
     ambient_player: ambient::AmbientPlayer,
+    /// 全局环境音开关 (false = 静音所有场景音景)。
+    sound_on: bool,
     /// 场景动效沉降包络 (纯逻辑: 暂停 500ms 淡出 / 恢复淡入)。
     motion_envelope: motion::MotionEnvelope,
     /// 最近 tick 算出的动效包络值 (`background_frame` 只读)。
@@ -173,6 +175,8 @@ enum Msg {
     ToggleStats,
     /// 打开 / 关闭年度报告面板 (旗舰版深度洞察)。
     ToggleReport,
+    /// 切换全局环境音开/关 (静音所有场景音景)。
+    ToggleSound,
     /// 导出专注数据为 CSV (明文, 固定路径)。
     ExportCsv,
     /// 打开导出 CSV 所在目录 (已导出过时可用)。
@@ -198,6 +202,7 @@ impl PomodoroApp {
             today_count: 0,
             ambient_mixer: ambient::AmbientMixer::new(),
             ambient_player: ambient::AmbientPlayer::new(),
+            sound_on: true,
             motion_envelope: motion::MotionEnvelope::new(),
             motion_gain: 0.0,
             rain_clock: 0.0,
@@ -268,6 +273,7 @@ impl PomodoroApp {
             today_count,
             ambient_mixer: ambient::AmbientMixer::new(),
             ambient_player: ambient::AmbientPlayer::new(),
+            sound_on: state.sound_on,
             motion_envelope: motion::MotionEnvelope::new(),
             motion_gain: 0.0,
             rain_clock: 0.0,
@@ -320,6 +326,7 @@ impl PomodoroApp {
             focus_duration_secs: config.focus_secs,
             break_duration_secs: config.break_secs,
             long_break_duration_secs: config.long_break_secs,
+            sound_on: self.sound_on,
         }
     }
 
@@ -474,6 +481,9 @@ impl App for PomodoroApp {
                 self.stats_open = false;
                 self.report_open = !self.report_open;
             }
+            Msg::ToggleSound => {
+                self.sound_on = !self.sound_on;
+            }
             Msg::ExportCsv => {
                 let path = export_csv_path();
                 let exported = self.run_export_csv(path.clone());
@@ -626,6 +636,7 @@ impl App for PomodoroApp {
             Phase::Focus => 1.0,
             Phase::Break | Phase::LongBreak => ambient::BREAK_DUCK,
         };
+        self.ambient_mixer.set_enabled(self.sound_on);
         let frame = self.ambient_mixer.frame_volumes(
             from,
             to,
@@ -888,8 +899,27 @@ fn control_pill(t: SceneTheme) -> impl widget::Widget {
                 // 面板关闭后焦点回锚点按钮 (按稳定 id, 见 focus_request)。
                 .child(ghost_button(t, "统计", Msg::ToggleStats).id("stats-button"))
                 .child(ghost_button(t, "报告", Msg::ToggleReport).id("report-button"))
-                .child(ghost_button(t, "设置", Msg::ToggleSettings).id("settings-button")),
+                .child(ghost_button(t, "设置", Msg::ToggleSettings).id("settings-button"))
+                .child(sound_toggle_button(t)),
         ))
+}
+
+/// 全局环境音开关按钮: 开 = accent (活动态), 关 = 次级文字色 (弱化)。
+fn sound_toggle_button(t: SceneTheme) -> Button {
+    Button::themed(
+        &t,
+        Text::new("声音").bind_color(|s: &PomodoroApp| {
+            if s.sound_on {
+                s.palette().accent
+            } else {
+                s.palette().text_secondary
+            }
+        }),
+    )
+    .bind_color(|_: &PomodoroApp| Color::TRANSPARENT)
+    .bind_hover_color(|s: &PomodoroApp| s.palette().surface)
+    .bind_focus_color(|s: &PomodoroApp| s.palette().accent)
+    .on_click(|| Msg::ToggleSound)
 }
 
 /// 设置面板浮层：居中玻璃卡片，调整专注/短休/长休时长。
@@ -2015,6 +2045,24 @@ mod tests {
         assert!(app.settings_open);
         app.update(Msg::ToggleSettings);
         assert!(!app.settings_open);
+    }
+
+    #[test]
+    fn toggle_sound_flips_state() {
+        let mut app = PomodoroApp::new_default();
+        assert!(app.sound_on, "环境音默认开");
+        app.update(Msg::ToggleSound);
+        assert!(!app.sound_on);
+        app.update(Msg::ToggleSound);
+        assert!(app.sound_on);
+    }
+
+    #[test]
+    fn snapshot_roundtrips_sound_on() {
+        let mut app = PomodoroApp::new_default();
+        assert!(app.snapshot_state().sound_on);
+        app.update(Msg::ToggleSound);
+        assert!(!app.snapshot_state().sound_on, "快照应反映关闭态");
     }
 
     #[test]

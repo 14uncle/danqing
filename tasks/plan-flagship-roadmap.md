@@ -96,14 +96,14 @@
 
 - **Description:** 默认计时方案、每场景音景开关、主题细节。让「旗舰」有实物——裁决: ¥68 全押体验层,清单必须兑现。
 - **Acceptance criteria:**
-  - [ ] 每场景音景开关(场景/环境音独立可关)
-  - [ ] 默认计时方案(设置面板)
+  - [x] 每场景音景开关 — 用户裁定「全局环境音开关」(2026-08-02: 控制条「声音」按钮, AmbientMixer `enabled` 300ms 包络平滑静音/恢复, `sound_on` 持久化, 旧 JSON 默认 true)
+  - [x] 默认计时方案 (2026-08-02: 用户裁定设置面板已有专注/短休/长休步进 + 持久化 + 重置即满足, 勾掉)
   - [ ] 主题细节(`src/theme.rs` token)
 - **Verification:** `cargo test` 全绿 + showcase 复用。
 - **Dependencies:** None
 - **Files:** `examples/pomodoro/*.rs`, `src/theme.rs`
 - **Scope:** M
-- **Status:** ⏳ 待启动
+- **Status:** 🔄 F1 完成, F3 待做 (2026-08-02)
 
 ### Task G: 建造实录发布(里程碑 0 Task D 剩余)
 
