@@ -899,16 +899,22 @@ fn control_pill(t: SceneTheme) -> impl widget::Widget {
                 // 面板关闭后焦点回锚点按钮 (按稳定 id, 见 focus_request)。
                 .child(ghost_button(t, "统计", Msg::ToggleStats).id("stats-button"))
                 .child(ghost_button(t, "报告", Msg::ToggleReport).id("report-button"))
-                .child(ghost_button(t, "设置", Msg::ToggleSettings).id("settings-button"))
-                .child(sound_toggle_button(t)),
+                .child(ghost_button(t, "设置", Msg::ToggleSettings).id("settings-button")),
         ))
 }
 
-/// 全局环境音开关按钮: 开 = accent (活动态), 关 = 次级文字色 (弱化)。
+/// 全局环境音开关按钮: 文字随状态 (开/关), 颜色同步 (开 = accent 活动态, 关 = 次级色弱化)。
 fn sound_toggle_button(t: SceneTheme) -> Button {
     Button::themed(
         &t,
-        Text::new("声音").bind_color(|s: &PomodoroApp| {
+        Text::bind(|s: &PomodoroApp| {
+            if s.sound_on {
+                "开".to_string()
+            } else {
+                "关".to_string()
+            }
+        })
+        .bind_color(|s: &PomodoroApp| {
             if s.sound_on {
                 s.palette().accent
             } else {
@@ -920,6 +926,25 @@ fn sound_toggle_button(t: SceneTheme) -> Button {
     .bind_hover_color(|s: &PomodoroApp| s.palette().surface)
     .bind_focus_color(|s: &PomodoroApp| s.palette().accent)
     .on_click(|| Msg::ToggleSound)
+}
+
+/// 设置面板行: 全局环境音开关 (标签 + 状态按钮, 与步进行同款对齐)。
+fn sound_setting_row(t: SceneTheme) -> impl widget::Widget {
+    Row::new()
+        .cross_stretch()
+        .gap(t.spacing_xs())
+        .child(Center::new(
+            Text::new("环境音")
+                .font_size(t.font_size_body())
+                .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
+        ))
+        // 与步进行的 [-] 占位对齐 (显式 height: 空 UiBox 撑满窗体会压扁行, 见 stepper_row 注释)。
+        .child(
+            UiBox::new(Color::TRANSPARENT)
+                .width(STEPPER_MINUS_OFFSET)
+                .height(1.0),
+        )
+        .child(Center::new(sound_toggle_button(t)))
 }
 
 /// 设置面板浮层：居中玻璃卡片，调整专注/短休/长休时长。
@@ -957,6 +982,7 @@ fn settings_panel(t: SceneTheme) -> impl widget::Widget {
                             Msg::DecLongBreak,
                             Msg::IncLongBreak,
                         ))
+                        .child(sound_setting_row(t))
                         .child(ghost_button(t, "重置计时", Msg::ResetConfig))
                         .child(
                             Text::new("变更在下一阶段生效")
