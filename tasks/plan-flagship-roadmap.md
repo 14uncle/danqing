@@ -121,13 +121,13 @@
 
 - **Description:** 界定云端边界、同步内容、数据格式复用(格式已是十年设计)、与订阅留口的关系。**不建后端**。
 - **Acceptance criteria:**
-  - [ ] spec 界定同步范围与格式复用方式(`docs/specs/companion-flagship-sync.md`)
-  - [ ] 明确与订阅留口(买断 ¥68 + 订阅双轨)的关系
+  - [x] spec 界定同步范围与格式复用方式(`docs/specs/companion-flagship-sync.md`)
+  - [x] 明确与订阅留口(买断 ¥68 + 订阅双轨)的关系
 - **Verification:** 用户审阅。
 - **Dependencies:** None
 - **Files:** `docs/specs/companion-flagship-sync.md`(新)
 - **Scope:** S
-- **Status:** ⏳ 待启动
+- **Status:** ✅ 2026-08-02 用户裁定 Q1-Q5, spec 已确认 (`docs/specs/companion-flagship-sync.md`)
 
 ### Task I: 沉浸世界补全 · 4 新场景(星夜/雪原/沙漠/云海)
 
