@@ -36,13 +36,10 @@
   - wgsl 调试直出行已标 TODO(Task 5) 届时移除; uniform 布局未动(护栏全绿); 新增 5 测(bake×4 + config×1)
   - **遗留(GUI 目测)**: 星夜纹理通路目测延后——验证时用户番茄钟正在运行(多实例会抢同一状态文件+全局热键), 留待 Phase 2 checkpoint 用户目测一并确认
 
-- [ ] **Task 5: shader 重写 star_field / star_twinkle**
-  - Description: `background.wgsl`: `star_field` 改为采样星野纹理 × `starry_base`;`star_twinkle` 脉冲逻辑不变(1/8 Hz 档位、`u.time`、±SF_TWINKLE_AMP),改为细网格脉冲场**调制采样结果**;旧常量 SF_COLS/SF_ROWS/SF_ON/SF_BIG/SF_WARM 退役(保留 SF_ASPECT/SF_BAND_BOT/SF_TWINKLE_AMP 中仍适用者)。meteor 不动。
-  - Acceptance: 亮星位置来自纹理(非 hash 格);星闪发生在纹理亮星上;暂停 500ms 星闪沉降、星野定格(语义零回归);雨/火/海/山/森林常量未动
-  - Verify: `cargo test --example pomodoro starry` 全绿 + 运行目测(运行/暂停)
-  - Dependencies: Task 4
-  - Files: `src/render/background.wgsl`
-  - Scope: M
+- [x] **Task 5: shader 重写 star_field / star_twinkle** ✅ 2026-08-03
+  - 产出: `star_field` 改为采样星野纹理(真实星表, B-V 暖色随纹理); `star_twinkle` 改为 96×54 脉冲场**调制采样**(脉冲逻辑逐字保留: {2,3,4}/8 Hz + 双极 ±0.42); `star_band()` 山脊遮挡两函数共用; 旧常量 SF_COLS/ROWS/ON/BIG/WARM/ASPECT + star_cell/star_color 全部退役, 无残留引用; Task 4 调试直出行已移除
+  - **顺带修复一处已提交 bug** (Task 4 commit e77d639): 纹理格式修改时 `str.replace` 首处命中误改了 `load_texture`(光晕/噪声 PNG 被切成线性格式会洗白), `upload_rgba_texture` 反而没改成——两处已对调归位(scene/load=Srgb, starfield=Unorm), 评审抓获
+  - 验证: naga Validator (ValidationFlags::all()) 通过(含模块作用域前向引用确认); 全量回归全绿; **wgsl 运行时编译+目测仍留待用户 checkpoint**(番茄钟运行中不便开第二实例)
 
 - [ ] **Task 6: star_haze 暗星雾 + 银纬 mask**
   - Description: `background.wgsl` 新增 `star_haze`: 细 hash 暗星点(极低亮度,不闪),密度按银纬解析 mask(b≈0 聚集,带宽/角度常量占位待 Task 8 回填)调制,挂 `starry_base` 常驻。与星野纹理叠加后密度分级肉眼可辨。

@@ -257,82 +257,44 @@ fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
 }
 
 // ---- 星夜动效 (星夜场景) ----
-// 雨场景范式: 静态图去星, 星野全部运行时程序化渲染。
-// - 基础星野 (star_field): 常驻, 按 starry_base = 场景权重 (定格可见, 暂停仍显示)。
-// - 星闪 (star_twinkle): 随 starry_intensity (包络×权重) 沉降, 频率 1/8 Hz 整数倍 (8s 公共周期, u.time)。
+// 雨场景范式: 静态图去星, 星野全部运行时渲染。
+// 2026-08-03 银河升级 (Task 5, spec: docs/specs/pomodoro-scene-starry-milkyway.md):
+// 星点布点从 48×28 hash 网格 (~100 颗均匀随机) 迁移到真实星表 (Yale BSC5,
+// 6743 颗, CPU 启动烘焙成 starfield_tex)。hash 网格常量 (SF_COLS/ROWS/ON/BIG/
+// WARM/ASPECT) 与 star_cell/star_color 随之退役; 山脊遮挡沿用 SF_BAND_BOT。
+// - 基础星野 (star_field): 采样星野纹理, 常驻 (starry_base = 场景权重, 暂停定格可见)。
+// - 星闪 (star_twinkle): 脉冲场调制纹理采样, 随 starry_intensity 沉降, {2,3,4}/8 Hz 档位。
 // - 流星 (meteor): 随 starry_intensity, rain_time 连续触发 (非 wrap 无跳变), 淡入淡出, 压暗。
 const STAR_W: f32 = 0.7853982;  // 2π/8: 动效基频角速度 (1/8 Hz)
+const SF_BAND_BOT: f32 = 0.80;  // 星带下缘 (山脊上方; 底图山脊 base_y 0.88/0.97, 留缓冲)
+const SF_TWINKLE_AMP: f32 = 0.42; // 星闪明暗双向摆动幅度 (±; 2026-08-02 用户裁定, 勿回调)
+const TW_COLS: f32 = 96.0;      // 星闪脉冲场网格列 (cell ≈16px @1536 画布)
+const TW_ROWS: f32 = 54.0;      // 星闪脉冲场网格行 (cell ≈19px @1024 高)
 
-// 参照原静态星图 (build_stars 风格): 少量散布星点 + ~10% 大亮星 + 蓝白为主 ~22% 暖星,
-// 软边光晕 (非硬盘)。粗网格 + 大 jitter → 随机散布无网格感。
-const SF_COLS: f32 = 48.0;     // 粗网格列
-const SF_ROWS: f32 = 28.0;     // 粗网格行
-const SF_ON: f32 = 0.074;      // 有星格比例 (48×28×0.074 ≈ 100 颗, 对齐原静态图实际 ~80-170)。
-                               // step 约定: 下方用 step(1.0 - SF_ON, h) 得 P(on)=SF_ON (同 big/warm);
-                               // 若误写 step(SF_ON, h) 会反转成 P=1-SF_ON ≈ 1280 颗 (2026-08-02 修复)。
-const SF_BIG: f32 = 0.10;      // 大亮星比例 (对齐原 big_frac 0.10)
-const SF_WARM: f32 = 0.22;     // 暖星比例 (对齐原 colors 22%)
-const SF_ASPECT: f32 = 1.5;    // 场景画布宽高比, 圆点修正
-const SF_BAND_BOT: f32 = 0.80; // 星带下缘 (山脊上方)
-const SF_TWINKLE_AMP: f32 = 0.42; // 星闪明暗双向摆动幅度 (±; 原单向加亮 0.28 读作「静态」)
-
-fn star_cell(uv: vec2<f32>) -> vec2<f32> {
-    return vec2<f32>(floor(uv.x * SF_COLS), floor(uv.y * SF_ROWS));
+// 山脊遮挡 mask: 星带下缘以下渐隐 (作用于星野与星闪)。
+fn star_band(y: f32) -> f32 {
+    return 1.0 - smoothstep(SF_BAND_BOT, SF_BAND_BOT + 0.04, y);
 }
 
-// 星点颜色: 蓝白为主, 偶有暖星 (原静态图 colors ((200,212,244),(255,236,190)) 线性近似)。
-fn star_color(h: f32) -> vec3<f32> {
-    let warm = step(1.0 - SF_WARM, h);
-    let cool = vec3<f32>(0.78, 0.83, 0.96);
-    let warm_c = vec3<f32>(1.0, 0.93, 0.74);
-    return cool + (warm_c - cool) * warm;
-}
-
-// 基础星野 (静态, 常驻): 位置/亮度固定, 暂停时不消失 (定格语义)。
-// 每格: 大 jitter 位置 → 随机散布; 独立 hash 决定 有星/大星/暖星。
+// 基础星野 (静态, 常驻): 采样 CPU 烘焙的真实星表纹理 — 位置/亮度/暖色全部
+// 来自星表 (Yale BSC5), 暂停时定格可见 (定格语义)。
 fn star_field(uv: vec2<f32>) -> vec3<f32> {
-    let cell = star_cell(uv);
-    let h = rain_hash(cell.x * 137.0 + cell.y * 71.0 + 5.0);
-    let on = step(1.0 - SF_ON, h);
-    let big = step(1.0 - SF_BIG, rain_hash(cell.x * 11.0 + cell.y * 17.0 + 4.0));
-    let warm_h = rain_hash(cell.x * 5.9 + cell.y * 41.3 + 3.0);
-    let jx = rain_hash(cell.x * 7.3 + cell.y * 13.1 + 1.0);
-    let jy = rain_hash(cell.x * 3.7 + cell.y * 29.3 + 2.0);
-    let cx = (cell.x + 0.1 + jx * 0.8) / SF_COLS;
-    let cy = (cell.y + 0.1 + jy * 0.8) / SF_ROWS;
-    let band = 1.0 - smoothstep(SF_BAND_BOT, SF_BAND_BOT + 0.04, cy);
-    // 半径在 aspect 修正空间 (d 已拉伸 x), 勿再乘 ASPECT。小星 2-4px 直径, 大星 5-8px
-    // (对齐原静态图 build_stars 半径: 普通 1-2px、大星 2-3px 原生像素)。
-    let r = (0.0012 + jx * 0.0006) * (1.0 + big * 1.1);
-    let d = distance(vec2<f32>(uv.x * SF_ASPECT, uv.y), vec2<f32>(cx * SF_ASPECT, cy));
-    let spot = 1.0 - smoothstep(r * 0.3, r, d);   // 小软边 (非大光晕)
-    let bright = (0.12 + jx * 0.18) * (1.0 + big * 1.2);
-    return star_color(warm_h) * spot * on * band * bright;
+    return textureSample(starfield_tex, starfield_smp, uv).rgb * star_band(uv.y);
 }
 
-// 星闪: 与基础星野同格, 亮度明暗双向摆动 (频率档位 {2,3,4}/8 Hz → 周期 4s/2.67s/2s)。
-// 双极脉冲 sin ∈ [-1,1]: 星点亮度在 base ± SF_TWINKLE_AMP 间明暗呼吸 (明暗都动, 非单向加亮)。
-// 原 {1,2,3}/8 Hz + 单向加亮 0.28 太慢太弱, 用户目测「静态」(2026-08-02)。
+// 星闪: 细网格脉冲场**调制**星野纹理采样 (不再自绘光点)。
+// cell ≈16×19px ≥ 亮星光点 (≤8px), 绝大多数格 ≤1 颗亮星 → 读作逐星明灭;
+// 亮星贴格边时两半可能不同步, 点径 ≤3px, 可接受。
+// 脉冲逻辑不变 (2026-08-02 裁定): {2,3,4}/8 Hz 档位 → 周期 4s/2.67s/2s;
+// 双极 sin [-1,1] ± SF_TWINKLE_AMP 明暗双向 (单向加亮读作「静态」)。
 fn star_twinkle(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    let cell = star_cell(uv);
-    let h = rain_hash(cell.x * 137.0 + cell.y * 71.0 + 5.0);
-    let on = step(1.0 - SF_ON, h);
-    let big = step(1.0 - SF_BIG, rain_hash(cell.x * 11.0 + cell.y * 17.0 + 4.0));
-    let warm_h = rain_hash(cell.x * 5.9 + cell.y * 41.3 + 3.0);
-    let jx = rain_hash(cell.x * 7.3 + cell.y * 13.1 + 1.0);
-    let jy = rain_hash(cell.x * 3.7 + cell.y * 29.3 + 2.0);
-    let cx = (cell.x + 0.1 + jx * 0.8) / SF_COLS;
-    let cy = (cell.y + 0.1 + jy * 0.8) / SF_ROWS;
-    let band = 1.0 - smoothstep(SF_BAND_BOT, SF_BAND_BOT + 0.04, cy);
-    // 与 star_field 同半径 (小脆星, 非大光晕)。
-    let r = (0.0012 + jx * 0.0006) * (1.0 + big * 1.1);
-    let d = distance(vec2<f32>(uv.x * SF_ASPECT, uv.y), vec2<f32>(cx * SF_ASPECT, cy));
-    let spot = 1.0 - smoothstep(r * 0.3, r, d);
+    let cell = vec2<f32>(floor(uv.x * TW_COLS), floor(uv.y * TW_ROWS));
     let freq_h = rain_hash(cell.x * 19.0 + cell.y * 23.0 + 8.0);  // 独立 hash → 频率真随机
     let phase_h = rain_hash(cell.x * 31.0 + cell.y * 47.0 + 9.0); // 独立 hash → 相位真随机
-    let k = 2.0 + floor(freq_h * 3.0);  // {2,3,4}/8 Hz → 周期 4s/2.67s/2s
+    let k = 2.0 + floor(freq_h * 3.0);  // {2,3,4}/8 Hz
     let pulse = sin(t * STAR_W * k + phase_h * 6.2831853);   // [-1,1] 双极: 明暗双向
-    return star_color(warm_h) * spot * on * band * pulse * SF_TWINKLE_AMP;
+    let star = textureSample(starfield_tex, starfield_smp, uv).rgb;
+    return star * star_band(uv.y) * pulse * SF_TWINKLE_AMP;
 }
 
 // 流星: 周期性斜向流星 (rain_time 连续触发, ~24s 一颗, 存续 ~1.4s)。
@@ -464,12 +426,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (u.starry_base > 0.0 || u.starry_intensity > 0.0) {
         // 星夜 (雨场景范式): 基础星野常驻 (starry_base = 场景权重, 暂停定格可见);
         // 星闪 + 流星随 starry_intensity (包络×权重) 沉降, 暂停 500ms 回静态星野。
+        // 星野与星闪均采样星野纹理 (真实星表), Task 4 调试直出行已随重写移除。
         color = vec4<f32>(
             color.rgb
                 + star_field(in.uv) * u.starry_base
-                // TODO(Task 5): 调试直出 — 验证星野纹理通路 (group 3) 后再
-                // 把 star_field 重写为采样本纹理, 届时移除此行。
-                + textureSample(starfield_tex, starfield_smp, in.uv).rgb * u.starry_base
                 + (star_twinkle(in.uv, u.time) + vec3<f32>(meteor(in.uv, u.rain_time)))
                     * u.starry_intensity,
             color.a,
