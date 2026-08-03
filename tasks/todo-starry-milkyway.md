@@ -41,7 +41,10 @@
   - **顺带修复一处已提交 bug** (Task 4 commit e77d639): 纹理格式修改时 `str.replace` 首处命中误改了 `load_texture`(光晕/噪声 PNG 被切成线性格式会洗白), `upload_rgba_texture` 反而没改成——两处已对调归位(scene/load=Srgb, starfield=Unorm), 评审抓获
   - 验证: naga Validator (ValidationFlags::all()) 通过(含模块作用域前向引用确认); 全量回归全绿; **wgsl 运行时编译+目测仍留待用户 checkpoint**(番茄钟运行中不便开第二实例)
 
-- [ ] **Task 6: star_haze 暗星雾 + 银纬 mask**
+- [x] **Task 6: star_haze 暗星雾 + 银纬 mask** ✅ 2026-08-03
+  - 产出: `background.wgsl` 新增 `star_haze`(384×216 细格 hash 暗星点,亮度 0.05,不闪,仅明暗格)+ `galactic_py` 逆投影(UV → 银道面纬向坐标, py=0 ⟺ 银道面);带内 on 概率 0.55 / 带外 0.10(step(1-ratio,h) 门禁约定);带宽 HAZE_BAND=0.10 (FOV_V=150 下 ≈15°),与 export-stars.py THETA=60°/SHIFT=(0,-0.03) 同源常量;Python 数值互验: 带中线 py=0 精确,织女/牛郎 py 符号与 ±b/150 一致
+  - 评审 APPROVE 后落实 2 建议: ①注释补"带宽度数随 FOV_V,Task 8 联动";②格边截断(与 GLINT 同先例)留 Task 8 目测确认
+  - **遗留(GUI 目测)**: 带内/带外密度分级 + 三层合成观感留待用户 Phase 2 checkpoint(番茄钟运行中不开第二实例)
   - Description: `background.wgsl` 新增 `star_haze`: 细 hash 暗星点(极低亮度,不闪),密度按银纬解析 mask(b≈0 聚集,带宽/角度常量占位待 Task 8 回填)调制,挂 `starry_base` 常驻。与星野纹理叠加后密度分级肉眼可辨。
   - Acceptance: 带内密度明显 > 带外(目测);常量集中在 wgsl 常量段;既有测试全绿
   - Verify: `cargo test --example pomodoro starry` + 目测

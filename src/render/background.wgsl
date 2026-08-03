@@ -297,6 +297,49 @@ fn star_twinkle(uv: vec2<f32>, t: f32) -> vec3<f32> {
     return star * star_band(uv.y) * pulse * SF_TWINKLE_AMP;
 }
 
+// ---- 暗星雾 (star_haze): 银河「深邃」体量的来源 ----
+// 星表 (≤6.5 等) 给真实结构, 但肉眼银河的密度感主要来自无数暗星 ——
+// 这里用细 hash 网格补一层极低亮度暗星 (不闪), 密度按银纬解析 mask 聚集
+// (b≈0 最密), 与星表亮星带、底图光带共用同一坐标系 (三层对齐)。
+// mask 常量与 tools/export-stars.py 的固定观测姿态互逆 (Task 8 对齐底图时
+// 两侧同步回填)。
+const HAZE_COLS: f32 = 384.0;    // 细网格列 (cell 4px @1536 画布)
+const HAZE_ROWS: f32 = 216.0;    // 细网格行 (cell ≈4.7px @1024 高)
+const HAZE_ASPECT: f32 = 1.5;    // 画布宽高比, 圆点修正
+const HAZE_ON_BAND: f32 = 0.55;  // 带内有星格比例 (step 约定: step(1-r,h) 得 P(on)=r)
+const HAZE_ON_SKY: f32 = 0.10;   // 带外有星格比例 (带内外密度比 ~5.5:1)
+const HAZE_BRIGHT: f32 = 0.05;   // 单星亮度上限 (极低 — 体量来自数量, 非单点亮度)
+const HAZE_THETA: f32 = 1.0471976;          // 60° (弧度) = export-stars.py THETA_DEG
+const HAZE_SHIFT: vec2<f32> = vec2<f32>(0.0, -0.03); // = export-stars.py SHIFT_X/Y
+const HAZE_BAND: f32 = 0.10;     // 银纬半宽 (py 单位 ≈ 15° 银纬)
+
+// 银纬 proxy: UV → 逆旋转平面坐标 py (py=0 ⟺ 银道面)。
+// 与 export-stars.py 投影互逆: py=0 的位置只依赖 THETA+SHIFT (与 L_CENTER/FOV
+// 无关); 但 HAZE_BAND 的度数含义随 FOV_V (改 FOV_V 须联动带宽, Task 8 同步回填)。
+fn galactic_py(uv: vec2<f32>) -> f32 {
+    let rx = uv.x - 0.5 - HAZE_SHIFT.x;
+    let ry = 0.5 - uv.y + HAZE_SHIFT.y;
+    return -rx * sin(HAZE_THETA) + ry * cos(HAZE_THETA);
+}
+
+// 暗星雾 (静态, 常驻): 密度沿银道面聚集, 挂 starry_base 与星野同生灭。
+fn star_haze(uv: vec2<f32>) -> vec3<f32> {
+    let band = 1.0 - smoothstep(HAZE_BAND, HAZE_BAND + 0.08, abs(galactic_py(uv)));
+    let on_ratio = HAZE_ON_SKY + (HAZE_ON_BAND - HAZE_ON_SKY) * band;
+    let cell = vec2<f32>(floor(uv.x * HAZE_COLS), floor(uv.y * HAZE_ROWS));
+    let h = rain_hash(cell.x * 149.0 + cell.y * 67.0 + 11.0);
+    let on = step(1.0 - on_ratio, h);  // step 约定: P(on) = on_ratio
+    let jx = rain_hash(cell.x * 7.9 + cell.y * 13.7 + 1.0);
+    let jy = rain_hash(cell.x * 3.1 + cell.y * 29.7 + 2.0);
+    let cx = (cell.x + 0.2 + jx * 0.6) / HAZE_COLS;
+    let cy = (cell.y + 0.2 + jy * 0.6) / HAZE_ROWS;
+    let d = distance(vec2<f32>(uv.x * HAZE_ASPECT, uv.y), vec2<f32>(cx * HAZE_ASPECT, cy));
+    let spot = 1.0 - smoothstep(0.0008, 0.0016, d);  // ~1-2px 软点
+    let bright = HAZE_BRIGHT * (0.5 + jx * 0.5);
+    // 微蓝白 (暗星普遍偏冷), 亮度极低, 不闪 — 闪是亮星 (纹理层) 的事。
+    return vec3<f32>(0.9, 0.93, 1.0) * spot * on * bright * star_band(uv.y);
+}
+
 // 流星: 周期性斜向流星 (rain_time 连续触发, ~24s 一颗, 存续 ~1.4s)。
 // 头部从右上斜向左下, 尾迹朝右上 (头部后方) 指数衰减; 淡入淡出, 压暗避免「爆闪」。
 const METEOR_PERIOD: f32 = 24.0;
@@ -426,10 +469,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (u.starry_base > 0.0 || u.starry_intensity > 0.0) {
         // 星夜 (雨场景范式): 基础星野常驻 (starry_base = 场景权重, 暂停定格可见);
         // 星闪 + 流星随 starry_intensity (包络×权重) 沉降, 暂停 500ms 回静态星野。
-        // 星野与星闪均采样星野纹理 (真实星表), Task 4 调试直出行已随重写移除。
+        // 三层合成: 星表亮星 (纹理) + 暗星雾 (银纬聚集) 挂 starry_base;
+        // 星闪/流星挂 starry_intensity。
         color = vec4<f32>(
             color.rgb
-                + star_field(in.uv) * u.starry_base
+                + (star_field(in.uv) + star_haze(in.uv)) * u.starry_base
                 + (star_twinkle(in.uv, u.time) + vec3<f32>(meteor(in.uv, u.rain_time)))
                     * u.starry_intensity,
             color.a,
