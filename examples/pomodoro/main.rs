@@ -20,6 +20,7 @@ mod flash;
 mod hint;
 mod motion;
 mod scenes;
+mod starfield;
 mod state;
 mod stats;
 mod timer;

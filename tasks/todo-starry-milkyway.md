@@ -21,15 +21,12 @@
   - 观测姿态常量(占位, Task 8 回填): L_CENTER=-45°, THETA=60°, FOV 260°×150°, SHIFT_Y=-0.03
   - 设计微调: "保留 u8" 落实为 B-V 色指数量化(0xFF=缺失), 服务星点暖色分布; bin 加 8B 自描述头(魔数+版本+计数), 利于 Task 3 截断防御
 
-- [ ] **Task 3: Rust 星表解析模块 + 单测**
-  - Description: 新增 `examples/pomodoro/starfield.rs`(纯逻辑,无 GPU): `include_bytes!` 加载 stars.bin,解码为星点迭代器(UV + 星等),星等→亮度/半径映射函数,边界防御(截断/非法记录跳过)。文件头 `@author 十四叔` / `@date`。
-  - Acceptance: 单测覆盖——解码星数与 bin 长度一致、星等映射单调(亮星更亮更大)、截断数据不 panic、织女/牛郎抽验(容差内)
-  - Verify: `cargo test --example pomodoro starfield` 全绿;`cargo clippy --example pomodoro -- -D warnings`
-  - Dependencies: Task 2
-  - Files: `examples/pomodoro/starfield.rs`(新)、`examples/pomodoro/main.rs`(挂 mod,1~2 行)
-  - Scope: M
+- [x] **Task 3: Rust 星表解析模块 + 单测** ✅ 2026-08-03
+  - 产出: `examples/pomodoro/starfield.rs` — decode(魔数/版本拒读/计数取小/截断跳过) + 星等→亮度(二次+0.02 地板)/半径(2.6px~1px)/B-V 染色映射, 7 单测全绿
+  - 锚点测试(织女/牛郎 星等+UV 抽验)与内嵌 bin 硬耦合——Task 8 重导后必红, 强制同步(特性)
+  - `#![allow(dead_code)]` 占位(Task 4 接线时移除); tint 注释已修正(冷星不染蓝)
 
-### Checkpoint: Phase 1 — starfield 单测全绿;锚点星投影人工核对通过
+### Checkpoint: Phase 1 — starfield 单测全绿 ✅;锚点星投影人工核对通过 ✅(Task 2 自检)
 
 ## Phase 2: 渲染通路
 
