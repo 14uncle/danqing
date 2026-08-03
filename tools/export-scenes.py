@@ -32,7 +32,7 @@ import math
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = REPO_ROOT / "assets" / "scenes"
@@ -296,6 +296,199 @@ def build_embers(count: int, color: tuple, seed: int) -> Image.Image:
     return overlay.filter(ImageFilter.GaussianBlur(radius=0.6))
 
 
+# ---------------------------------------------------------------------------
+# 银河 (星夜场景): 光带 + 尘埃暗隙 + 星点雾。
+# 光带中心线严格落在 py=0 — 与 export-stars.py 投影 (THETA/SHIFT/FOV) 和
+# background.wgsl galactic_py 同源常量, 三层 (底图光带 / 亮星带 / 暗星雾带)
+# 对齐靠构造保证而非事后测量。Task 8 调角/带宽时三处同步回填。
+# 灰度防线 (spec): 不烘焙可分辨亮星 — 星点雾全部单像素、增量封顶,
+# 可分辨亮星一律来自运行时星野纹理层 (烘焙星不闪 = 穿帮)。
+# ---------------------------------------------------------------------------
+
+
+def galactic_pxy(u: float, v: float, theta_deg: float, shift: tuple) -> tuple[float, float]:
+    """画面 UV → 银道面坐标 (px 沿带 / py 跨带), wgsl galactic_py 的 Python 镜像。
+
+    py=0 ⟺ 银道面 (光带中心线); px 沿带, 银心方向在 px = (0 - L_CENTER)/FOV_U。
+    """
+    t = math.radians(theta_deg)
+    rx = u - 0.5 - shift[0]
+    ry = 0.5 - v + shift[1]
+    px = rx * math.cos(t) + ry * math.sin(t)
+    py = -rx * math.sin(t) + ry * math.cos(t)
+    return px, py
+
+
+def _lcg(seed: int):
+    """与 build_ridges/build_embers 同款的确定性 LCG 序列。"""
+    state = seed
+    while True:
+        state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+        yield (state >> 16) / 32768.0
+
+
+def _value_noise(cols: int, rows: int, seed: int) -> tuple[list, int, int]:
+    g = _lcg(seed)
+    return [next(g) for _ in range(cols * rows)], cols, rows
+
+
+def _noise_at(noise: tuple, x: float, y: float) -> float:
+    """双线性 + smoothstep 插值采样; x∈[0,cols), y∈[0,rows)。"""
+    grid, cols, rows = noise
+    x = min(max(x, 0.0), cols - 1e-4)
+    y = min(max(y, 0.0), rows - 1e-4)
+    x0, y0 = int(x), int(y)
+    x1, y1 = min(x0 + 1, cols - 1), min(y0 + 1, rows - 1)
+    fx = (x - x0) ** 2 * (3.0 - 2.0 * (x - x0))
+    fy = (y - y0) ** 2 * (3.0 - 2.0 * (y - y0))
+    a = grid[y0 * cols + x0]
+    b = grid[y0 * cols + x1]
+    c = grid[y1 * cols + x0]
+    d = grid[y1 * cols + x1]
+    return lerp(lerp(a, b, fx), lerp(c, d, fx), fy)
+
+
+def _fbm(noises: list, x: float, y: float, weights: tuple = (0.5, 0.3, 0.2)) -> float:
+    """多倍频值噪声叠加; noises 为 [(noise, sx, sy), ...], 返回 ~[0,1]。"""
+    return sum(
+        w * _noise_at(noise, x * sx, y * sy)
+        for (noise, sx, sy), w in zip(noises, weights)
+    )
+
+
+def _smoothstep(a: float, b: float, x: float) -> float:
+    t = min(1.0, max(0.0, (x - a) / (b - a)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def fbm3(noises: list, x: float, y: float) -> float:
+    """等权 N 倍频 fbm (len(noises) 归一), 无权重偏置, 返回 ~[0,1]。"""
+    return sum(_noise_at(n, x * sx, y * sy) for n, sx, sy in noises) / len(noises)
+
+
+def apply_milkyway(img: Image.Image, cfg: dict) -> Image.Image:
+    """把银河烘焙进星夜底图 (RGBA in/out, alpha 恒 255)。
+
+    合成顺序: ① 光带 screen 提亮 (低分辨率场 + LANCZOS 放大, 平滑元素惯例);
+    ② 星点雾单像素加点 (native res, 增量封顶); ③ 尘埃暗隙 multiply 压暗
+    (尘埃在星光之前, 暗隙同时吃掉光带与星点雾 — 物理次序)。
+    """
+    theta = cfg["theta_deg"]
+    shift = cfg["shift"]
+    half = cfg["band_half"]
+    gc_px = cfg["gc_px"]
+    falloff = cfg["along_falloff"]
+    floor = cfg["band_floor"]
+    gain = cfg["peak_gain"]
+
+    # 低分辨率光带/尘埃场 (平滑元素, 惯例不 SS)。
+    lw, lh = WIDTH // 4, HEIGHT // 4
+    band_noises = [
+        (_value_noise(24, 16, cfg["seed"] + 1), 6.0, 26.0),
+        (_value_noise(48, 32, cfg["seed"] + 2), 12.0, 52.0),
+        (_value_noise(96, 64, cfg["seed"] + 3), 24.0, 104.0),
+    ]
+    warp_noises = [
+        (_value_noise(16, 12, cfg["seed"] + 31), 2.5, 9.0),
+        (_value_noise(32, 24, cfg["seed"] + 32), 5.0, 18.0),
+        (_value_noise(64, 48, cfg["seed"] + 33), 10.0, 36.0),
+    ]
+    dust_noises = [
+        (_value_noise(24, 32, cfg["seed"] + 11), 4.0, 90.0),
+        (_value_noise(48, 64, cfg["seed"] + 12), 8.0, 180.0),
+        (_value_noise(96, 128, cfg["seed"] + 13), 16.0, 360.0),
+    ]
+    light = Image.new("RGB", (lw, lh))
+    dust = Image.new("L", (lw, lh))
+    light_px = light.load()
+    dust_px = dust.load()
+    for y in range(lh):
+        v = (y + 0.5) / lh
+        for x in range(lw):
+            u = (x + 0.5) / lw
+            px_, py = galactic_pxy(u, v, theta, shift)
+            # 负半带 (px<0 左下段 / py<0 银道面下侧) 噪声贴第 0 列/行采样:
+            # 单负半带结构只随单轴变化, 双负角区 (px<0 且 py<0) 两轴俱钉为
+            # 恒定 = 沿带拉伸的平滑观感 — 2026-08-03
+            # 用户多轮挑片裁定的审美, 显式保留 (评审曾作 Major 上报, 裁定为
+            # 有意不对称; Task 8 调参注意两半带对频率参数的响应不同)。
+            sx_, sy_ = max(px_, 0.0), max(py, 0.0)
+            # 域扭曲: 中心线低频摆动 + 边缘羽化, 破探照灯式直边。
+            warp = (fbm3(warp_noises, sx_, sy_) - 0.5) * 2.0 * cfg["warp_amp"]
+            py_w = py + warp
+            # 带宽沿路径起伏 (真实银河宽度不均, 破柏油马路感)。
+            width_n = 0.85 + 0.55 * (fbm3(warp_noises, px_ * 0.6 + 3.7, 11.3) - 0.5) * 2.0
+            half_w = half * min(1.45, max(0.60, width_n))
+            cross = math.exp(-((py_w / half_w) ** 2))
+            # 出画溶解: 带延伸到画布边时渐隐于天, 不成悬崖切片。
+            edge = min(u, 1.0 - u, v, 1.0 - v)
+            dissolve = _smoothstep(0.0, 0.07, edge)
+            along_n = 0.25 + 0.50 * fbm3(band_noises[:1], max(px_ * 0.5, 0.0), 0.0)
+            along = (floor + (1.0 - floor) * math.exp(-(((px_ - gc_px) / falloff) ** 2))) * along_n
+            # 带内斑驳结构 (亮星云气块状感)。
+            struct = 0.42 + 1.15 * max(0.0, _fbm(band_noises, sx_, sy_) - 0.26)
+            intensity = min(1.0, cross * along * struct * gain * dissolve)
+            warm_mix = math.exp(-(((px_ - gc_px) / 0.09) ** 2)) * math.exp(-((py_w / (half * 0.55)) ** 2))
+            color = lerp_rgb(cfg["core_color"], cfg["warm_color"], warm_mix)
+            light_px[x, y] = (
+                int(color[0] * intensity),
+                int(color[1] * intensity),
+                int(color[2] * intensity),
+            )
+            # 尘埃暗隙: 中线偏移的窄带 × 脊状噪声, 越靠银心越强 (大暗隙)。
+            lane = math.exp(-(((py_w - cfg["dust_offset"]) / cfg["dust_width"]) ** 2))
+            ridge = max(0.0, (_fbm(dust_noises, sx_, sy_) - 0.48) * 2.4)
+            dk = min(1.0, lane * ridge * (0.55 + 0.45 * along) * cfg["dust_strength"] * dissolve)
+            dust_px[x, y] = int(255 * (1.0 - dk))
+
+    light = light.resize(SIZE, Image.LANCZOS).filter(ImageFilter.GaussianBlur(radius=3))
+    dust = dust.resize(SIZE, Image.LANCZOS).filter(ImageFilter.GaussianBlur(radius=2.5))
+
+    rgb = ImageChops.screen(img.convert("RGB"), light)
+
+    # 星点雾: 单像素, 密度沿银道面聚集, 增量封顶 (灰度防线)。
+    g = _lcg(cfg["seed"] + 21)
+    cap = cfg["haze_alpha_max"]
+    pix = rgb.load()
+    placed = 0
+    attempts = cfg["haze_count"] * 3
+    for _ in range(attempts):
+        if placed >= cfg["haze_count"]:
+            break
+        u, v = next(g), next(g)
+        _, py = galactic_pxy(u, v, theta, shift)
+        accept = 0.06 + 0.94 * math.exp(-((py / (half * 1.5)) ** 2))
+        if next(g) > accept:
+            continue
+        delta = int(14 + next(g) * (cap - 14))
+        tint = 0.88 + next(g) * 0.12  # 蓝白微调 (0.88~1.0)
+        x, y = int(u * (WIDTH - 1)), int(v * (HEIGHT - 1))
+        r, gb, b = pix[x, y]
+        pix[x, y] = (
+            min(255, r + int(delta * tint)),
+            min(255, gb + int(delta * (0.5 + tint / 2))),
+            min(255, b + delta),
+        )
+        placed += 1
+
+    if placed < cfg["haze_count"]:
+        print(f"       WARNING: 星点雾投放 {placed}/{cfg['haze_count']} (接受率不足)")
+    rgb = ImageChops.multiply(rgb, dust.convert("RGB"))
+    out = rgb.convert("RGBA")
+
+    # 自检输出: 带心 vs 带外亮度采样 (供挑片数值参照)。
+    # 注意: (0.587, 0.320) 是银心在 theta/shift 下的反投影, Task 8 调角须联动。
+    def lum_at(u: float, v: float) -> float:
+        return luminance(out.convert("RGB").getpixel((int(u * (WIDTH - 1)), int(v * (HEIGHT - 1)))))
+
+    print(
+        f"       银河: 星点雾 {placed} 颗 (增量≤{cap}); "
+        f"带心(GC) lum={lum_at(0.587, 0.320):.4f} vs "
+        f"带外 lum={lum_at(0.12, 0.12):.4f}"
+    )
+    return out
+
+
 def sample_center_extremes(img: Image.Image) -> tuple[tuple, tuple]:
     """Brightest/darkest colors (by luminance) in the center region, after all baking."""
     x0, y0 = int(CENTER_BOX[0] * WIDTH), int(CENTER_BOX[1] * HEIGHT)
@@ -471,6 +664,27 @@ SCENES = [
             {"base_y": 0.97, "amp": 0.05, "color": (8, 9, 22), "alpha": 255, "seed": 0x502},
         ],
         "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 50},
+        # 银河光带 + 尘埃暗隙 + 星点雾 (Task 7, spec: pomodoro-scene-starry-milkyway)。
+        # theta/shift/band_half/gc_px 与 export-stars.py 投影、background.wgsl
+        # galactic_py 同源 — Task 8 调参时三处同步, 不得只改一处。
+        "milkyway": {
+            "theta_deg": 60.0,      # = export-stars.py THETA_DEG
+            "shift": (0.0, -0.03),  # = export-stars.py SHIFT_X/Y
+            "band_half": 0.10,      # 跨带高斯半宽 (py) = wgsl HAZE_BAND
+            "gc_px": 45.0 / 260.0,  # 银心沿带坐标 = (0 - L_CENTER) / FOV_U
+            "along_falloff": 0.17,  # 沿带衰减 (px): 最亮段压银心 (UV.y≈0.32, 上 1/3)
+            "band_floor": 0.45,     # 远银心残余亮度 (带仍斜跨全天)
+            "peak_gain": 0.74,      # 光带峰值增益 (screen 提亮上限)
+            "core_color": (212, 208, 236),  # 带核心 (淡紫白, 冷)
+            "warm_color": (255, 226, 186),  # 银心暖调
+            "dust_offset": 0.025,   # 暗隙中线 py 偏移 (银道面一侧)
+            "dust_width": 0.045,    # 暗隙跨带宽度 (py)
+            "dust_strength": 1.0,  # 暗隙压暗强度
+            "warp_amp": 0.055,    # 中心线域扭曲幅度 (py): 破直边, 羽化带缘
+            "haze_count": 24000,    # 星点雾颗数 (单像素, 不可分辨)
+            "haze_alpha_max": 72,   # 星点雾增量封顶 (灰度防线: 不许可分辨亮星)
+            "seed": 0x57A9,
+        },
         "palette": {
             "base": (22, 26, 52),
             "accent": (255, 224, 160),
@@ -490,6 +704,9 @@ def build_scene(cfg: dict) -> Image.Image:
         img = Image.alpha_composite(
             img, radial_overlay(g["color"], g["center"], g["radius"], g["peak"])
         )
+    if "milkyway" in cfg:
+        # 银河在山脊之前烘焙: 山脊剪影遮挡带底 (带自山后升起)。
+        img = apply_milkyway(img, cfg["milkyway"])
     if "ridges" in cfg:
         img = Image.alpha_composite(img, build_ridges(cfg["ridges"]))
     if "waves" in cfg:
