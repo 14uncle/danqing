@@ -1375,9 +1375,29 @@ fn run() -> anyhow::Result<()> {
         None => PomodoroApp::new_default(),
     };
 
+    // 星野纹理启动烘焙: 真实星表 (Yale BSC5) → RGBA 位图, 与场景图同画布
+    // (1536×1024), shader 与场景纹理共用 Cover 裁剪 UV, 星点与山脊线对齐。
+    // 常驻一张 ~6MB 纹理; 烘焙耗时计入启动门槛实测 (spec: 目标 <100ms)。
+    let bake_start = std::time::Instant::now();
+    let catalog = starfield::decode(starfield::STARS_BIN);
+    let starfield_rgba =
+        starfield::bake_starfield_rgba(&catalog, starfield::BAKE_WIDTH, starfield::BAKE_HEIGHT);
+    log::info!(
+        "星野烘焙: {} 星 → {}x{}, 耗时 {:?}",
+        catalog.len(),
+        starfield::BAKE_WIDTH,
+        starfield::BAKE_HEIGHT,
+        bake_start.elapsed(),
+    );
+
     let background = BackgroundConfig::with_scenes(SCENES.iter().map(|s| s.image))
         .scale(ScaleMode::Cover)
-        .with_noise(NOISE, NOISE_OPACITY);
+        .with_noise(NOISE, NOISE_OPACITY)
+        .with_starfield(
+            starfield_rgba,
+            starfield::BAKE_WIDTH,
+            starfield::BAKE_HEIGHT,
+        );
     let config = WindowConfig {
         title: "丹青 · 番茄钟".into(),
         size: Size::new(960.0, 640.0),

@@ -373,6 +373,15 @@ var tex_to: texture_2d<f32>;
 @group(2) @binding(1)
 var samp_to: sampler;
 
+// 星野纹理 (星夜场景): CPU 启动烘焙的真实星表星点层, 与场景图同画布,
+// 共用 in.uv 采样 (同一组 Cover 裁剪, 星点与山脊线像素级对齐)。
+// 未配置时 Rust 侧绑 1×1 全黑回退 — 本槽恒可绑。
+@group(3) @binding(0)
+var starfield_tex: texture_2d<f32>;
+
+@group(3) @binding(1)
+var starfield_smp: sampler;
+
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -458,6 +467,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         color = vec4<f32>(
             color.rgb
                 + star_field(in.uv) * u.starry_base
+                // TODO(Task 5): 调试直出 — 验证星野纹理通路 (group 3) 后再
+                // 把 star_field 重写为采样本纹理, 届时移除此行。
+                + textureSample(starfield_tex, starfield_smp, in.uv).rgb * u.starry_base
                 + (star_twinkle(in.uv, u.time) + vec3<f32>(meteor(in.uv, u.rain_time)))
                     * u.starry_intensity,
             color.a,

@@ -30,13 +30,11 @@
 
 ## Phase 2: 渲染通路
 
-- [ ] **Task 4: 星野纹理烘焙 + 绑定点接线**
-  - Description: `src/render/background.rs` 纹理 bind group 扩一槽(星野纹理,与场景大图 `create_scene_texture` 同机制的字节上传 API);example 侧启动时用 starfield 模块把 9,110 星 splat 成 1280×720 单通道位图(亮星带小光晕,6.5 等星 = 1px 弱点)并上传,常驻。测量并记录烘焙耗时。
-  - Acceptance: 星夜场景渲染采样到星野纹理(可先以调试亮度直出验证);烘焙耗时实测 <100ms(记录数值);`cargo test --lib uniform_buffer_size` 等护栏全绿(uniform 未动)
-  - Verify: `cargo test --lib --tests` 全绿 + `cargo run --release --example pomodoro` 目测星野出现
-  - Dependencies: Task 3
-  - Files: `src/render/background.rs`、`examples/pomodoro/starfield.rs`、`examples/pomodoro/main.rs`
-  - Scope: M
+- [x] **Task 4: 星野纹理烘焙 + 绑定点接线** ✅ 2026-08-03
+  - 产出: engine `BackgroundConfig::with_starfield`(RGBA 字节+尺寸) + pipeline group 3 恒绑(1×1 全黑 fallback) + `upload_rgba_texture`(**Rgba8Unorm 线性格式**——bake 是线性权重非 sRGB 图像, 评审修正); example 侧 `bake_starfield_rgba`(6,743 星二次软点 splat, 与场景图同画布 1536×1024) + 启动接线
+  - **烘焙耗时实测 13.4ms (debug)** — 远低于 <100ms 目标; release 更快, 精确值见启动日志 `星野烘焙: ... 耗时`
+  - wgsl 调试直出行已标 TODO(Task 5) 届时移除; uniform 布局未动(护栏全绿); 新增 5 测(bake×4 + config×1)
+  - **遗留(GUI 目测)**: 星夜纹理通路目测延后——验证时用户番茄钟正在运行(多实例会抢同一状态文件+全局热键), 留待 Phase 2 checkpoint 用户目测一并确认
 
 - [ ] **Task 5: shader 重写 star_field / star_twinkle**
   - Description: `background.wgsl`: `star_field` 改为采样星野纹理 × `starry_base`;`star_twinkle` 脉冲逻辑不变(1/8 Hz 档位、`u.time`、±SF_TWINKLE_AMP),改为细网格脉冲场**调制采样结果**;旧常量 SF_COLS/SF_ROWS/SF_ON/SF_BIG/SF_WARM 退役(保留 SF_ASPECT/SF_BAND_BOT/SF_TWINKLE_AMP 中仍适用者)。meteor 不动。

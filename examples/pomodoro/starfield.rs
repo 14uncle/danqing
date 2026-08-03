@@ -8,9 +8,6 @@
 //! HR 顺序 (已剔除 UV 外与缺字段项), 不落 HR 号。
 //! 版本策略同 stats.rs: 未来版本拒读 (防御性返回空)。
 
-// Task 4 接线 (纹理烘焙 + 渲染上传) 前暂允 dead_code; 接线时移除此行。
-#![allow(dead_code)]
-
 /// 内置星表二进制 (`assets/stars.bin`, 由 `tools/export-stars.py` 生成)。
 pub static STARS_BIN: &[u8] = include_bytes!("../../assets/stars.bin");
 
@@ -113,6 +110,54 @@ pub fn star_tint(bv: Option<f32>) -> (f32, f32, f32) {
             (1.0, 1.0 - 0.25 * w, 1.0 - 0.55 * w)
         }
     }
+}
+
+/// 烘焙画布尺寸: 与场景图一致 (1536×1024, export-scenes.py 画布)。
+/// 采样时与场景纹理共用同一组 Cover 裁剪 UV, 星点与山脊线像素级对齐。
+pub const BAKE_WIDTH: u32 = 1536;
+pub const BAKE_HEIGHT: u32 = 1024;
+
+/// 把目录星 splat 成 RGBA8 星野位图。
+///
+/// 线性空间累加 (亮度 × B-V 染色), 超 1.0 截顶; alpha 恒 255。
+/// 半径定义基于 1280 宽画布, 按实际画布宽等比缩放。
+pub fn bake_starfield_rgba(stars: &[CatalogStar], width: u32, height: u32) -> Vec<u8> {
+    assert!(width > 0 && height > 0, "烘焙画布尺寸须为正");
+    let mut acc = vec![0.0f32; (width * height * 3) as usize];
+    let scale = width as f32 / 1280.0;
+    for star in stars {
+        let r = (star.radius() * scale).max(0.75);
+        let cx = star.x * (width - 1) as f32;
+        let cy = star.y * (height - 1) as f32;
+        let (tr, tg, tb) = star.tint();
+        let bright = star.brightness();
+        let x0 = (cx - r).floor().max(0.0) as u32;
+        let x1 = ((cx + r).ceil() as u32).min(width - 1);
+        let y0 = (cy - r).floor().max(0.0) as u32;
+        let y1 = ((cy + r).ceil() as u32).min(height - 1);
+        for py in y0..=y1 {
+            for px in x0..=x1 {
+                let d = (px as f32 - cx).hypot(py as f32 - cy) / r;
+                if d >= 1.0 {
+                    continue;
+                }
+                // 二次软点: 中心满亮, 边缘平滑归零 (无硬边锯齿)。
+                let w = (1.0 - d * d) * bright;
+                let i = ((py * width + px) * 3) as usize;
+                acc[i] += w * tr;
+                acc[i + 1] += w * tg;
+                acc[i + 2] += w * tb;
+            }
+        }
+    }
+    let mut out = vec![0u8; (width * height * 4) as usize];
+    for p in 0..(width * height) as usize {
+        out[p * 4] = (acc[p * 3].min(1.0) * 255.0) as u8;
+        out[p * 4 + 1] = (acc[p * 3 + 1].min(1.0) * 255.0) as u8;
+        out[p * 4 + 2] = (acc[p * 3 + 2].min(1.0) * 255.0) as u8;
+        out[p * 4 + 3] = 255;
+    }
+    out
 }
 
 #[cfg(test)]
@@ -219,5 +264,77 @@ mod tests {
         assert!(warm_b < cold_b, "暖星蓝通道应更低");
         let (r, _, _) = star_tint(Some(1.8));
         assert_eq!(r, 1.0, "红通道不动, 只掉蓝绿");
+    }
+
+    fn px(buf: &[u8], w: u32, x: u32, y: u32) -> (u8, u8, u8, u8) {
+        let i = ((y * w + x) * 4) as usize;
+        (buf[i], buf[i + 1], buf[i + 2], buf[i + 3])
+    }
+
+    fn star_at(x: f32, y: f32, vmag: f32, bv: Option<f32>) -> CatalogStar {
+        CatalogStar { x, y, vmag, bv }
+    }
+
+    #[test]
+    fn bake_empty_starfield_is_black_with_opaque_alpha() {
+        let buf = bake_starfield_rgba(&[], 8, 8);
+        assert_eq!(buf.len(), 8 * 8 * 4);
+        for y in 0..8 {
+            for x in 0..8 {
+                let (r, g, b, a) = px(&buf, 8, x, y);
+                assert_eq!((r, g, b), (0, 0, 0), "无星应全黑");
+                assert_eq!(a, 255, "alpha 恒 255");
+            }
+        }
+    }
+
+    #[test]
+    fn bake_places_star_at_expected_pixel() {
+        // 星心精确对齐 px (32,32) → 峰值 = brightness; 天狼级 (mag -1.5) 满亮 255。
+        let c = 32.0 / 63.0;
+        let buf = bake_starfield_rgba(&[star_at(c, c, -1.5, None)], 64, 64);
+        let (r, _, _, _) = px(&buf, 64, 32, 32);
+        assert!(r > 200, "星心应接近满亮, 实际 {r}");
+        assert_eq!(px(&buf, 64, 0, 0).0, 0, "角落应无星光");
+        // 峰值位置正确: 全图最亮 px 即 (32,32)。
+        let mut best = (0u8, 0u32, 0u32);
+        for y in 0..64 {
+            for x in 0..64 {
+                let (v, _, _, _) = px(&buf, 64, x, y);
+                if v > best.0 {
+                    best = (v, x, y);
+                }
+            }
+        }
+        assert_eq!((best.1, best.2), (32, 32), "最亮 px 应恰在星心");
+    }
+
+    #[test]
+    fn bake_applies_bv_tint() {
+        let warm = bake_starfield_rgba(&[star_at(0.5, 0.5, 0.0, Some(1.8))], 64, 64);
+        let (r, _, b, _) = px(&warm, 64, 32, 32);
+        assert!(r > b, "暖星应红大于蓝 (r={r} b={b})");
+        let cold = bake_starfield_rgba(&[star_at(0.5, 0.5, 0.0, None)], 64, 64);
+        let (r2, _, b2, _) = px(&cold, 64, 32, 32);
+        assert_eq!(r2, b2, "中性星红蓝相等");
+    }
+
+    #[test]
+    fn bake_full_catalog_reports_timing() {
+        // 启动门槛实测 (spec: 目标 <100ms)。debug 构建是最保守上界
+        // (release 通常快 5~20 倍); 卡一个宽松上限防病态回归, 精确值看运行日志。
+        let stars = decode(STARS_BIN);
+        let t0 = std::time::Instant::now();
+        let buf = bake_starfield_rgba(&stars, BAKE_WIDTH, BAKE_HEIGHT);
+        let elapsed = t0.elapsed();
+        assert_eq!(buf.len(), (BAKE_WIDTH * BAKE_HEIGHT * 4) as usize);
+        eprintln!(
+            "bake {} stars -> {BAKE_WIDTH}x{BAKE_HEIGHT}: {elapsed:?}",
+            stars.len()
+        );
+        assert!(
+            elapsed.as_millis() < 500,
+            "debug 烘焙耗时 {elapsed:?} 超 500ms 上限"
+        );
     }
 }

@@ -41,6 +41,10 @@ pub struct BackgroundConfig {
     pub glow: Option<PathBuf>,
     /// 可选噪声叠加图路径 (通常为 `assets/background/noise.png`)。
     pub noise: Option<PathBuf>,
+    /// 星野纹理原始 RGBA8 字节与尺寸 (应用层启动时烘焙, 非 PNG 路径 — 与场景图
+    /// 同画布, shader 与场景纹理共用同一组 UV 采样)。
+    /// 未配置时绑 1×1 全黑回退纹理 (group 3 槽位恒可绑, 输出零贡献)。
+    pub starfield: Option<(Vec<u8>, (u32, u32))>,
     /// 主背景图缩放模式。
     pub scale: ScaleMode,
     /// 光晕图叠加不透明度 (0.0 ..= 1.0)。
@@ -205,6 +209,12 @@ impl BackgroundConfig {
         self
     }
 
+    /// 设置星野纹理 (RGBA8 原始字节 + 尺寸; 须与场景图同画布)。
+    pub fn with_starfield(mut self, rgba: Vec<u8>, width: u32, height: u32) -> Self {
+        self.starfield = Some((rgba, (width, height)));
+        self
+    }
+
     /// 设置主背景图缩放模式。
     pub fn scale(mut self, scale: ScaleMode) -> Self {
         self.scale = scale;
@@ -269,6 +279,9 @@ pub struct BackgroundPipeline {
     glow: Option<BackgroundTexture>,
     /// 噪声叠加纹理 (单一资源, 启动时即用, 不进 LRU)。
     noise: Option<BackgroundTexture>,
+    /// 星野纹理 (启动时上传, 常驻): 配置缺失/非法时绑 1×1 全黑回退,
+    /// 保证 group 3 槽位恒可绑 (shader 对星夜外场景 starry_base=0 零贡献)。
+    starfield: BackgroundTexture,
     scale: ScaleMode,
     glow_opacity: f32,
     noise_opacity: f32,
@@ -361,6 +374,8 @@ impl BackgroundPipeline {
                 Some(&uniform_layout),
                 Some(&texture_layout),
                 Some(&texture_layout),
+                // group 3: 星野纹理 (星夜场景运行时星点层; 未配置时绑 1×1 全黑回退)
+                Some(&texture_layout),
             ],
             ..Default::default()
         });
@@ -437,6 +452,14 @@ impl BackgroundPipeline {
             .noise
             .as_deref()
             .and_then(|p| load_texture(device, queue, &texture_layout, p, "noise"));
+        // 星野: 配置的 RGBA 字节直接上传; 缺失/长度非法时回退 1×1 全黑。
+        let starfield = config
+            .starfield
+            .as_ref()
+            .and_then(|(rgba, (w, h))| {
+                upload_rgba_texture(device, queue, &texture_layout, rgba, *w, *h, "starfield")
+            })
+            .unwrap_or_else(|| starfield_fallback(device, queue, &texture_layout));
 
         Self {
             pipeline,
@@ -452,6 +475,7 @@ impl BackgroundPipeline {
             texture_layout: texture_layout.clone(),
             glow,
             noise,
+            starfield,
             scale: config.scale,
             glow_opacity: config.glow_opacity.clamp(0.0, 1.0),
             noise_opacity: config.noise_opacity.clamp(0.0, 1.0),
@@ -747,6 +771,9 @@ impl BackgroundPipeline {
         pass.set_bind_group(0, &self.uniform_binds[layer], &[]);
         pass.set_bind_group(1, &tex_from.bind_group, &[]);
         pass.set_bind_group(2, &tex_to.bind_group, &[]);
+        // group 3 星野纹理恒绑 (未配置时为 1×1 全黑回退); 非星夜场景
+        // starry_base=0, shader 零贡献, 各层同绑无害。
+        pass.set_bind_group(3, &self.starfield.bind_group, &[]);
         let first = (layer * VERTS_PER_LAYER) as u32;
         pass.draw(first..first + VERTS_PER_LAYER as u32, 0..1);
     }
@@ -890,7 +917,7 @@ fn load_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        format: wgpu::TextureFormat::Rgba8Unorm,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
@@ -939,6 +966,106 @@ fn load_texture(
         width,
         height,
     })
+}
+
+/// 上传原始 RGBA8 字节为纹理并创建 bind group; 字节长度与尺寸不符时返回 None。
+///
+/// 格式用 Rgba8Unorm 而非 Rgba8UnormSrgb: 星野字节是线性累加的强度权重
+/// (非 sRGB 编码图像), 采样不应再施加 sRGB→linear 解码 (会把中暗星
+/// 非线性压暗, 非线性交给 shader 显式表达)。
+fn upload_rgba_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    label: &str,
+) -> Option<BackgroundTexture> {
+    // u64 乘法防 absurd 尺寸溢出绕过校验。
+    if width == 0 || height == 0 || rgba.len() != (width as u64 * height as u64 * 4) as usize {
+        log::warn!(
+            "{label} 纹理字节长度与尺寸不符 ({width}x{height}, {} B)",
+            rgba.len()
+        );
+        return None;
+    }
+    let size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(&format!("{label} texture")),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some(&format!("{label} sampler")),
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(&format!("{label} bind group")),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+        ],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        rgba,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * width),
+            rows_per_image: Some(height),
+        },
+        size,
+    );
+    Some(BackgroundTexture {
+        texture,
+        view,
+        bind_group,
+        width,
+        height,
+    })
+}
+
+/// 星野缺省回退: 1×1 全黑纹理 (group 3 恒可绑, 输出零贡献)。
+fn starfield_fallback(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+) -> BackgroundTexture {
+    upload_rgba_texture(
+        device,
+        queue,
+        layout,
+        &[0, 0, 0, 255],
+        1,
+        1,
+        "starfield fallback",
+    )
+    .expect("1x1 回退纹理创建不应失败")
 }
 
 #[cfg(test)]
@@ -998,6 +1125,16 @@ mod tests {
         assert_eq!(cfg.scenes.len(), 3);
         assert!(cfg.image.is_none());
         assert_eq!(cfg.scale, ScaleMode::Cover);
+    }
+
+    #[test]
+    fn background_config_with_starfield_stores_rgba() {
+        let cfg = BackgroundConfig::default();
+        assert!(cfg.starfield.is_none(), "默认无星野 (绑 1×1 回退)");
+        let cfg = cfg.with_starfield(vec![0u8; 16], 2, 2);
+        let (rgba, dims) = cfg.starfield.as_ref().expect("星野应已设置");
+        assert_eq!(rgba.len(), 16);
+        assert_eq!(*dims, (2, 2));
     }
 
     #[test]
