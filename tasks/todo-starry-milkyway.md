@@ -68,19 +68,19 @@
   - Files: `assets/`(底图)、`tools/export-scenes.py`(如需调参)、`examples/pomodoro/scenes.rs`(生成)
   - Scope: M
 
-- [ ] **Task 8: 光带常量回填 + 三层对齐**
+- [x] **Task 8: 光带常量回填 + 三层对齐** ✅ 2026-08-03
+  - 常量回填先天完成: 底图光带直接生成于 py=0 (与 export-stars.py 投影、wgsl galactic_py 同源), θ=60°/SHIFT=(0,-0.03)/band_half=0.10 三处一致, 星表未重导, 锚点测试全绿
+  - GUI 目测 (用户实例窗口期, release): **三层对齐成立** — 亮星沿光带聚集 (中带段亮星密度/尺寸 vs 带外左侧肉眼可辨), 暗星雾带内外密度分级清晰 (HAZE_ON 0.55/0.10), 格边截断无可见网格接缝 (Task 6 遗留项关闭), 倒计时区对比度与山脊遮挡正常
+  - 深邃剂量一轮即过, 未触发迭代 (5-commit 预算消耗 0)
   - Description: 测量新底图光带中心线,回填 wgsl 银纬 mask 角度/带宽常量(与 export-stars.py 旋转常量一致);目测迭代三层对齐(光带/亮星带/暗星雾带重合)与"深邃"剂量(暗星雾密度/光带亮度/星闪幅度配比)。
-  - Acceptance: 三层带结构目测重合;银河一眼可辨;**同区域迭代 ≤5 commit**(超预算提级换范式);阈值裁定回填 spec
-  - Verify: 运行目测 + commit 计数自查
-  - Dependencies: Task 6、Task 7
-  - Files: `src/render/background.wgsl`、`tools/export-stars.py`(角度常量)、`docs/specs/pomodoro-scene-starry-milkyway.md`(阈值回填)
-  - Scope: S
 
-### Checkpoint: Phase 3 — 三层重合;与倒计时大字区无遮挡冲突
+### Checkpoint: Phase 3 — 三层重合 ✅;与倒计时大字区无遮挡冲突 ✅
 
 ## Phase 4: 收口
 
-- [ ] **Task 9: benchmark + 全量回归 + 三件套**
+- [x] **Task 9: benchmark + 全量回归 + 三件套** ✅ 2026-08-03
+  - 前置进展(2026-08-03): 引擎侧 benchmark 已过 — showcase release 最佳启动 870.9ms ≤1s、中位 WS 182.6MB ≤360MB PASS;基线对拍(3386ac1 worktree)最佳 886.3ms,**星野管线零回归**(首轮 1.5s+ 为构建后冷启动方差,热轮两侧均 ~880ms)。pomodoro 专项(含烘焙耗时)待用户实例空闲后补测
+  - pomodoro 专项(2026-08-03 补测): 最佳启动 **859.7ms ≤1s PASS**(热轮 860~890ms, 与 showcase 同水平; 星野烘焙 17ms 日志实测)、中位 WS **205.3MB ≤360MB PASS**(场景纹理+音频+星野 6MB RGBA 记账);冷启动慢轮 (1.4~1.5s) 为机器级噪声, showcase 基线同样存在。用户状态文件已原样恢复
   - Description: `powershell -NoProfile -File tools/benchmark.ps1`(须先 release 构建);全量测试;fmt/clippy/test 三件套零警告。
   - Acceptance: 暖机启动 ≤1s(含星表烘焙)、常驻 WS ≤360MB PASS;`cargo test --lib --tests` 与 `cargo test --example pomodoro` 全绿
   - Verify: benchmark 输出 + 三件套输出
