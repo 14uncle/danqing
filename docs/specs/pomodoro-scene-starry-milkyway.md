@@ -51,7 +51,7 @@ powershell -NoProfile -File tools/benchmark.ps1   # 启动 ≤1s(含星表烘焙
 
 - **星表**: Yale Bright Star Catalog(9,110 颗,视星等 ≤6.5)。授权已尽调确认(2026-08-03,见 Open Questions);数据源 `ybsc5.gz`(ASCII),**自带 GLON/GLAT 银道坐标与 B-V 色指数**——投影免坐标转换,色指数可直接服务星点暖色分布。
 - **投影在银道坐标系做**: 银经 l → UV.x,银纬 b → UV.y,整体旋转一个常量角对齐底图光带。**这是关键设计**——银道坐标下亮星天然沿 b≈0 聚集,与暗星雾 mask、底图光带共用同一坐标系,对齐只需调一个旋转角 + 平移,不做真实地点/时刻地平坐标换算(不过度工程)。
-- **二进制格式**: 每星 6B(x: u16, y: u16 归一化;mag: u8 量化;保留: u8),全表 ~53KB。Rust 侧 `include_bytes!`。
+- **二进制格式**: 8B 自描述头(魔数 "DQST" + 版本 u16 + 计数 u16,LE) + 每星 6B(x: u16, y: u16 归一化;vmag: u8 量化 `v=q/27-2.0`;**bv: u8,B-V 色指数量化 `q=(bv+0.5)*85`,0xFF=缺失**——服务星点暖色分布)。全表 ~40KB。Rust 侧 `include_bytes!`。
 - `assets/stars.bin` 是 assets/ 首个**数据资产**(非视觉资产),意图文档已授权。
 
 ### 渲染层: 启动烘焙 + shader 重写 star_field

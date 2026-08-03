@@ -15,13 +15,11 @@
 
 ## Phase 1: 数据管线
 
-- [ ] **Task 2: tools/export-stars.py + assets/stars.bin**
-  - Description: 新增预处理脚本(对齐 `export-scenes.py` 惯例): 下载/读取 BSC → 银道坐标 (l,b) → 投影到 UV(银经→x、银纬→y + 旋转常量,默认角度先取 60° 占位,Task 8 回填) → 写出 `assets/stars.bin`(每星 6B: x u16 / y u16 / mag u8 / 保留 u8,~53KB)。脚本打印自检: 星数、星等分布、织女(Vega)/牛郎(Altair)投影坐标。
-  - Acceptance: 脚本跑通产出 stars.bin;织女/牛郎分列银河带两侧(b 符号相反),坐标与已知星图一致(人工核对);UV 外星点已剔除并打印剔除数
-  - Verify: 运行脚本看自检输出 + 人工核对锚点星
-  - Dependencies: Task 1
-  - Files: `tools/export-stars.py`(新)、`assets/stars.bin`(生成入库)
-  - Scope: M
+- [x] **Task 2: tools/export-stars.py + assets/stars.bin** ✅ 2026-08-03
+  - 产出: `tools/export-stars.py`(纯 stdlib, 缓存 tools/.cache/ 已 gitignore) + `assets/stars.bin`(40,466 B, 8B 头 "DQST" v1 + 6,743 星 × 6B)
+  - 自检全过: 解析 9,096/9,110(14 条非恒星记录缺字段跳过); 织女(0.605,0.031)/牛郎(0.730,0.191) 分列带两侧且 l/b/星等解析抽验命中; 银心落 (0.587,0.320) 上三分之一; UV 外剔除 2,353 颗并打印
+  - 观测姿态常量(占位, Task 8 回填): L_CENTER=-45°, THETA=60°, FOV 260°×150°, SHIFT_Y=-0.03
+  - 设计微调: "保留 u8" 落实为 B-V 色指数量化(0xFF=缺失), 服务星点暖色分布; bin 加 8B 自描述头(魔数+版本+计数), 利于 Task 3 截断防御
 
 - [ ] **Task 3: Rust 星表解析模块 + 单测**
   - Description: 新增 `examples/pomodoro/starfield.rs`(纯逻辑,无 GPU): `include_bytes!` 加载 stars.bin,解码为星点迭代器(UV + 星等),星等→亮度/半径映射函数,边界防御(截断/非法记录跳过)。文件头 `@author 十四叔` / `@date`。
