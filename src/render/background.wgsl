@@ -224,9 +224,10 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
 // alpha 0.30 (终审 0.45 → 0.22 消除黄沙, 0.22 太隐回提至明显可见区间 b977da6;
 // 山脊背景本已暖粉 ~170/255, additive 叠加勿再过饱和读作"黄沙")。
 // scale 3.0 (升自 2.0, 雾团 ~125-320px 更细腻不读作"沙粒")。
-const MOUNTAIN_MIST_Y_TOP: f32 = 0.50;
-const MOUNTAIN_MIST_Y_FULL: f32 = 0.80;
-const MOUNTAIN_MIST_Y_END: f32 = 0.88;
+// 2026-08-04: AI 底图云海在上半部, 动效位置上移适配。
+const MOUNTAIN_MIST_Y_TOP: f32 = 0.25;
+const MOUNTAIN_MIST_Y_FULL: f32 = 0.55;
+const MOUNTAIN_MIST_Y_END: f32 = 0.65;
 const MOUNTAIN_MIST_ALPHA: f32 = 0.30;
 const MOUNTAIN_MIST_COLOR: vec3<f32> = vec3<f32>(0.920, 0.650, 0.620);
 
