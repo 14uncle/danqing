@@ -678,26 +678,26 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         while let Ok(event) = self.window_event_rx.try_recv() {
             self.apply_window_event(event, event_loop);
         }
-        // 控制流：
-        // 可见时：主动 request_redraw + WaitUntil(16ms), 等效 60fps 重绘。
-        //   WaitUntil 比 Poll 显著省 CPU (空载时 Poll 一秒跑几千次，WaitUntil 仅
-        //   ~60 次), 同时 OS 调度超时 / 外部事件 / 模态菜单 close 仍能及时唤醒
-        //   winit, 行为等价。
+        // 控制流：统一 WaitUntil(16ms) ≈ 60fps, 无论窗口可见与否。
+        //   可见时：主动 request_redraw 驱动渲染; WaitUntil 比 Poll 省 CPU
+        //     (空载时 Poll 一秒跑几千次，WaitUntil 仅 ~60 次), 同时 OS 调度超时 /
+        //     外部事件 / 模态菜单 close 仍能及时唤醒 winit, 行为等价。
+        //   隐藏时：RedrawRequested 不会发 (窗口不可见), 但 about_to_wait 中的
+        //     app.tick() 仍每帧推进 (计时器 / 持久化 / 环境音)。用 WaitUntil 而非
+        //     Poll 限制 tick 频率至 ~60fps, 避免 Poll 空转 (数千 fps) 导致环境音
+        //     player.play()/set_volume() 被高频调用, 干扰音频线程缓冲区 → 噪声。
         //   关键：muda 托盘菜单的 TrackPopupMenu 是 Windows 阻塞 API, 会在主线程
-        //         跑模态消息循环，期间 winit 事件循环被冻结; 菜单关闭后必须主动
-        //         重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
-        //         过滤/丢弃, UI 卡在旧值不更新 (读秒停止、按钮 label 不切)。
-        // 隐藏时：Poll 驱动 app.tick (RedrawRequested 不会发，因为窗口不可见)。
+        //     跑模态消息循环，期间 winit 事件循环被冻结; 菜单关闭后必须主动
+        //     重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
+        //     过滤/丢弃, UI 卡在旧值不更新 (读秒停止、按钮 label 不切)。
         if self.is_visible {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
-        } else {
-            event_loop.set_control_flow(ControlFlow::Poll);
         }
+        event_loop.set_control_flow(ControlFlow::WaitUntil(
+            Instant::now() + Duration::from_millis(16),
+        ));
     }
 }
 
