@@ -222,8 +222,8 @@ impl BackgroundConfig {
     }
 }
 
-/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐, 覆盖 9 字段 × 4B 有效数据)。
-pub(crate) const UNIFORM_BUFFER_BYTES: u64 = 48;
+/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐, 覆盖 13 字段 × 4B 有效数据)。
+pub(crate) const UNIFORM_BUFFER_BYTES: u64 = 64;
 
 /// 单个已上传的背景纹理。
 #[allow(dead_code)]
@@ -326,8 +326,8 @@ impl BackgroundPipeline {
         let uniform_bufs: [wgpu::Buffer; LAYER_COUNT] = std::array::from_fn(|_| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("background uniform buffer"),
-                // WGSL uniform struct 自动 16-byte 对齐, 9×f32 = 36B 有效数据
-                // 被 WGSL 当作 48B 处理 (尾部 12B padding, shader 不读)。
+                // WGSL uniform struct 自动 16-byte 对齐, 13×f32 = 52B 有效数据
+                // 被 WGSL 当作 64B 处理 (尾部 12B padding, shader 不读)。
                 // 常量 UNIFORM_BUFFER_BYTES 与 UNIFORM_FIELDS 一同被回归护栏覆盖
                 // (uniform_buffer_size_covers_wgsl_struct 测试)。
                 size: UNIFORM_BUFFER_BYTES,
@@ -779,8 +779,8 @@ impl BackgroundPipeline {
     }
 
     /// 按缩放模式计算顶点与 UV, 写入指定层的顶点区段与 uniform buffer。
-    /// uniform 布局 (44B 有效, WGSL 16B 对齐为 48B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, 山强度, 森林强度, 星夜强度, 星夜基础]。
-    /// buffer 实际创建 48B (与 WGSL 自动对齐一致, 尾部 4B 是 padding, shader 不读)。
+    /// uniform 布局 (52B 有效, WGSL 16B 对齐为 64B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, 山强度, 森林强度, 星夜强度, 星夜基础, 屏宽, 屏高]。
+    /// buffer 实际创建 64B (与 WGSL 自动对齐一致, 尾部 12B 是 padding, shader 不读)。
     #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
@@ -861,7 +861,7 @@ impl BackgroundPipeline {
             0,
             bytemuck::cast_slice(&[
                 opacity, fade, motion[0], motion[1], motion[2], motion[3], motion[4], motion[5],
-                motion[6], motion[7], motion[8],
+                motion[6], motion[7], motion[8], screen_w, screen_h,
             ]),
         );
     }
@@ -1286,7 +1286,7 @@ mod tests {
         // ≤ buffer 大小 (UNIFORM_BUFFER_BYTES),且 buffer 必须 16B 对齐
         // (WGSL uniform 规范)。这是 2026-07-30 山/森林动效漏改触发的护栏 —
         // 之前 buffer 留 32B 但 cast_slice 写 36B,wgpu 启动即 panic。
-        const UNIFORM_FIELDS: usize = 11;
+        const UNIFORM_FIELDS: usize = 13;
         let payload_bytes = UNIFORM_FIELDS * std::mem::size_of::<f32>();
         assert!(
             UNIFORM_BUFFER_BYTES as usize >= payload_bytes,

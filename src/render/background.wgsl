@@ -20,6 +20,8 @@ struct Uniforms {
     forest_intensity: f32,
     starry_intensity: f32,
     starry_base: f32,
+    screen_w: f32,
+    screen_h: f32,
 }
 
 // ---- 雨幕 (雨场景; 静态图已去丝, 雨全部由本段程序化渲染) ----
@@ -299,16 +301,11 @@ fn star_twinkle(uv: vec2<f32>, t: f32) -> vec3<f32> {
 
 // ---- 暗星雾 (star_haze): 银河「深邃」体量的来源 ----
 // 星表 (≤6.5 等) 给真实结构, 但肉眼银河的密度感主要来自无数暗星 ——
-// 这里用细 hash 网格补一层极低亮度暗星 (不闪), 密度按银纬解析 mask 聚集
-// (b≈0 最密), 与星表亮星带、底图光带共用同一坐标系 (三层对齐)。
+// 这里用 value noise 生成连续雾密度 (非离散网格点阵, 避免像素画感),
+// 密度按银纬解析 mask 聚集 (b≈0 最密), 与星表亮星带、底图光带共用
+// 同一坐标系 (三层对齐)。
 // mask 常量与 tools/export-stars.py 的固定观测姿态互逆 (Task 8 对齐底图时
 // 两侧同步回填)。
-const HAZE_COLS: f32 = 384.0;    // 细网格列 (cell 4px @1536 画布)
-const HAZE_ROWS: f32 = 216.0;    // 细网格行 (cell ≈4.7px @1024 高)
-const HAZE_ASPECT: f32 = 1.5;    // 画布宽高比, 圆点修正
-const HAZE_ON_BAND: f32 = 0.55;  // 带内有星格比例 (step 约定: step(1-r,h) 得 P(on)=r)
-const HAZE_ON_SKY: f32 = 0.10;   // 带外有星格比例 (带内外密度比 ~5.5:1)
-const HAZE_BRIGHT: f32 = 0.05;   // 单星亮度上限 (极低 — 体量来自数量, 非单点亮度)
 const HAZE_THETA: f32 = 1.0471976;          // 60° (弧度) = export-stars.py THETA_DEG
 const HAZE_SHIFT: vec2<f32> = vec2<f32>(0.0, -0.03); // = export-stars.py SHIFT_X/Y
 const HAZE_BAND: f32 = 0.10;     // 银纬半宽 (py 单位 ≈ 15° 银纬)
@@ -322,22 +319,39 @@ fn galactic_py(uv: vec2<f32>) -> f32 {
     return -rx * sin(HAZE_THETA) + ry * cos(HAZE_THETA);
 }
 
-// 暗星雾 (静态, 常驻): 密度沿银道面聚集, 挂 starry_base 与星野同生灭。
+// 双线性 value noise: 在4个整数格点采样 hash, 双线性插值,
+// 输出 [0,1] 连续标量。无离散网格边界, 自然平滑。
+fn haze_noise(p: vec2<f32>) -> f32 {
+    let ix = floor(p.x);
+    let iy = floor(p.y);
+    let fx = fract(p.x);
+    let fy = fract(p.y);
+    // smoothstep 插值核: 三次 Hermite 消除格点处的导数不连续
+    let ux = fx * fx * (3.0 - 2.0 * fx);
+    let uy = fy * fy * (3.0 - 2.0 * fy);
+    let a = rain_hash(ix * 127.1 + iy * 311.7);
+    let b = rain_hash((ix + 1.0) * 127.1 + iy * 311.7);
+    let c = rain_hash(ix * 127.1 + (iy + 1.0) * 311.7);
+    let d = rain_hash((ix + 1.0) * 127.1 + (iy + 1.0) * 311.7);
+    return mix(mix(a, b, ux), mix(c, d, ux), uy);
+}
+
+// 暗星雾 (静态, 常驻): 用 value noise 生成连续雾密度, 沿银道面聚集。
+// 非离散点阵 — 避免网格结构造成的像素画/半调印刷感。
+// 挂 starry_base 与星野同生灭。
 fn star_haze(uv: vec2<f32>) -> vec3<f32> {
     let band = 1.0 - smoothstep(HAZE_BAND, HAZE_BAND + 0.08, abs(galactic_py(uv)));
-    let on_ratio = HAZE_ON_SKY + (HAZE_ON_BAND - HAZE_ON_SKY) * band;
-    let cell = vec2<f32>(floor(uv.x * HAZE_COLS), floor(uv.y * HAZE_ROWS));
-    let h = rain_hash(cell.x * 149.0 + cell.y * 67.0 + 11.0);
-    let on = step(1.0 - on_ratio, h);  // step 约定: P(on) = on_ratio
-    let jx = rain_hash(cell.x * 7.9 + cell.y * 13.7 + 1.0);
-    let jy = rain_hash(cell.x * 3.1 + cell.y * 29.7 + 2.0);
-    let cx = (cell.x + 0.2 + jx * 0.6) / HAZE_COLS;
-    let cy = (cell.y + 0.2 + jy * 0.6) / HAZE_ROWS;
-    let d = distance(vec2<f32>(uv.x * HAZE_ASPECT, uv.y), vec2<f32>(cx * HAZE_ASPECT, cy));
-    let spot = 1.0 - smoothstep(0.0008, 0.0016, d);  // ~1-2px 软点
-    let bright = HAZE_BRIGHT * (0.5 + jx * 0.5);
+    // 双层 noise 叠加: 低频定大势 (银河带宽), 高频添碎屑 (自然颗粒感)。
+    // 采样坐标乘以画布宽高比修正, 保证各向同性。
+    let aspect = u.screen_w / max(u.screen_h, 1.0);
+    let p = vec2<f32>(uv.x * aspect, uv.y);
+    let n1 = haze_noise(p * 8.0);      // 低频: ~192px 周期 (1536/8)
+    let n2 = haze_noise(p * 24.0) * 0.4; // 高频: ~64px 周期, 振幅衰减
+    let density = (n1 + n2) * band;    // 银纬调制
     // 微蓝白 (暗星普遍偏冷), 亮度极低, 不闪 — 闪是亮星 (纹理层) 的事。
-    return vec3<f32>(0.9, 0.93, 1.0) * spot * on * bright * star_band(uv.y);
+    // 底图已含银河光带细节 (尘埃暗隙), haze 只在几乎不可见层面增加深空颗粒感,
+    // 勿喧宾夺主冲掉暗部层次。
+    return vec3<f32>(0.9, 0.93, 1.0) * density * 0.01 * star_band(uv.y);
 }
 
 // 流星: 周期性斜向流星 (rain_time 连续触发, ~24s 一颗, 存续 ~1.4s)。
