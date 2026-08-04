@@ -95,7 +95,8 @@ fn rain_overlay(uv: vec2<f32>, t: f32) -> f32 {
 const FIRE_W: f32 = 0.7853982;         // 2π/8: 动效基频角速度 (1/8 Hz)
 
 // 呼吸: 3 个正弦叠加 (2/8、3/8、5/8 Hz → 周期 4/2.67/1.6s) 叠出有机起伏。
-const FIRE_CENTER: vec2<f32> = vec2<f32>(0.5, 0.86); // 光晕锚点 (下部火床, 对齐静态图辉光)
+// 2026-08-04: AI 底图火堆居中 (y≈0.65), 调整锚点。
+const FIRE_CENTER: vec2<f32> = vec2<f32>(0.5, 0.65); // 光晕锚点 (居中火堆)
 const FIRE_MASK_RADIUS: f32 = 0.48;    // 呼吸径向衰减半径 (uv)
 const FIRE_BREATH_GAIN: f32 = 0.08;    // 呼吸幅度上限 (乘性; 4% 实测不可读, 翻倍)
 
