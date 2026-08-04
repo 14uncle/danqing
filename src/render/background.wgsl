@@ -220,21 +220,39 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
 }
 
 // ---- 山动效 (山场景) ----
-// 单层暖粉雾融入暮色。mask 0.50-0.88 集中在山脊上空。
-// alpha 0.30 (终审 0.45 → 0.22 消除黄沙, 0.22 太隐回提至明显可见区间 b977da6;
-// 山脊背景本已暖粉 ~170/255, additive 叠加勿再过饱和读作"黄沙")。
-// scale 3.0 (升自 2.0, 雾团 ~125-320px 更细腻不读作"沙粒")。
-const MOUNTAIN_MIST_Y_TOP: f32 = 0.50;
-const MOUNTAIN_MIST_Y_FULL: f32 = 0.80;
-const MOUNTAIN_MIST_Y_END: f32 = 0.88;
-const MOUNTAIN_MIST_ALPHA: f32 = 0.30;
-const MOUNTAIN_MIST_COLOR: vec3<f32> = vec3<f32>(0.920, 0.650, 0.620);
+// 2026-08-04: 适配 AI 底图 (元宝生成山脊+云海)。
+// 图中云海在 Y=0.25-0.55 (山谷间), 山脊间薄雾在 Y=0.45-0.65。
+// 双层动效: 主云海 (缓慢流动) + 薄雾 (轻柔飘动), 颜色匹配图中粉紫色调。
+// alpha 克制, 增强而非遮盖现有云层。
+
+// 主云海: Y=0.25-0.55, 匹配图中云海位置
+const MOUNTAIN_CLOUD_Y_TOP: f32 = 0.25;
+const MOUNTAIN_CLOUD_Y_FULL: f32 = 0.40;
+const MOUNTAIN_CLOUD_Y_END: f32 = 0.55;
+const MOUNTAIN_CLOUD_ALPHA: f32 = 0.18;
+const MOUNTAIN_CLOUD_COLOR: vec3<f32> = vec3<f32>(0.850, 0.720, 0.750);  // 粉紫色, 匹配落日照射的云
+
+// 薄雾: Y=0.45-0.65, 山脊间的流动雾气
+const MOUNTAIN_MIST_Y_TOP: f32 = 0.45;
+const MOUNTAIN_MIST_Y_FULL: f32 = 0.55;
+const MOUNTAIN_MIST_Y_END: f32 = 0.65;
+const MOUNTAIN_MIST_ALPHA: f32 = 0.12;
+const MOUNTAIN_MIST_COLOR: vec3<f32> = vec3<f32>(0.780, 0.680, 0.720);  // 淡粉紫, 更透明
 
 fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    let band = smoothstep(MOUNTAIN_MIST_Y_TOP, MOUNTAIN_MIST_Y_FULL, uv.y)
-             * (1.0 - smoothstep(MOUNTAIN_MIST_Y_END, 1.0, uv.y));
-    let p = mist_pattern(uv, t, 0.0625, 3.0, 0.0);
-    return MOUNTAIN_MIST_COLOR * p * band * MOUNTAIN_MIST_ALPHA;
+    // 主云海: 缓慢水平流动, 增强图中云层
+    let cloud_band = smoothstep(MOUNTAIN_CLOUD_Y_TOP, MOUNTAIN_CLOUD_Y_FULL, uv.y)
+                   * (1.0 - smoothstep(MOUNTAIN_CLOUD_Y_FULL, MOUNTAIN_CLOUD_Y_END, uv.y));
+    let cloud_p = mist_pattern(uv, t, 0.04, 2.5, 0.0);  // 更慢速度, 更大尺度
+    let cloud = MOUNTAIN_CLOUD_COLOR * cloud_p * cloud_band * MOUNTAIN_CLOUD_ALPHA;
+
+    // 薄雾: 轻柔飘动, 山脊间流动感
+    let mist_band = smoothstep(MOUNTAIN_MIST_Y_TOP, MOUNTAIN_MIST_Y_FULL, uv.y)
+                  * (1.0 - smoothstep(MOUNTAIN_MIST_Y_FULL, MOUNTAIN_MIST_Y_END, uv.y));
+    let mist_p = mist_pattern(uv, t, 0.0625, 3.0, 1.7);  // 标准速度, 加相位偏移
+    let mist = MOUNTAIN_MIST_COLOR * mist_p * mist_band * MOUNTAIN_MIST_ALPHA;
+
+    return cloud + mist;
 }
 
 // ---- 森林动效 (森林场景) ----
