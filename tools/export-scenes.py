@@ -203,16 +203,13 @@ def build_waves(layers: list[dict]) -> Image.Image:
 
 
 def build_trees(layers: list[dict]) -> Image.Image:
-    """Forest treelines: dense rows of conifer triangles (SS x for AA).
+    """Forest treelines: proper conifer trees with trunks and canopies (SS x for AA).
 
     Each layer: base_y (baseline fraction), h_min/h_max (tree height
     fractions), color, alpha, blur (native-res gaussian radius), seed;
     optional und (baseline undulation amplitude) / freq (undulation
-    cycles). The baseline rolls like forested hills — a flat baseline
-    reads as a shelf, not terrain. Trees overlap heavily and sit on a
-    solid mass that follows the same curve, so each layer reads as
-    continuous canopy with a jagged horizon. Layers composite far-to-near;
-    far layers should be lighter, lower-alpha and blurrier (fog eats them).
+    cycles). Trees have vertical trunks + conical canopy; light shafts
+    between trees add depth. Layers composite far-to-near.
     """
     w, h = WIDTH * SS, HEIGHT * SS
     result = Image.new("RGBA", SIZE, (0, 0, 0, 0))
@@ -238,17 +235,56 @@ def build_trees(layers: list[dict]) -> Image.Image:
         steps = 120
         mass = [(w * i / steps, baseline(w * i / steps)) for i in range(steps + 1)]
         draw.polygon(mass + [(w, h), (0, h)], fill=(*layer["color"], layer["alpha"]))
-        # Dense overlapping conifers; gaps show the same-color mass beneath.
+
+        # Generate trees with vertical trunks + conical canopy.
         x = -rnd() * 40 * SS
         while x < w:
             th = (layer["h_min"] + rnd() * (layer["h_max"] - layer["h_min"])) * h
-            half = th * (0.20 + rnd() * 0.10)
+            trunk_h = th * (0.35 + rnd() * 0.15)  # trunk is 35-50% of total height
+            canopy_h = th - trunk_h
+            trunk_w = th * (0.03 + rnd() * 0.02)  # thin trunk
+            canopy_half = th * (0.18 + rnd() * 0.08)  # canopy width at base
             by = baseline(x)
-            draw.polygon(
-                [(x - half, by), (x, by - th), (x + half, by)],
+
+            # Draw trunk (vertical rectangle).
+            trunk_top = by - trunk_h
+            draw.rectangle(
+                [x - trunk_w, trunk_top, x + trunk_w, by],
                 fill=(*layer["color"], layer["alpha"]),
             )
-            x += half * 2 * (0.35 + rnd() * 0.4)
+
+            # Draw canopy (triangle on top of trunk).
+            canopy_base = trunk_top
+            canopy_top = trunk_top - canopy_h
+            draw.polygon(
+                [(x - canopy_half, canopy_base), (x, canopy_top), (x + canopy_half, canopy_base)],
+                fill=(*layer["color"], layer["alpha"]),
+            )
+
+            x += canopy_half * 2 * (0.6 + rnd() * 0.5)  # spacing between trees
+
+        # Add light shafts between trees (subtle vertical streaks).
+        if layer.get("light_shafts", False):
+            shaft_overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            shaft_draw = ImageDraw.Draw(shaft_overlay)
+            shaft_color = tuple(min(255, c + 30) for c in layer["color"])  # slightly lighter
+            x = -rnd() * 60 * SS
+            while x < w:
+                if rnd() > 0.3:  # 70% chance to place a shaft
+                    shaft_h = th * (0.4 + rnd() * 0.3)
+                    shaft_w = th * (0.01 + rnd() * 0.01)
+                    by = baseline(x)
+                    shaft_top = by - shaft_h
+                    # Gradient alpha: brighter at top, fading down.
+                    for sy in range(int(shaft_top), int(by)):
+                        t = (sy - shaft_top) / max(1, shaft_h)
+                        alpha = int(layer["alpha"] * 0.3 * (1.0 - t))
+                        shaft_draw.line([(x, sy), (x + shaft_w, sy)], fill=(*shaft_color, alpha))
+                x += th * (0.8 + rnd() * 0.6)
+
+            # Composite shafts onto overlay at SS resolution before resize.
+            overlay = Image.alpha_composite(overlay, shaft_overlay)
+
         overlay = overlay.resize(SIZE, Image.LANCZOS)
         overlay = overlay.filter(ImageFilter.GaussianBlur(radius=layer.get("blur", 1.2)))
         result = Image.alpha_composite(result, overlay)
@@ -625,15 +661,15 @@ SCENES = [
         "glow": {"color": (214, 228, 214), "center": (0.5, 0.10), "radius": 0.42, "peak": 45},
         "veil": {"color": (13, 21, 16), "center": (0.5, 0.48), "radius": 0.55, "peak": 60},
         "trees": [
-            # 远林: 雾中淡影, 最虚。
-            {"base_y": 0.52, "h_min": 0.05, "h_max": 0.10, "color": (118, 138, 122),
-             "alpha": 110, "blur": 2.5, "seed": 0xF01},
-            # 中林。
-            {"base_y": 0.68, "h_min": 0.08, "h_max": 0.15, "color": (72, 94, 78),
-             "alpha": 190, "blur": 1.5, "seed": 0xF02},
-            # 近林: 最深最实, 收住底边。
-            {"base_y": 0.88, "h_min": 0.12, "h_max": 0.22, "color": (36, 56, 45),
-             "alpha": 255, "blur": 1.0, "seed": 0xF03},
+            # 远林: 雾中淡影, 最虚; 树干+树冠结构。
+            {"base_y": 0.52, "h_min": 0.06, "h_max": 0.12, "color": (118, 138, 122),
+             "alpha": 110, "blur": 2.5, "seed": 0xF01, "light_shafts": False},
+            # 中林: 林间光柱。
+            {"base_y": 0.68, "h_min": 0.10, "h_max": 0.18, "color": (72, 94, 78),
+             "alpha": 190, "blur": 1.5, "seed": 0xF02, "light_shafts": True},
+            # 近林: 最深最实, 收住底边; 粗壮树干。
+            {"base_y": 0.88, "h_min": 0.14, "h_max": 0.24, "color": (36, 56, 45),
+             "alpha": 255, "blur": 1.0, "seed": 0xF03, "light_shafts": False},
         ],
         # 雾不烘焙: 2026-07-30 用户裁定森林静态图去底雾, 雾全部由运行时程序化
         # 渲染 (background.wgsl forest_mist, 3 层 2D 各向同性 + 风驱, 暂停 500ms
