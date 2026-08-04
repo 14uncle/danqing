@@ -649,7 +649,10 @@ SCENES = [
     {
         "key": "forest",
         "name": "森林",
-        # 雾顶亮、中部压暗保倒计时对比度、底部深绿的纵向结构。
+        # AI 生成底图 (元宝, 2026-08-04): 写实松林 + 晨雾 + 暖色天光。
+        # 替换原程序化三角形树; 动效 (forest_mist) 仍由运行时 shader 渲染。
+        "ai_base": "forest_yuanbao_clean.png",
+        # 渐变/光晕/暗纱仍保留, 用于统一风格与对比度护栏。
         "stops": [
             (0.00, (168, 185, 171)),
             (0.30, (126, 146, 130)),
@@ -659,22 +662,9 @@ SCENES = [
         ],
         # 顶部天光 (穿雾), 克制峰值避免中央采样区过亮。
         "glow": {"color": (214, 228, 214), "center": (0.5, 0.10), "radius": 0.42, "peak": 45},
-        "veil": {"color": (13, 21, 16), "center": (0.5, 0.48), "radius": 0.55, "peak": 60},
-        "trees": [
-            # 远林: 雾中淡影, 最虚; 树干+树冠结构。
-            {"base_y": 0.52, "h_min": 0.06, "h_max": 0.12, "color": (118, 138, 122),
-             "alpha": 110, "blur": 2.5, "seed": 0xF01, "light_shafts": False},
-            # 中林: 林间光柱。
-            {"base_y": 0.68, "h_min": 0.10, "h_max": 0.18, "color": (72, 94, 78),
-             "alpha": 190, "blur": 1.5, "seed": 0xF02, "light_shafts": True},
-            # 近林: 最深最实, 收住底边; 粗壮树干。
-            {"base_y": 0.88, "h_min": 0.14, "h_max": 0.24, "color": (36, 56, 45),
-             "alpha": 255, "blur": 1.0, "seed": 0xF03, "light_shafts": False},
-        ],
-        # 雾不烘焙: 2026-07-30 用户裁定森林静态图去底雾, 雾全部由运行时程序化
-        # 渲染 (background.wgsl forest_mist, 3 层 2D 各向同性 + 风驱, 暂停 500ms
-        # 沉降回裸静态图 — 雨场景改造范式)。 对比 export-scenes.py 雨配置: 雨
-        # 丝不烘焙, 同样全运行时。
+        # 暗纱加强: AI 底图天空较亮, 需要更强中央压暗保对比度 (大字 ≥3:1)。
+        "veil": {"color": (8, 14, 10), "center": (0.5, 0.42), "radius": 0.65, "peak": 95},
+        # 雾不烘焙: 运行时 shader 渲染 (forest_mist)。
         "palette": {
             "base": (50, 72, 59),
             "accent": (172, 198, 158),
@@ -734,7 +724,18 @@ SCENES = [
 
 
 def build_scene(cfg: dict) -> Image.Image:
-    img = build_gradient(cfg["stops"]).convert("RGBA")
+    # AI 底图模式: 加载预制 AI 生成图, 跳过程序化渐变/树。
+    if "ai_base" in cfg:
+        ai_path = OUT_DIR / cfg["ai_base"]
+        if not ai_path.exists():
+            raise FileNotFoundError(f"AI 底图不存在: {ai_path}")
+        img = Image.open(ai_path).convert("RGBA")
+        # 统一尺寸 (容错: AI 生图可能不是精确 1536x1024)
+        if img.size != SIZE:
+            img = img.resize(SIZE, Image.LANCZOS)
+    else:
+        img = build_gradient(cfg["stops"]).convert("RGBA")
+
     if "glow" in cfg:
         g = cfg["glow"]
         img = Image.alpha_composite(
