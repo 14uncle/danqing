@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Remove AI watermarks from forest images — aggressive method."""
+"""Remove AI watermarks from scene images — aggressive paint-over method."""
 import sys
 from pathlib import Path
 from PIL import Image, ImageFilter, ImageDraw
@@ -15,8 +15,6 @@ def inpaint(img: Image.Image, regions: list[tuple[int, int, int, int]]) -> Image
 
     for x0, y0, x1, y1 in regions:
         # Sample texture from a clean nearby area
-        # For top-left: sample from (x0, y1+50) area
-        # For bottom-right: sample from (x0-100, y0-100) area
         if y0 < h // 3:  # top region
             src_x, src_y = x0, min(h - (y1-y0), y1 + 80)
         elif x0 > w // 2:  # bottom-right
@@ -36,18 +34,13 @@ def inpaint(img: Image.Image, regions: list[tuple[int, int, int, int]]) -> Image
         pw, ph = patch.size
         mask = Image.new("L", (pw, ph), 0)
         draw = ImageDraw.Draw(mask)
-        # Inner rectangle fully opaque
         inner_pad = 20
         draw.rectangle([inner_pad, inner_pad, pw-inner_pad, ph-inner_pad], fill=255)
-
-        # Feather edges with gradient
         for i in range(inner_pad):
             alpha = int(255 * (i / inner_pad))
             draw.rectangle([i, i, pw-i-1, ph-i-1], outline=alpha)
-
         mask = mask.filter(ImageFilter.GaussianBlur(radius=inner_pad))
 
-        # Paste with mask
         result.paste(patch, (x0, y0), mask)
 
     return result
@@ -56,26 +49,25 @@ def inpaint(img: Image.Image, regions: list[tuple[int, int, int, int]]) -> Image
 def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-    # 即梦: top-left + bottom-right (wider regions)
-    jimeng = Image.open(ASSETS_DIR / "forest_jimeng.png")
-    w, h = jimeng.size
-    jimeng_clean = inpaint(jimeng, [
-        (0, 0, 250, 100),          # top-left "AI生成"
-        (w-420, h-150, w, h),      # bottom-right "即梦AI"
+    # 山: bottom-right "元宝 AI生成"
+    mountain = Image.open(ASSETS_DIR / "moutain_ai_2.png")
+    w, h = mountain.size
+    mountain_clean = inpaint(mountain, [
+        (w-300, h-100, w, h),  # bottom-right
     ])
-    jimeng_clean = jimeng_clean.resize((1536, 1024), Image.LANCZOS)
-    jimeng_clean.save(ASSETS_DIR / "forest_jimeng_clean.png", "PNG", optimize=True)
-    print(f"即梦: {w}x{h} -> 1536x1024, inpainted")
+    mountain_clean = mountain_clean.resize((1536, 1024), Image.LANCZOS)
+    mountain_clean.save(ASSETS_DIR / "mountain_ai_clean.png", "PNG", optimize=True)
+    print(f"山: {w}x{h} -> 1536x1024")
 
-    # 元宝: bottom-right only
-    yuanbao = Image.open(ASSETS_DIR / "forest_yanbao.png")
-    w2, h2 = yuanbao.size
-    yuanbao_clean = inpaint(yuanbao, [
-        (w2-320, h2-120, w2, h2),  # bottom-right "元宝 AI生成"
+    # 火: bottom-right "元宝 AI生成"
+    bonfire = Image.open(ASSETS_DIR / "bonfire_ai_2.png")
+    w2, h2 = bonfire.size
+    bonfire_clean = inpaint(bonfire, [
+        (w2-300, h2-100, w2, h2),  # bottom-right
     ])
-    yuanbao_clean = yuanbao_clean.resize((1536, 1024), Image.LANCZOS)
-    yuanbao_clean.save(ASSETS_DIR / "forest_yuanbao_clean.png", "PNG", optimize=True)
-    print(f"元宝: {w2}x{h2} -> 1536x1024, inpainted")
+    bonfire_clean = bonfire_clean.resize((1536, 1024), Image.LANCZOS)
+    bonfire_clean.save(ASSETS_DIR / "bonfire_ai_clean.png", "PNG", optimize=True)
+    print(f"火: {w2}x{h2} -> 1536x1024")
 
 
 if __name__ == "__main__":

@@ -550,20 +550,16 @@ SCENES = [
     {
         "key": "bonfire",
         "name": "篝火",
-        "stops": [
-            (0.00, (13, 8, 6)),
-            (0.45, (26, 15, 10)),
-            (0.75, (48, 24, 12)),
-            (1.00, (24, 12, 8)),
-        ],
-        "glow": {"color": (255, 159, 67), "center": (0.5, 0.86), "radius": 0.48, "peak": 120},
-        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 60},
-        "embers": {"count": 42, "color": (255, 190, 110), "seed": 0xB0E1},
+        # AI 生成底图 (元宝, 2026-08-04, 裁剪+压暗版): 写实篝火 + 白桦木堆。
+        # 裁剪后火焰偏右, 左侧留暗区; 整体压暗 60% 保对比度。
+        "ai_base": "bonfire_ai_cropped.png",
+        # 暗纱极强: 整个画面重度压暗, 只保留火焰辉光。
+        "veil": {"color": (0, 0, 0), "center": (0.5, 0.5), "radius": 0.80, "peak": 160},
         "palette": {
             "base": (26, 15, 10),
             "accent": (255, 159, 67),
-            "text_primary": (250, 244, 235),
-            "text_secondary": (199, 184, 166),
+            "text_primary": (240, 230, 215),  # 恢复亮色文字
+            "text_secondary": (195, 180, 165),
             "surface": ((0, 0, 0), 0.25),
             "surface_input": ((0, 0, 0), 0.38),
         },
@@ -624,19 +620,10 @@ SCENES = [
     {
         "key": "mountain",
         "name": "山",
-        "stops": [
-            (0.00, (43, 36, 64)),
-            (0.40, (86, 80, 115)),
-            (0.62, (139, 125, 158)),
-            (0.78, (199, 172, 178)),
-            (1.00, (62, 52, 82)),
-        ],
-        "glow": {"color": (240, 200, 170), "center": (0.5, 0.66), "radius": 0.4, "peak": 60},
-        "veil": {"color": (20, 16, 32), "center": (0.5, 0.46), "radius": 0.55, "peak": 40},
-        "ridges": [
-            {"base_y": 0.86, "amp": 0.10, "color": (52, 44, 74), "alpha": 235, "seed": 0xA01},
-            {"base_y": 0.97, "amp": 0.08, "color": (34, 28, 50), "alpha": 255, "seed": 0xA02},
-        ],
+        # AI 生成底图 (元宝, 2026-08-04): 写实山脊 + 云海 + 暖色落日。
+        # 替换原程序化山脊; 动效 (mountain_intensity) 仍由运行时 shader 渲染。
+        "ai_base": "mountain_ai_clean.png",
+        "veil": {"color": (15, 12, 28), "center": (0.5, 0.45), "radius": 0.60, "peak": 55},
         "palette": {
             "base": (86, 80, 115),
             "accent": (232, 192, 122),
