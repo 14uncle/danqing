@@ -550,15 +550,15 @@ SCENES = [
     {
         "key": "bonfire",
         "name": "篝火",
-        # AI 生成底图 (元宝, 2026-08-04, 裁剪+压暗版): 写实篝火 + 白桦木堆。
-        # 裁剪后火焰偏右, 左侧留暗区; 整体压暗 60% 保对比度。
-        "ai_base": "bonfire_ai_cropped.png",
-        # 暗纱极强: 整个画面重度压暗, 只保留火焰辉光。
-        "veil": {"color": (0, 0, 0), "center": (0.5, 0.5), "radius": 0.80, "peak": 160},
+        # AI 生成底图 (元宝, 2026-08-04 v2): 写实篝火 + 白桦木 teepee。
+        # 小火堆居中, 四周留暗保对比度。
+        "ai_base": "bonfire.png",
+        # 暗纱: 火焰区域压暗, 保对比度护栏 (大字 ≥3:1)。
+        "veil": {"color": (0, 0, 0), "center": (0.5, 0.42), "radius": 0.70, "peak": 110},
         "palette": {
             "base": (26, 15, 10),
             "accent": (255, 159, 67),
-            "text_primary": (240, 230, 215),  # 恢复亮色文字
+            "text_primary": (240, 230, 215),
             "text_secondary": (195, 180, 165),
             "surface": ((0, 0, 0), 0.25),
             "surface_input": ((0, 0, 0), 0.38),
@@ -622,7 +622,7 @@ SCENES = [
         "name": "山",
         # AI 生成底图 (元宝, 2026-08-04): 写实山脊 + 云海 + 暖色落日。
         # 替换原程序化山脊; 动效 (mountain_intensity) 仍由运行时 shader 渲染。
-        "ai_base": "mountain_ai_clean.png",
+        "ai_base": "mountain.png",
         "veil": {"color": (15, 12, 28), "center": (0.5, 0.45), "radius": 0.60, "peak": 55},
         "palette": {
             "base": (86, 80, 115),
@@ -638,7 +638,7 @@ SCENES = [
         "name": "森林",
         # AI 生成底图 (元宝, 2026-08-04): 写实松林 + 晨雾 + 暖色天光。
         # 替换原程序化三角形树; 动效 (forest_mist) 仍由运行时 shader 渲染。
-        "ai_base": "forest_yuanbao_clean.png",
+        "ai_base": "forest.png",
         # 渐变/光晕/暗纱仍保留, 用于统一风格与对比度护栏。
         "stops": [
             (0.00, (168, 185, 171)),
