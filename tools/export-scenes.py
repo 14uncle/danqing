@@ -622,7 +622,7 @@ SCENES = [
         # AI 生成底图 (元宝, 2026-08-04): 写实山脊 + 云海 + 暖色落日。
         # 替换原程序化山脊; 动效 (mountain_intensity) 仍由运行时 shader 渲染。
         "ai_base": "mountain.png",
-        "veil": {"color": (15, 12, 28), "center": (0.5, 0.45), "radius": 0.60, "peak": 55},
+        # 无暗纱: 原图落日亮度已足够。
         "palette": {
             "base": (86, 80, 115),
             "accent": (232, 192, 122),
