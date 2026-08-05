@@ -12,17 +12,24 @@
 - **动效适配**: 暗纱加强 (peak 95), forest_mist shader 无需改动
 - **迭代笔记**: 即梦版本水印去除困难,元宝更干净
 
-## 待生成
+## 待重新生成
 
-### 山 (待定)
-- **诊断**: 云雾+山画面浑浊, 云雾多层叠加糊了灰阶
-- **手术层级**: shader 参数修复 (不换图? 或换图?)
-- **状态**: 待确认是否需要 AI 底图
+### 山 ✅ (2026-08-04 通过)
+- **工具**: 元宝 AI
+- **提示词**: `Layered mountain ridgelines at sunset, cloud fog flowing between peaks, warm orange sunset glow at horizon, dark purple/indigo palette, misty atmosphere with depth, no text, no people, cinematic composition, 1536x1024`
+- **结果**: `assets/scenes/mountain_ai_clean.png` → `mountain.png`
+- **动效适配**: 双层云雾动效 (ec85f78): 主云海 Y=0.25-0.55 + 薄雾 Y=0.45-0.65
+- **迭代笔记**: v1 云海在上半部, 动效在下半部不匹配; 改为动效适配图 (双层云雾)
 
-### 火 (待定)
-- **诊断**: "说不出哪好哪坏"= 画面没有主角: 只有余烬, 没有木材堆
-- **手术**: 补主角: 余烬 → 完整篝火 + 爆裂声 + 火星
-- **状态**: 待 AI 底图生成
+### 火 ✅ (2026-08-04 通过)
+- **工具**: 元宝 AI
+- **提示词**: `Small campfire with stacked birch logs, centered composition, warm orange flames, glowing embers, dark forest background at night, lots of dark space around the fire, no text, no people, cinematic composition, 1536x1024`
+- **关键**: 火堆小一点、居中、四周留暗保对比度
+- **迭代笔记**: v1 裁剪破坏构图; v2 明火太大; v3 改为余烬/火炭概念 (无明火), 动效改为火星从炭堆升起
+- **结果**: `assets/scenes/bonfire_ai_3.png` → `bonfire.png`
+- **动效适配**: FIRE_CENTER.y 0.65→0.50, EMBER_SPAN 0.52→0.38, veil peak 65→45
+- **余烬聚焦**: EMBER_DENSITY 160→60, EMBER_SWAY 0.006→0.002, band收窄至x=0.25-0.50, EMBER_SPAN 0.38→0.15
+- **火星优化**: EMBER_SPEED 0.25→0.40 (加快), EMBER_RADIUS 0.006→0.004 (缩小), EMBER_COLOR→橙红色 (1.0,0.45,0.15)
 
 ## 提示词模板
 
