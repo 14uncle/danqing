@@ -60,10 +60,10 @@ def main():
     print(f"山: {w}x{h} -> 1536x1024")
 
     # 火: bottom-right "元宝 AI生成"
-    bonfire = Image.open(ASSETS_DIR / "bonfire_ai_2.png")
+    bonfire = Image.open(ASSETS_DIR / "bonfire_ai_3.png")
     w2, h2 = bonfire.size
     bonfire_clean = inpaint(bonfire, [
-        (w2-300, h2-100, w2, h2),  # bottom-right
+        (w2-450, h2-180, w2, h2),  # bottom-right (扩大区域)
     ])
     bonfire_clean = bonfire_clean.resize((1536, 1024), Image.LANCZOS)
     bonfire_clean.save(ASSETS_DIR / "bonfire_ai_clean.png", "PNG", optimize=True)
