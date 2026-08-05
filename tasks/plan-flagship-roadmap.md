@@ -140,11 +140,12 @@
   - [x] 星夜动效 spec — `docs/specs/pomodoro-scene-motion-starry.md`(13643cf, 329c1c9)
   - [x] 用户终审通过(星点数 188→47 用户裁定 / 独立明暗呼吸 / 夜风音效重做 b35c887, 2026-08-02 收尾)
   - [x] 免费/旗舰边界不变(免费=篝火 1 个)
+  - [x] 深邃银河升级 — Yale BSC5 星表 + AI 底图 + 暗星雾三层合成, 2026-08-04 用户终审通过 (plan-starry-milkyway.md Tasks 1-10)
 - **Verification:** `cargo test --example pomodoro` 全绿 + 用户终审 + benchmark 双门槛不破。
 - **Dependencies:** None(与 E/F/H 并行);场景开发范式参考 Task A 归档(山/森林终审)
-- **Files:** `examples/pomodoro/scenes.rs`, `examples/pomodoro/ambient.rs`, `examples/pomodoro/motion.rs`; `assets/scenes/starry.png`, `assets/audio/starry.ogg`; `docs/specs/pomodoro-scene-motion-starry.md`
+- **Files:** `examples/pomodoro/scenes.rs`, `examples/pomodoro/ambient.rs`, `examples/pomodoro/motion.rs`; `assets/scenes/starry.png`, `assets/audio/starry.ogg`; `docs/specs/pomodoro-scene-motion-starry.md`; `examples/pomodoro/starfield.rs`, `tools/export-stars.py`, `assets/stars.bin`
 - **Scope:** M(执行时含 4 场景, 收敛后仅星夜落地)
-- **Status:** ✅ 2026-08-01 收敛为 6 场景(630a7b4 删沙漠等), 星夜为第 6 场景完整落地; 2026-08-02 星夜收尾(b35c887)。**结论: 里程碑交付「星夜」一个极, 不做 9 场景**; 雪原/沙漠/云海如需重启须另立任务。
+- **Status:** ✅ 2026-08-01 收敛为 6 场景(630a7b4 删沙漠等), 星夜为第 6 场景完整落地; 2026-08-02 星夜收尾(b35c887); 2026-08-04 深邃银河升级终审通过(9c958b3→f58f46e, Tasks 1-10)。**结论: 里程碑交付「星夜」一个极, 不做 9 场景**; 雪原/沙漠/云海如需重启须另立任务。
 
 ## 战略决策(已定)
 

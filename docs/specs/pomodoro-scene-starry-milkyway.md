@@ -2,7 +2,7 @@
 
 - @author 十四叔
 - @date 2026/08/03
-- 状态: 待评审
+- 状态: ✅ 已通过用户终审 (2026-08-04)
 - 上位意图: `docs/intent/scene-atmosphere-upgrade.md`(2026-08-03 用户显式 yes)
 
 ## Objective
