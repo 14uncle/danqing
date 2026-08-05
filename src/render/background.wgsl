@@ -95,21 +95,23 @@ fn rain_overlay(uv: vec2<f32>, t: f32) -> f32 {
 const FIRE_W: f32 = 0.7853982;         // 2π/8: 动效基频角速度 (1/8 Hz)
 
 // 呼吸: 3 个正弦叠加 (2/8、3/8、5/8 Hz → 周期 4/2.67/1.6s) 叠出有机起伏。
-// 2026-08-04: AI 底图火堆居中 (y≈0.65), 调整锚点。
-const FIRE_CENTER: vec2<f32> = vec2<f32>(0.5, 0.65); // 光晕锚点 (居中火堆)
+// 2026-08-04: AI 底图余烬堆居中 (y≈0.50), 调整锚点。
+const FIRE_CENTER: vec2<f32> = vec2<f32>(0.5, 0.50); // 光晕锚点 (余烬堆中心)
 const FIRE_MASK_RADIUS: f32 = 0.48;    // 呼吸径向衰减半径 (uv)
 const FIRE_BREATH_GAIN: f32 = 0.08;    // 呼吸幅度上限 (乘性; 4% 实测不可读, 翻倍)
 
 // 余烬: 分列 hash, 每列一颗, 相位随机、速度全列一致 (保公共周期)。
-const EMBER_DENSITY: f32 = 160.0;      // 列密度 (960px 窗 ≈ 6px/列)
-const EMBER_SPEED: f32 = 0.25;         // 上浮速度 (循环/秒, 2/8; 一趟 ~4s)
-const EMBER_SPAN: f32 = 0.52;          // 行程: 自火床 (y≈0.86) 升至 y≈0.34 折返
-const EMBER_RADIUS: f32 = 0.0055;      // 点半径 (纵向 uv; 960px 窗 ≈ 7px 直径, 终审裁定)
-const EMBER_ASPECT: f32 = 1.5;         // 场景画布宽高比 (1536×1024), 圆点修正
-const EMBER_SWAY: f32 = 0.006;         // 横摆幅度 (uv ≈ 6px)
-const EMBER_BRIGHT: f32 = 0.85;        // 点亮度上限 (additive; 0.5 在亮橙辉光上对比不足)
-const EMBER_ON: f32 = 0.80;            // hash > 此值的列才有余烬 (~32 列, 带内 ~22-25 颗)
-const EMBER_COLOR: vec3<f32> = vec3<f32>(1.0, 0.78, 0.45); // 热黄 (对齐静态火星点的淡黄)
+const EMBER_DENSITY: f32 = 80.0;       // 列密度 (960px 窗 ≈ 12px/列; 加密, 增火星数)
+const EMBER_SPEED: f32 = 0.25;         // 上浮速度 (循环/秒; 放慢, 悠然浮动)
+const EMBER_Y: f32 = 0.598;            // 发射原点 y (0.50+100px≈0.098, 下移对齐柴堆底)
+const EMBER_SPAN: f32 = 0.345;         // 行程: 0.15+200px≈0.195, 升至 y≈0.253
+const EMBER_RADIUS: f32 = 0.0025;      // 点半径 (纵向 uv; 960px 窗 ≈ 3px 直径)
+const EMBER_HEIGHT_MIN: f32 = 1.3;     // 纵向拉伸最小倍率 (短余烬, 微椭)
+const EMBER_HEIGHT_MAX: f32 = 2.0;     // 纵向拉伸最大倍率 (长余烬, 尾部微翘)
+const EMBER_SWAY: f32 = 0.002;         // 横摆幅度 (uv ≈ 2px; 收窄, 聚焦柴堆)
+const EMBER_BRIGHT: f32 = 0.90;        // 点亮度上限 (additive; 略提亮)
+const EMBER_ON: f32 = 0.66;            // hash > 此值的列才有余烬 (~27 列, 带内 ~15-18 颗)
+const EMBER_COLOR: vec3<f32> = vec3<f32>(1.0, 0.28, 0.06); // 深红余烬色
 
 fn fire_flicker(t: f32) -> f32 {
     return 0.6 * sin(t * FIRE_W * 2.0)
@@ -125,6 +127,7 @@ fn fire_breath(uv: vec2<f32>, t: f32) -> f32 {
 }
 
 // 余烬层: 自底部升起, 横向轻摆, 随行程 (life) 淡出。
+// 形状: 纵向拉伸椭圆 (高>宽), 逐粒子随机高宽比 + 尖尾上翘, 模拟真实余烬。
 fn ember_layer(uv: vec2<f32>, t: f32) -> f32 {
     let col = floor(uv.x * EMBER_DENSITY);
     let rnd = rain_hash(col * 1.37 + 53.0); // 与雨不同种子, 避免位置相关
@@ -133,16 +136,19 @@ fn ember_layer(uv: vec2<f32>, t: f32) -> f32 {
     let k = 1.0 + floor(rnd * 3.0);
     let cx = (col + 0.5) / EMBER_DENSITY + sin(t * FIRE_W * k + rnd * 6.2831853) * EMBER_SWAY;
     let life = fract(t * EMBER_SPEED + rnd * 7.0); // 0=点燃(底部) → 1=熄灭(顶端)
-    let cy = FIRE_CENTER.y - life * EMBER_SPAN;
-    // 发射带收窄: 对齐静态图火星散布带 (中部偏右), 带外软裁。
-    let band = smoothstep(0.20, 0.35, cx) * (1.0 - smoothstep(0.75, 0.90, cx));
-    // 圆点 (宽高比修正); 亮度随行程衰减 + 低频闪烁 (4/8 Hz, 整数倍)。
-    let d = distance(
-        vec2<f32>(uv.x * EMBER_ASPECT, uv.y),
-        vec2<f32>(cx * EMBER_ASPECT, cy),
-    );
-    let spot = 1.0 - smoothstep(EMBER_RADIUS * 0.5, EMBER_RADIUS, d);
-    let fade = (1.0 - life) * (0.7 + 0.3 * sin(t * FIRE_W * 4.0 + rnd * 9.0));
+    let cy = EMBER_Y - life * EMBER_SPAN;
+    // 发射带: 聚焦柴堆区域, 带心 x≈0.38, 带外柔裁。
+    let band = smoothstep(0.24, 0.28, cx) * (1.0 - smoothstep(0.48, 0.57, cx));
+    // 逐粒子纵向拉伸倍率 (1.3~2.0 倍), 高宽比随 life 递增 (上翘尾)。
+    let hscale = mix(EMBER_HEIGHT_MIN, EMBER_HEIGHT_MAX, rnd);
+    let tail = 1.0 + life * 0.5; // 尾部微翘, 不过度拉伸
+    // 椭圆距离: dy 除以拉伸因子 → 纵向延伸, 横向保持 (水滴/余烬形)。
+    let dx = uv.x - cx;
+    let dy = (uv.y - cy) / (hscale * tail);
+    let d = sqrt(dx * dx + dy * dy);
+    let spot = 1.0 - smoothstep(EMBER_RADIUS * 0.4, EMBER_RADIUS, d);
+    // 亮度: 底部亮 → 顶部暗 (头部核心, 尾部余韵), 叠低频闪烁。
+    let fade = (1.0 - life * 0.6) * (0.7 + 0.3 * sin(t * FIRE_W * 4.0 + rnd * 9.0));
     return spot * on * band * fade * EMBER_BRIGHT;
 }
 
