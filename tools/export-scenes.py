@@ -553,8 +553,7 @@ SCENES = [
         # AI 生成底图 (元宝, 2026-08-04 v3): 写实余烬 + 白桦木堆, 无明火。
         # 火堆居中 (y≈0.50), 四周留暗保对比度。
         "ai_base": "bonfire.png",
-        # 暗纱: 轻度压暗, 保留余烬细节; 火焰极值由火焰本身提供, 不需过度压制。
-        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 45},
+        # 无暗纱: 原图亮度已足够, 暗纱会压暗余烬/火焰。
         "palette": {
             "base": (26, 15, 10),
             "accent": (255, 159, 67),
@@ -742,10 +741,11 @@ def build_scene(cfg: dict) -> Image.Image:
         img = Image.alpha_composite(img, build_embers(e["count"], e["color"], e["seed"]))
     if "mist" in cfg:
         img = Image.alpha_composite(img, build_mist(cfg["mist"]))
-    v = cfg["veil"]
-    img = Image.alpha_composite(
-        img, radial_overlay(v["color"], v["center"], v["radius"], v["peak"])
-    )
+    if "veil" in cfg:
+        v = cfg["veil"]
+        img = Image.alpha_composite(
+            img, radial_overlay(v["color"], v["center"], v["radius"], v["peak"])
+        )
     # 不烘焙颗粒: 运行时噪声叠加层 (assets/background/noise.png) 负责防抖带,
     # 与阶段 1 背景一致; 烘焙颗粒会让 PNG 体积膨胀约 4 倍。
     return img.convert("RGB")
