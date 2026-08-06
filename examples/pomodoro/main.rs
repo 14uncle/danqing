@@ -65,13 +65,13 @@ const SAVE_THROTTLE: Duration = Duration::from_secs(1);
 const FADE_EASING: Easing = Easing::EaseInOut;
 /// 设置面板卡片宽度。
 const SETTINGS_CARD_WIDTH: f32 = 300.0;
-/// 报告面板卡片宽度 (略宽于统计卡, 容纳近 12 月趋势)。
+/// 报告面板卡片宽度 (略宽于统计卡，容纳近 12 月趋势)。
 const REPORT_CARD_WIDTH: f32 = 360.0;
 /// 设置面板标题与关闭按钮间距。
 const SETTINGS_HEADER_GAP: f32 = 150.0;
 /// 设置面板步进器数值显示宽度。
 const STEPPER_VALUE_WIDTH: f32 = 72.0;
-/// 减号按钮相对标签的偏移量: 把 [-] 从标签右侧推开 15px (视觉微调)。
+/// 减号按钮相对标签的偏移量：把 [-] 从标签右侧推开 15px (视觉微调)。
 const STEPPER_MINUS_OFFSET: f32 = 15.0;
 
 /// 番茄钟应用状态。
@@ -100,18 +100,18 @@ struct PomodoroApp {
     today_date: String,
     /// 今日已自然完成的专注数 (skip 不计，跨日归零)。
     today_count: u32,
-    /// 环境音混音器 (纯逻辑: 淡化权重 × 暂停沉降包络)。
+    /// 环境音混音器 (纯逻辑：淡化权重 × 暂停沉降包络)。
     ambient_mixer: ambient::AmbientMixer,
-    /// 环境音播放器 (rodio 适配层: 懒初始化 + 双槽 + 静默降级)。
+    /// 环境音播放器 (rodio 适配层：懒初始化 + 双槽 + 静默降级)。
     ambient_player: ambient::AmbientPlayer,
     /// 全局环境音开关 (false = 静音所有场景音景)。
     sound_on: bool,
-    /// 场景动效沉降包络 (纯逻辑: 暂停 500ms 淡出 / 恢复淡入)。
+    /// 场景动效沉降包络 (纯逻辑：暂停 500ms 淡出 / 恢复淡入)。
     motion_envelope: motion::MotionEnvelope,
     /// 最近 tick 算出的动效包络值 (`background_frame` 只读)。
     motion_gain: f32,
     /// 雨钟 (秒): 雨丝下落时间轴。暂停时定格可见 (不随包络沉降),
-    /// 包络只推进本钟 — 暂停 500ms 减速冻结, 恢复 500ms 加速续走。
+    /// 包络只推进本钟 — 暂停 500ms 减速冻结，恢复 500ms 加速续走。
     rain_clock: f32,
     /// 窗口事件发送器 (run_app 启动时注入，App 借此控制窗口显隐 / 退出)。
     window_sender: Option<WindowEventSender>,
@@ -123,17 +123,17 @@ struct PomodoroApp {
     stats_open: bool,
     /// 年度报告面板是否打开 (旗舰版深度洞察)。
     report_open: bool,
-    /// 专注会话历史 (数据层: 自然完成的 Focus 记录)。
+    /// 专注会话历史 (数据层：自然完成的 Focus 记录)。
     history: FocusHistory,
-    /// 历史脏旗标: 完成记录后置位, 与状态共用 1Hz 节流落盘。
+    /// 历史脏旗标：完成记录后置位，与状态共用 1Hz 节流落盘。
     history_dirty: bool,
     /// 导出 CSV 结果提示 (Some = 显示中)。
     export_notice: Option<String>,
-    /// 提示过期时刻 (注入时间轴, now >= 此值后隐藏)。
+    /// 提示过期时刻 (注入时间轴，now >= 此值后隐藏)。
     export_notice_until: Duration,
     /// 面板关闭后要恢复焦点的按钮 id (一次性; 框架应用后经 [`App::focus_restored`] 清除)。
     restore_focus_to: Option<&'static str>,
-    /// 导出 CSV 是否已存在 (启动时查一次, 导出成功后置位; 控制「打开所在目录」按钮)。
+    /// 导出 CSV 是否已存在 (启动时查一次，导出成功后置位; 控制「打开所在目录」按钮)。
     export_file_exists: bool,
 }
 
@@ -174,7 +174,7 @@ enum Msg {
     ToggleReport,
     /// 切换全局环境音开/关 (静音所有场景音景)。
     ToggleSound,
-    /// 导出专注数据为 CSV (明文, 固定路径)。
+    /// 导出专注数据为 CSV (明文，固定路径)。
     ExportCsv,
     /// 打开导出 CSV 所在目录 (已导出过时可用)。
     OpenExportDir,
@@ -363,11 +363,11 @@ impl PomodoroApp {
 
     /// 将自然完成的专注写为会话记录 (每完成一条)。
     ///
-    /// 专注时长取计划时长 (自然完成 = 计时器从满量跑到 0, 实际专注恒等于计划,
-    /// 暂停冻结 remaining 不计入); 开始时刻由「完成时刻 - 计划时长」推得, 保证
+    /// 专注时长取计划时长 (自然完成 = 计时器从满量跑到 0, 实际专注恒等于计划，
+    /// 暂停冻结 remaining 不计入); 开始时刻由「完成时刻 - 计划时长」推得，保证
     /// 记录自洽 (focused ≤ completed - started)。huge overshoot 一次多条时按
     /// 完成时刻倒排错开 (i=0 为批次内最早), 轮次钳到 ≥1 (跨周期边界时无法还原
-    /// 上一周期的轮次, 不做越界值)。
+    /// 上一周期的轮次，不做越界值)。
     fn record_focus_sessions(&mut self, count: u8, round: u8) {
         let completed_ts = current_wall_secs();
         let planned_secs = self.timer.config().focus_secs;
@@ -388,25 +388,25 @@ impl PomodoroApp {
         self.history_dirty = true;
     }
 
-    /// 执行 CSV 导出并设置面板提示 (用户点击必须有可见反馈, 3s 后过期)。
+    /// 执行 CSV 导出并设置面板提示 (用户点击必须有可见反馈，3s 后过期)。
     /// `path = None` 表示无配置目录 (导出失败)。
-    /// 执行 CSV 导出并设置面板提示 (用户点击必须有可见反馈, 3s 后过期)。
+    /// 执行 CSV 导出并设置面板提示 (用户点击必须有可见反馈，3s 后过期)。
     /// `path = None` 表示无配置目录 (导出失败)。返回是否成功
     /// (供调用方决定是否在文件管理器中显示导出文件)。
     fn run_export_csv(&mut self, path: Option<std::path::PathBuf>) -> bool {
         let (ok, notice) = match path {
             Some(path) => match stats::export_csv_to(&path, &self.history) {
                 Ok(()) => {
-                    log::info!("专注数据已导出: {}", path.display());
-                    self.export_file_exists = true; // 已导出过: 显示「打开所在目录」按钮
+                    log::info!("专注数据已导出：{}", path.display());
+                    self.export_file_exists = true; // 已导出过：显示「打开所在目录」按钮
                     (true, "已导出 CSV ✓".to_string())
                 }
                 Err(reason) => {
-                    log::warn!("导出 CSV 失败: {reason}");
-                    (false, format!("导出失败: {reason}"))
+                    log::warn!("导出 CSV 失败：{reason}");
+                    (false, format!("导出失败：{reason}"))
                 }
             },
-            None => (false, "导出失败: 无配置目录".to_string()),
+            None => (false, "导出失败：无配置目录".to_string()),
         };
         self.export_notice = Some(notice);
         self.export_notice_until = self.now + Duration::from_secs(3);
@@ -443,7 +443,7 @@ impl App for PomodoroApp {
                 }
             }
             Msg::ToggleSettings => {
-                // 关闭设置面板: 焦点回到「设置」按钮 (一次性, 见 focus_request)。
+                // 关闭设置面板：焦点回到「设置」按钮 (一次性，见 focus_request)。
                 if self.settings_open {
                     self.restore_focus_to = Some("settings-button");
                 }
@@ -461,7 +461,7 @@ impl App for PomodoroApp {
                 self.timer.update_config(timer::TimerConfig::default());
             }
             Msg::ToggleStats => {
-                // 关闭统计面板: 焦点回到「统计」按钮 (一次性, 见 focus_request)。
+                // 关闭统计面板：焦点回到「统计」按钮 (一次性，见 focus_request)。
                 if self.stats_open {
                     self.restore_focus_to = Some("stats-button");
                 }
@@ -470,7 +470,7 @@ impl App for PomodoroApp {
                 self.stats_open = !self.stats_open;
             }
             Msg::ToggleReport => {
-                // 关闭报告面板: 焦点回到「报告」按钮 (一次性, 见 focus_request)。
+                // 关闭报告面板：焦点回到「报告」按钮 (一次性，见 focus_request)。
                 if self.report_open {
                     self.restore_focus_to = Some("report-button");
                 }
@@ -485,19 +485,19 @@ impl App for PomodoroApp {
                 let path = export_csv_path();
                 let exported = self.run_export_csv(path.clone());
                 if exported {
-                    // 导出成功: 在系统文件管理器中显示文件 (回答「导到哪了」)。
+                    // 导出成功：在系统文件管理器中显示文件 (回答「导到哪了」)。
                     if let Some(path) = path {
                         reveal_in_file_manager(&path);
                     }
                 }
             }
             Msg::OpenExportDir => {
-                // 已导出过的按钮: 直接打开导出文件所在目录 (文件若被外部删除则只记日志)。
+                // 已导出过的按钮：直接打开导出文件所在目录 (文件若被外部删除则只记日志)。
                 if let Some(path) = export_csv_path() {
                     if path.exists() {
                         reveal_in_file_manager(&path);
                     } else {
-                        log::warn!("导出文件不存在, 跳过打开目录: {}", path.display());
+                        log::warn!("导出文件不存在，跳过打开目录：{}", path.display());
                     }
                 }
             }
@@ -587,10 +587,10 @@ impl App for PomodoroApp {
             // 会话记录：每个自然完成记一条。专注时长取计划时长——自然完成意味着
             // 计时器从满量跑到 0 (暂停冻结 remaining), 实际专注恒等于计划时长;
             // 故无需逐帧累计 (dt 累加在 huge overshoot 下会把冻结/休息期摊进专注,
-            // 恢复中途的 started_ts 也不真实)。开始时刻由「完成 - 计划」推得, 记录自洽。
+            // 恢复中途的 started_ts 也不真实)。开始时刻由「完成 - 计划」推得，记录自洽。
             self.record_focus_sessions(report.focus_completions, report.completed_round);
         }
-        // 跨日归零 (1Hz 节流): 常驻应用过午夜后, 不等下次完成即刷新副标「今日 N」。
+        // 跨日归零 (1Hz 节流): 常驻应用过午夜后，不等下次完成即刷新副标「今日 N」。
         if self.now.saturating_sub(self.last_date_check) >= SAVE_THROTTLE {
             self.last_date_check = self.now;
             let today = today::today_string();
@@ -643,10 +643,10 @@ impl App for PomodoroApp {
             self.now,
         );
         self.ambient_player.apply(frame);
-        // 场景动效: 与音频同潮汐契约 — 运行全量, 暂停 500ms 沉降 (视觉独立时长)。
+        // 场景动效：与音频同潮汐契约 — 运行全量，暂停 500ms 沉降 (视觉独立时长)。
         self.motion_gain = self.motion_envelope.gain(self.timer.is_running(), self.now);
-        // 雨钟: 雨丝定格可见 (2026-07-29 用户裁定: 暂停显示雨丝, 不随包络沉降);
-        // 包络只推进下落时间 — 暂停 500ms 减速冻结, 恢复 500ms 加速续走, 无跳变。
+        // 雨钟：雨丝定格可见 (2026-07-29 用户裁定：暂停显示雨丝，不随包络沉降);
+        // 包络只推进下落时间 — 暂停 500ms 减速冻结，恢复 500ms 加速续走，无跳变。
         self.rain_clock += dt.as_secs_f32() * self.motion_gain;
     }
 
@@ -900,7 +900,7 @@ fn control_pill(t: SceneTheme) -> impl widget::Widget {
         ))
 }
 
-/// 全局环境音开关按钮: 文字随状态 (开/关), 颜色同步 (开 = accent 活动态, 关 = 次级色弱化)。
+/// 全局环境音开关按钮：文字随状态 (开/关), 颜色同步 (开 = accent 活动态，关 = 次级色弱化)。
 fn sound_toggle_button(t: SceneTheme) -> Button {
     Button::themed(
         &t,
@@ -925,7 +925,7 @@ fn sound_toggle_button(t: SceneTheme) -> Button {
     .on_click(|| Msg::ToggleSound)
 }
 
-/// 设置面板行: 全局环境音开关 (标签 + 状态按钮, 与步进行同款对齐)。
+/// 设置面板行：全局环境音开关 (标签 + 状态按钮，与步进行同款对齐)。
 fn sound_setting_row(t: SceneTheme) -> impl widget::Widget {
     Row::new()
         .cross_stretch()
@@ -935,7 +935,7 @@ fn sound_setting_row(t: SceneTheme) -> impl widget::Widget {
                 .font_size(t.font_size_body())
                 .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
         ))
-        // 与步进行的 [-] 占位对齐 (显式 height: 空 UiBox 撑满窗体会压扁行, 见 stepper_row 注释)。
+        // 与步进行的 [-] 占位对齐 (显式 height: 空 UiBox 撑满窗体会压扁行，见 stepper_row 注释)。
         .child(
             UiBox::new(Color::TRANSPARENT)
                 .width(STEPPER_MINUS_OFFSET)
@@ -1030,9 +1030,9 @@ fn stepper_row(
                 .font_size(t.font_size_body())
                 .bind_color(|s: &PomodoroApp| s.palette().text_secondary),
         ))
-        // 减号右移 STEPPER_MINUS_OFFSET: [-] 不贴标签, 与 [+][数值] 保持呼吸。
+        // 减号右移 STEPPER_MINUS_OFFSET: [-] 不贴标签，与 [+][数值] 保持呼吸。
         // 显式 height(1.0): 无子组件的 UiBox 未指定高度会取父约束上限 (Box::layout),
-        // 撑满窗体把步进行顶到窗体高 (回归: 设置卡片被撑到窗高只显示首行)。
+        // 撑满窗体把步进行顶到窗体高 (回归：设置卡片被撑到窗高只显示首行)。
         .child(
             UiBox::new(Color::TRANSPARENT)
                 .width(STEPPER_MINUS_OFFSET)
@@ -1081,8 +1081,8 @@ fn stats_panel(t: SceneTheme) -> impl widget::Widget {
     )
 }
 
-/// 统计面板导出操作区: 「导出 CSV」按钮 + (已导出过时)「打开所在目录」按钮。
-/// 用 Switcher 按 `export_file_exists` 切换: 未导出过只显示导出按钮,
+/// 统计面板导出操作区：「导出 CSV」按钮 + (已导出过时)「打开所在目录」按钮。
+/// 用 Switcher 按 `export_file_exists` 切换：未导出过只显示导出按钮，
 /// 已导出过并排显示两个 (导出 + 打开所在目录), 面板高度恒定。
 fn export_actions(t: SceneTheme) -> impl widget::Widget {
     Switcher::new()
@@ -1096,7 +1096,7 @@ fn export_actions(t: SceneTheme) -> impl widget::Widget {
         .bind(|s: &PomodoroApp| usize::from(s.export_file_exists))
 }
 
-/// 统计面板底部导出提示行: 固定高度, 无提示时留空 (面板高度恒定, 不抖动)。
+/// 统计面板底部导出提示行：固定高度，无提示时留空 (面板高度恒定，不抖动)。
 /// 点击「导出 CSV」后短暂显示结果 (成功 ✓ / 失败原因), 3s 后淡出。
 fn export_notice_row(t: SceneTheme) -> impl widget::Widget {
     UiBox::new(Color::TRANSPARENT)
@@ -1173,11 +1173,11 @@ fn export_csv_path() -> Option<std::path::PathBuf> {
 }
 
 /// 在系统文件管理器中显示导出文件 (回答「导到哪了」)。
-/// Win: Explorer 定位文件; mac: Finder 定位; 其它平台: 打开所在目录。
-/// 导出本身已成功, 此处失败只记日志, 不影响导出结果。
+/// Win: Explorer 定位文件; mac: Finder 定位; 其它平台：打开所在目录。
+/// 导出本身已成功，此处失败只记日志，不影响导出结果。
 fn reveal_in_file_manager(path: &std::path::Path) {
     if let Err(err) = reveal_attempt(path) {
-        log::warn!("在文件管理器中显示导出文件失败: {err}");
+        log::warn!("在文件管理器中显示导出文件失败：{err}");
     }
 }
 
@@ -1212,7 +1212,7 @@ fn current_year() -> u32 {
     chrono::Local::now().year() as u32
 }
 
-/// 年度报告面板浮层: 居中玻璃卡片, 旗舰版深度洞察
+/// 年度报告面板浮层：居中玻璃卡片，旗舰版深度洞察
 /// (当前年汇总 + 场景分布 + 近 12 月趋势)。
 fn report_panel(t: SceneTheme) -> impl widget::Widget {
     Stack::new().child(UiBox::new(t.scrim()).radius(0.0)).child(
@@ -1256,7 +1256,7 @@ fn section_label(t: SceneTheme, text: &'static str) -> impl widget::Widget {
         .bind_color(|s: &PomodoroApp| s.palette().text_secondary)
 }
 
-/// 报告面板标题行: "年度报告" + 旗舰角标 + 关闭按钮。
+/// 报告面板标题行："年度报告" + 旗舰角标 + 关闭按钮。
 fn report_header(t: SceneTheme) -> impl widget::Widget {
     Row::new()
         .cross_stretch()
@@ -1287,7 +1287,7 @@ fn report_header(t: SceneTheme) -> impl widget::Widget {
         )
 }
 
-/// 场景分布: 每个场景一行 (名 + 本年专注时长; 无记录显示 "—")。
+/// 场景分布：每个场景一行 (名 + 本年专注时长; 无记录显示 "—")。
 fn scene_distribution_rows(t: SceneTheme) -> impl widget::Widget {
     (0..SCENES.len()).fold(Column::new().gap(t.spacing_xs()), |col, idx| {
         col.child(scene_row(t, idx))
@@ -1311,7 +1311,7 @@ fn scene_row(t: SceneTheme, idx: usize) -> impl widget::Widget {
     })
 }
 
-/// 近 12 月趋势: 逐月一行 (YYYY-MM + 当月专注时长)。
+/// 近 12 月趋势：逐月一行 (YYYY-MM + 当月专注时长)。
 fn month_trend_rows(t: SceneTheme) -> impl widget::Widget {
     (0..12).fold(Column::new().gap(t.spacing_xs()), |col, idx| {
         col.child(trend_row(t, idx))
@@ -1371,7 +1371,7 @@ fn run() -> anyhow::Result<()> {
         None => PomodoroApp::new_default(),
     };
 
-    // 星野纹理启动烘焙: 真实星表 (Yale BSC5) → RGBA 位图, 与场景图同画布
+    // 星野纹理启动烘焙：真实星表 (Yale BSC5) → RGBA 位图，与场景图同画布
     // (1536×1024), shader 与场景纹理共用 Cover 裁剪 UV, 星点与山脊线对齐。
     // 常驻一张 ~6MB 纹理; 烘焙耗时计入启动门槛实测 (spec: 目标 <100ms)。
     let bake_start = std::time::Instant::now();
@@ -1379,7 +1379,7 @@ fn run() -> anyhow::Result<()> {
     let starfield_rgba =
         starfield::bake_starfield_rgba(&catalog, starfield::BAKE_WIDTH, starfield::BAKE_HEIGHT);
     log::info!(
-        "星野烘焙: {} 星 → {}x{}, 耗时 {:?}",
+        "星野烘焙：{} 星 → {}x{}, 耗时 {:?}",
         catalog.len(),
         starfield::BAKE_WIDTH,
         starfield::BAKE_HEIGHT,
@@ -1534,17 +1534,17 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.rain_intensity - 1.0).abs() < 1e-6,
-            "雨场景运行中雨效应全量: {}",
+            "雨场景运行中雨效应全量：{}",
             frame.rain_intensity
         );
         assert!(
             (frame.time - 1.4).abs() < 1e-6,
-            "动效时间应注入: {}",
+            "动效时间应注入：{}",
             frame.time
         );
         assert!(
             frame.rain_time > 0.0,
-            "运行中雨钟应推进: {}",
+            "运行中雨钟应推进：{}",
             frame.rain_time
         );
     }
@@ -1560,24 +1560,24 @@ mod tests {
         app.tick(&ctx);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
         app.tick(&ctx);
-        // 暂停 (2026-07-29 用户裁定): 雨丝定格可见 — 强度不沉降, 雨钟 500ms 内减速冻结。
+        // 暂停 (2026-07-29 用户裁定): 雨丝定格可见 — 强度不沉降，雨钟 500ms 内减速冻结。
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1650));
         app.tick(&ctx);
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.rain_intensity - 1.0).abs() < 1e-6,
-            "暂停边沿雨丝应全量可见: {}",
+            "暂停边沿雨丝应全量可见：{}",
             frame.rain_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
         app.tick(&ctx);
         let frozen = app.background_frame().expect("应有背景帧").rain_time;
-        assert!(frozen > 0.0, "雨钟应已推进过: {frozen}");
+        assert!(frozen > 0.0, "雨钟应已推进过：{frozen}");
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.rain_intensity - 1.0).abs() < 1e-6,
-            "暂停 500ms 后雨丝仍全量可见: {}",
+            "暂停 500ms 后雨丝仍全量可见：{}",
             frame.rain_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2400));
@@ -1585,23 +1585,23 @@ mod tests {
         let later = app.background_frame().expect("应有背景帧").rain_time;
         assert!(
             (later - frozen).abs() < 1e-6,
-            "暂停后雨钟应冻结: {frozen} -> {later}"
+            "暂停后雨钟应冻结：{frozen} -> {later}"
         );
-        // 恢复: 雨钟从冻结点续走, 无跳变 (边沿帧包络为 0, 次帧起升)。
+        // 恢复：雨钟从冻结点续走，无跳变 (边沿帧包络为 0, 次帧起升)。
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2900));
         app.tick(&ctx);
         let edge = app.background_frame().expect("应有背景帧").rain_time;
         assert!(
             (edge - frozen).abs() < 1e-6,
-            "恢复边沿帧应连续: {frozen} -> {edge}"
+            "恢复边沿帧应连续：{frozen} -> {edge}"
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(3400));
         app.tick(&ctx);
         let resumed = app.background_frame().expect("应有背景帧").rain_time;
         assert!(
             resumed > frozen,
-            "恢复后雨钟应从冻结点续走: {frozen} -> {resumed}"
+            "恢复后雨钟应从冻结点续走：{frozen} -> {resumed}"
         );
     }
 
@@ -1610,7 +1610,7 @@ mod tests {
         let mut app = PomodoroApp::new_default();
         app.last_save_at = Duration::from_secs(25 * 60);
         app.ambient_player.disable_for_test();
-        app.timer.toggle(app.now); // 运行中, 但场景是篝火 (非雨)
+        app.timer.toggle(app.now); // 运行中，但场景是篝火 (非雨)
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
         app.tick(&ctx);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
@@ -1624,7 +1624,7 @@ mod tests {
         let mut app = PomodoroApp::new_default();
         app.last_save_at = Duration::from_secs(25 * 60); // 防测试触发真实落盘
         app.ambient_player.disable_for_test(); // 防测试触碰音频设备
-        app.fader.switch_to(motion::BONFIRE_SCENE, app.now); // 默认场景即篝火, 显式锁定
+        app.fader.switch_to(motion::BONFIRE_SCENE, app.now); // 默认场景即篝火，显式锁定
         app.timer.toggle(app.now); // 开始计时
         // 场景淡化 (800ms) 完成后包络才开始走 (首次 tick 边沿), 再走满 500ms。
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
@@ -1634,7 +1634,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.fire_intensity - 1.0).abs() < 1e-6,
-            "篝火场景运行中火效应全量: {}",
+            "篝火场景运行中火效应全量：{}",
             frame.fire_intensity
         );
         assert_eq!(frame.rain_intensity, 0.0, "篝火场景雨效恒 0");
@@ -1651,14 +1651,14 @@ mod tests {
         app.tick(&ctx);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
         app.tick(&ctx);
-        // 暂停: 边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
+        // 暂停：边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1650));
         app.tick(&ctx);
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.fire_intensity - 1.0).abs() < 1e-6,
-            "暂停边沿帧应连续: {}",
+            "暂停边沿帧应连续：{}",
             frame.fire_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
@@ -1666,7 +1666,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.fire_intensity - 0.5).abs() < 1e-6,
-            "暂停沉降中点: {}",
+            "暂停沉降中点：{}",
             frame.fire_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2150));
@@ -1674,7 +1674,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             frame.fire_intensity.abs() < 1e-6,
-            "暂停 500ms 后火效应消失: {}",
+            "暂停 500ms 后火效应消失：{}",
             frame.fire_intensity
         );
     }
@@ -1684,7 +1684,7 @@ mod tests {
         let mut app = PomodoroApp::new_default();
         app.last_save_at = Duration::from_secs(25 * 60);
         app.ambient_player.disable_for_test();
-        app.fader.switch_to(motion::RAIN_SCENE, app.now); // 运行中, 但场景是雨 (非篝火)
+        app.fader.switch_to(motion::RAIN_SCENE, app.now); // 运行中，但场景是雨 (非篝火)
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
         app.tick(&ctx);
@@ -1709,7 +1709,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.sea_intensity - 1.0).abs() < 1e-6,
-            "海场景运行中海效应全量: {}",
+            "海场景运行中海效应全量：{}",
             frame.sea_intensity
         );
         assert_eq!(frame.rain_intensity, 0.0, "海场景雨效恒 0");
@@ -1727,14 +1727,14 @@ mod tests {
         app.tick(&ctx);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
         app.tick(&ctx);
-        // 暂停: 边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
+        // 暂停：边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1650));
         app.tick(&ctx);
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.sea_intensity - 1.0).abs() < 1e-6,
-            "暂停边沿帧应连续: {}",
+            "暂停边沿帧应连续：{}",
             frame.sea_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
@@ -1742,7 +1742,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.sea_intensity - 0.5).abs() < 1e-6,
-            "暂停沉降中点: {}",
+            "暂停沉降中点：{}",
             frame.sea_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2150));
@@ -1750,7 +1750,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             frame.sea_intensity.abs() < 1e-6,
-            "暂停 500ms 后海效应消失: {}",
+            "暂停 500ms 后海效应消失：{}",
             frame.sea_intensity
         );
     }
@@ -1784,7 +1784,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.mountain_intensity - 1.0).abs() < 1e-6,
-            "山场景运行中山效应全量: {}",
+            "山场景运行中山效应全量：{}",
             frame.mountain_intensity
         );
         assert_eq!(frame.rain_intensity, 0.0, "山场景雨效恒 0");
@@ -1804,14 +1804,14 @@ mod tests {
         app.tick(&ctx);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
         app.tick(&ctx);
-        // 暂停: 边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
+        // 暂停：边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1650));
         app.tick(&ctx);
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.mountain_intensity - 1.0).abs() < 1e-6,
-            "暂停边沿帧应连续: {}",
+            "暂停边沿帧应连续：{}",
             frame.mountain_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
@@ -1819,7 +1819,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.mountain_intensity - 0.5).abs() < 1e-6,
-            "暂停沉降中点: {}",
+            "暂停沉降中点：{}",
             frame.mountain_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2150));
@@ -1827,7 +1827,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             frame.mountain_intensity.abs() < 1e-6,
-            "暂停 500ms 后山效应消失: {}",
+            "暂停 500ms 后山效应消失：{}",
             frame.mountain_intensity
         );
     }
@@ -1861,7 +1861,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.forest_intensity - 1.0).abs() < 1e-6,
-            "森林场景运行中森林效应全量: {}",
+            "森林场景运行中森林效应全量：{}",
             frame.forest_intensity
         );
         assert_eq!(frame.rain_intensity, 0.0, "森林场景雨效恒 0");
@@ -1881,14 +1881,14 @@ mod tests {
         app.tick(&ctx);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
         app.tick(&ctx);
-        // 暂停: 边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
+        // 暂停：边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1650));
         app.tick(&ctx);
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.forest_intensity - 1.0).abs() < 1e-6,
-            "暂停边沿帧应连续: {}",
+            "暂停边沿帧应连续：{}",
             frame.forest_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
@@ -1896,7 +1896,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.forest_intensity - 0.5).abs() < 1e-6,
-            "暂停沉降中点: {}",
+            "暂停沉降中点：{}",
             frame.forest_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2150));
@@ -1904,7 +1904,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             frame.forest_intensity.abs() < 1e-6,
-            "暂停 500ms 后森林效应消失: {}",
+            "暂停 500ms 后森林效应消失：{}",
             frame.forest_intensity
         );
     }
@@ -1923,7 +1923,7 @@ mod tests {
         assert_eq!(frame.forest_intensity, 0.0, "非森林场景森林效恒 0");
     }
 
-    // ---- 星夜: 运行全量 / 暂停沉降 / 非星夜恒 0 ----
+    // ---- 星夜：运行全量 / 暂停沉降 / 非星夜恒 0 ----
 
     #[test]
     fn background_frame_carries_starry_motion_when_running_on_starry_scene() {
@@ -1940,7 +1940,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.starry_intensity - 1.0).abs() < 1e-6,
-            "星夜场景运行中星夜效应全量: {}",
+            "星夜场景运行中星夜效应全量：{}",
             frame.starry_intensity
         );
         assert_eq!(frame.rain_intensity, 0.0, "星夜场景雨效恒 0");
@@ -1961,14 +1961,14 @@ mod tests {
         app.tick(&ctx);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
         app.tick(&ctx);
-        // 暂停: 边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
+        // 暂停：边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1650));
         app.tick(&ctx);
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.starry_intensity - 1.0).abs() < 1e-6,
-            "暂停边沿帧应连续: {}",
+            "暂停边沿帧应连续：{}",
             frame.starry_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
@@ -1976,7 +1976,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.starry_intensity - 0.5).abs() < 1e-6,
-            "暂停沉降中点: {}",
+            "暂停沉降中点：{}",
             frame.starry_intensity
         );
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2150));
@@ -1984,7 +1984,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             frame.starry_intensity.abs() < 1e-6,
-            "暂停 500ms 后星夜效应消失: {}",
+            "暂停 500ms 后星夜效应消失：{}",
             frame.starry_intensity
         );
     }
@@ -2006,7 +2006,7 @@ mod tests {
 
     #[test]
     fn starry_base_persists_when_paused_on_starry_scene() {
-        // 雨场景范式: 基础星野按场景权重常驻 — 暂停时星夜效 (包络) 归零,
+        // 雨场景范式：基础星野按场景权重常驻 — 暂停时星夜效 (包络) 归零，
         // 但星野保持可见 (定格), 直到离开星夜场景。
         let mut app = PomodoroApp::new_default();
         app.last_save_at = Duration::from_secs(25 * 60);
@@ -2017,14 +2017,14 @@ mod tests {
         app.tick(&ctx);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
         app.tick(&ctx);
-        // 暂停: 边沿帧连续 (intensity 仍 1), +250ms 沉降 0.5, +500ms 归零; 星野全程 1。
+        // 暂停：边沿帧连续 (intensity 仍 1), +250ms 沉降 0.5, +500ms 归零; 星野全程 1。
         app.timer.toggle(app.now);
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
         app.tick(&ctx);
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.starry_intensity - 1.0).abs() < 1e-6,
-            "暂停边沿帧应连续: {}",
+            "暂停边沿帧应连续：{}",
             frame.starry_intensity
         );
         assert_eq!(frame.starry_base, 1.0, "暂停边沿星野常驻");
@@ -2033,7 +2033,7 @@ mod tests {
         let frame = app.background_frame().expect("应有背景帧");
         assert!(
             (frame.starry_intensity - 0.5).abs() < 1e-6,
-            "暂停沉降中点: {}",
+            "暂停沉降中点：{}",
             frame.starry_intensity
         );
         assert_eq!(frame.starry_base, 1.0, "星野不随包络沉降 (定格可见)");
@@ -2047,7 +2047,7 @@ mod tests {
 
     #[test]
     fn midnight_rollover_resets_today_count_without_completion() {
-        // 不等下次自然完成 (评审发现: 副标曾会显示昨天的「今日 N」)。
+        // 不等下次自然完成 (评审发现：副标曾会显示昨天的「今日 N」)。
         let mut app = PomodoroApp::new_default();
         app.today_date = "2020-01-01".into();
         app.today_count = 5;
@@ -2056,13 +2056,13 @@ mod tests {
         // 首次 tick (now=0) 距 last_date_check=0 不足 1s, 不触发检查。
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::ZERO);
         app.tick(&ctx);
-        assert_eq!(app.today_count, 5, "1s 节流未到, 不应检查");
-        // 1s 后: 触发跨日归零。
+        assert_eq!(app.today_count, 5, "1s 节流未到，不应检查");
+        // 1s 后：触发跨日归零。
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_secs(1));
         app.tick(&ctx);
         assert_eq!(app.today_count, 0, "跨午夜应主动归零");
         assert_eq!(app.today_date, today::today_string());
-        // 同日不再误清: 有计数后保持。
+        // 同日不再误清：有计数后保持。
         app.today_count = 2;
         let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_secs(2));
         app.tick(&ctx);
@@ -2129,7 +2129,7 @@ mod tests {
         assert_eq!(app.timer.config().focus_secs, 60);
     }
 
-    // === 数据层: 专注会话记录 (2026-08-01 里程碑 0 Task C) ===
+    // === 数据层：专注会话记录 (2026-08-01 里程碑 0 Task C) ===
 
     fn fresh_app_with_empty_history() -> PomodoroApp {
         let mut app = PomodoroApp::new_default();
@@ -2137,7 +2137,7 @@ mod tests {
         app
     }
 
-    /// 以 0.5s 步进从当前 now 继续推进 (模拟逐帧运行, 毫秒累加可测)。
+    /// 以 0.5s 步进从当前 now 继续推进 (模拟逐帧运行，毫秒累加可测)。
     fn advance(app: &mut PomodoroApp, by_secs: u64) {
         let step = Duration::from_millis(500);
         let target = app.now + Duration::from_secs(by_secs);
@@ -2163,7 +2163,7 @@ mod tests {
         assert_eq!(s.scene_index, 0);
         assert!(
             s.focused_secs.abs_diff(25 * 60) <= 2,
-            "专注时长≈计划时长: {}",
+            "专注时长≈计划时长：{}",
             s.focused_secs
         );
         assert!(s.started_ts > 0 && s.started_ts <= s.completed_ts);
@@ -2210,7 +2210,7 @@ mod tests {
         app.last_save_at = Duration::from_secs(60 * 60);
         app.ambient_player.disable_for_test();
         app.timer.toggle(app.now);
-        app.update(Msg::Skip); // skip 出 Focus: 不算完成, 不记录
+        app.update(Msg::Skip); // skip 出 Focus: 不算完成，不记录
         advance(&mut app, 60);
         assert!(app.history.sessions.is_empty(), "skip 不应产生会话记录");
     }
@@ -2237,8 +2237,8 @@ mod tests {
 
     #[test]
     fn huge_overshoot_records_each_completion_chronologically() {
-        // C2 回归: 单帧跨 2 个 Focus (F + B + F = 3300s)。每条必须自洽 (专注 = 计划时长),
-        // 轮次按时间序 [1, 2], 完成时刻单调, 不得把冻结/休息期摊进专注。
+        // C2 回归：单帧跨 2 个 Focus (F + B + F = 3300s)。每条必须自洽 (专注 = 计划时长),
+        // 轮次按时间序 [1, 2], 完成时刻单调，不得把冻结/休息期摊进专注。
         let mut app = fresh_app_with_empty_history();
         app.last_save_at = Duration::from_secs(10 * 3600);
         app.ambient_player.disable_for_test();
@@ -2257,7 +2257,7 @@ mod tests {
         for s in &app.history.sessions {
             assert!(
                 s.focused_secs <= s.completed_ts.saturating_sub(s.started_ts),
-                "记录必须自洽 (专注 ≤ 完成-开始): {}",
+                "记录必须自洽 (专注 ≤ 完成 - 开始): {}",
                 s.focused_secs
             );
         }
@@ -2265,7 +2265,7 @@ mod tests {
 
     #[test]
     fn completion_without_prior_running_frames_still_records() {
-        // I3 回归: 无 running+Focus 帧即完成 (如恢复 Paused+Focus 后立即跨终点),
+        // I3 回归：无 running+Focus 帧即完成 (如恢复 Paused+Focus 后立即跨终点),
         // 也必须记录 — 记录不依赖会话追踪。
         let mut app = fresh_app_with_empty_history();
         app.last_save_at = Duration::from_secs(10 * 3600);
@@ -2397,7 +2397,7 @@ mod tests {
             app.export_notice
                 .as_deref()
                 .is_some_and(|n| n == "已导出 CSV ✓"),
-            "成功导出应设置可见提示: {:?}",
+            "成功导出应设置可见提示：{:?}",
             app.export_notice
         );
         assert_eq!(
@@ -2419,14 +2419,14 @@ mod tests {
             app.export_notice
                 .as_deref()
                 .is_some_and(|n| n.starts_with("导出失败")),
-            "失败应设置含原因的提示: {:?}",
+            "失败应设置含原因的提示：{:?}",
             app.export_notice
         );
     }
 
     // === 设置面板布局回归 (2026-08-01) ===
 
-    /// 测试用主题 (任意调色板, 只验证布局几何)。
+    /// 测试用主题 (任意调色板，只验证布局几何)。
     fn test_theme() -> SceneTheme {
         SceneTheme::new(ScenePalette {
             base: Color::BLACK,
@@ -2484,8 +2484,8 @@ mod tests {
 
     #[test]
     fn stepper_row_height_tracks_content_not_window() {
-        // 回归: 减号前的 20px 占位 UiBox 若无显式高度, Box::layout 对未指定
-        // 维度取父约束上限 → 步进行被顶到窗体高, 设置卡片被撑到窗高只显示首行。
+        // 回归：减号前的 20px 占位 UiBox 若无显式高度，Box::layout 对未指定
+        // 维度取父约束上限 → 步进行被顶到窗体高，设置卡片被撑到窗高只显示首行。
         let t = test_theme();
         let mut row = danqing::widget::node(stepper_row(
             t,
@@ -2501,15 +2501,15 @@ mod tests {
         );
         assert!(
             size.height < 100.0,
-            "步进行高度应随内容 (控件高), 而非窗体高: {}",
+            "步进行高度应随内容 (控件高), 而非窗体高：{}",
             size.height
         );
     }
 
     #[test]
     fn scene_distribution_rows_cover_all_scenes() {
-        // 回归: 报告面板场景分布曾硬编码 5 行, 星夜 (index 5) 被漏。
-        // 行数必须与 SCENES 对齐, 新增场景时自动跟随。
+        // 回归：报告面板场景分布曾硬编码 5 行，星夜 (index 5) 被漏。
+        // 行数必须与 SCENES 对齐，新增场景时自动跟随。
         let t = test_theme();
         let node = danqing::widget::node(scene_distribution_rows(t));
         assert_eq!(
