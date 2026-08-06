@@ -624,39 +624,16 @@ SCENES = [
     {
         "key": "starry",
         "name": "星夜",
-        # 深靛蓝夜空 → 暗地; 中央保持暗, 保白字对比度。星点不烘焙 —
-        # 运行时由 shader 程序化渲染 (雨场景范式, starry_base 常驻)。
-        "stops": [
-            (0.00, (10, 12, 30)),
-            (0.45, (22, 26, 52)),
-            (0.72, (38, 42, 74)),
-            (1.00, (16, 18, 40)),
-        ],
-        "ridges": [
-            {"base_y": 0.88, "amp": 0.06, "color": (12, 14, 32), "alpha": 235, "seed": 0x501},
-            {"base_y": 0.97, "amp": 0.05, "color": (8, 9, 22), "alpha": 255, "seed": 0x502},
-        ],
-        "veil": {"color": (0, 0, 0), "center": (0.5, 0.48), "radius": 0.55, "peak": 50},
-        # 银河光带 + 尘埃暗隙 + 星点雾 (Task 7, spec: pomodoro-scene-starry-milkyway)。
-        # theta/shift/band_half/gc_px 与 export-stars.py 投影、background.wgsl
-        # galactic_py 同源 — Task 8 调参时三处同步, 不得只改一处。
-        "milkyway": {
-            "theta_deg": 60.0,      # = export-stars.py THETA_DEG
-            "shift": (0.0, -0.03),  # = export-stars.py SHIFT_X/Y
-            "band_half": 0.10,      # 跨带高斯半宽 (py) = wgsl HAZE_BAND
-            "gc_px": 45.0 / 260.0,  # 银心沿带坐标 = (0 - L_CENTER) / FOV_U
-            "along_falloff": 0.17,  # 沿带衰减 (px): 最亮段压银心 (UV.y≈0.32, 上 1/3)
-            "band_floor": 0.45,     # 远银心残余亮度 (带仍斜跨全天)
-            "peak_gain": 0.74,      # 光带峰值增益 (screen 提亮上限)
-            "core_color": (212, 208, 236),  # 带核心 (淡紫白, 冷)
-            "warm_color": (255, 226, 186),  # 银心暖调
-            "dust_offset": 0.025,   # 暗隙中线 py 偏移 (银道面一侧)
-            "dust_width": 0.045,    # 暗隙跨带宽度 (py)
-            "dust_strength": 1.0,  # 暗隙压暗强度
-            "warp_amp": 0.055,    # 中心线域扭曲幅度 (py): 破直边, 羽化带缘
-            "haze_count": 24000,    # 星点雾颗数 (单像素, 不可分辨)
-            "haze_alpha_max": 72,   # 星点雾增量封顶 (灰度防线: 不许可分辨亮星)
-            "seed": 0x57A9,
+        # AI 生成底图 (元宝, 2026-08-06): 银河光带左下→右上斜跨, 暗山脊剪影。
+        # 星点不烘焙 — 运行时由 shader 程序化渲染 (雨场景范式, starry_base 常驻)。
+        "ai_base": "starry_clean.png",
+        "palette": {
+            "base": (22, 26, 52),
+            "accent": (120, 140, 200),
+            "text_primary": (220, 225, 240),
+            "text_secondary": (160, 170, 200),
+            "surface": ((0, 0, 0), 0.25),
+            "surface_input": ((0, 0, 0), 0.38),
         },
         "palette": {
             "base": (22, 26, 52),

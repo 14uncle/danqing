@@ -28,6 +28,16 @@
 - **动效适配**: 无需改动 shader (雨丝全部程序化渲染); 加暗纱 (peak 75) 压中心亮度保对比度
 - **迭代笔记**: v1 有雨丝(与 shader 冲突)且无地面元素; v2 暴风云+树线剪影更佳
 
+### 星夜 ✅ (2026-08-06 底图升级)
+- **工具**: 元宝 AI
+- **提示词**: `Deep dark night sky with prominent milky way band stretching diagonally from lower-left to upper-right, rich galactic dust lanes and dark nebulae within the band, warm yellowish core glow in upper third, deep indigo/navy background (22,26,52), layered dark mountain silhouettes at bottom edge, no visible individual stars, no text, no people, no watermarks, atmospheric depth, cinematic composition, 1536x1024`
+- **结果**: `assets/scenes/starry_ai_1.png` → `starry_clean.png` → `starry.png`
+- **动效适配**: 无需改动 shader (星野/星闪/流星/星雾均为程序化, 不依赖底图几何)
+- **迭代笔记**: v1 银河层次丰富, 尘埃暗隙可辨; export-scenes.py 需改为 ai_base 模式; 水印在山脊+天空交界处, 纹理合成效果差, 改用周围暗色直接覆盖
+- **export-scenes.py 改动**: 星夜配置从 stops+ridges+veil+milkyway 改为 ai_base: "starry_clean.png"
+- **水印矩形参考**: 推荐尺寸 ≤350×120 (右下角) 或 ≤300×100 (底部中间); bonfire/forest 曾用 400×224 矩形偏大
+- **去水印方法**: 暗色场景 (starry/bonfire/forest) 用纯色覆盖比纹理合成更干净; `remove_watermark.py` 默认纹理合成适用于亮色/纹理复杂区域
+
 ## 待重新生成
 
 ### 山 ✅ (2026-08-04 通过)
@@ -66,6 +76,7 @@ atmospheric, moody, dark palette, depth of field, layered composition
 | 森林 | `misty pine forest, conifers, atmospheric fog, twilight` |
 | 山 | `mountain ridgelines, cloud fog, dusk, layered peaks` |
 | 火 | `bonfire campfire, embers, warm glow, dark forest background` |
+| 星夜 | `milky way, galactic dust lanes, deep indigo night sky, mountain silhouettes` |
 
 ## 迭代记录格式
 

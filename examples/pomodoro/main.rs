@@ -56,10 +56,6 @@ use tray::build_menu;
 /// 完成反馈视觉脉冲时长 (头部满 → 尾部透明)。
 const FLASH_DURATION: Duration = Duration::from_millis(600);
 
-/// 全局噪声叠加 (防抖带颗粒，复用阶段 1 资产)。
-const NOISE: &str = "assets/background/noise.png";
-/// 噪声叠加不透明度。
-const NOISE_OPACITY: f32 = 0.06;
 /// 场景交叉淡化时长 (spec: 600~1000ms)。
 const FADE_DURATION: Duration = Duration::from_millis(800);
 /// 持久化节流间隔：state_dirty 为 true 时，距上次保存超过此间隔才落盘。
@@ -1392,7 +1388,6 @@ fn run() -> anyhow::Result<()> {
 
     let background = BackgroundConfig::with_scenes(SCENES.iter().map(|s| s.image))
         .scale(ScaleMode::Cover)
-        .with_noise(NOISE, NOISE_OPACITY)
         .with_starfield(
             starfield_rgba,
             starfield::BAKE_WIDTH,
