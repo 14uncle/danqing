@@ -89,16 +89,12 @@ fn rain_overlay(uv: vec2<f32>, t: f32) -> f32 {
 }
 
 // ---- 篝火动效 (篝火场景) ----
-// 光晕呼吸 (乘性, 只起伏已有辉光) + 火星余烬上浮 (暖色 additive 圆点,
-// 形态对齐静态图已有火星点)。参数集中于本段, 调参只动这里。
+// UV 位移: 火焰区域采样坐标偏移, 底图纹理自身舞动 (参考 sea_swell 范式)。
+// 余烬粒子保留作为微量点缀。参数集中于本段, 调参只动这里。
 // 所有频率/速度取 1/8 Hz 整数倍, 与雨共用 8s 公共周期 (Rust 侧 MOTION_WRAP_SECS)。
 const FIRE_W: f32 = 0.7853982;         // 2π/8: 动效基频角速度 (1/8 Hz)
-
-// 呼吸: 3 个正弦叠加 (2/8、3/8、5/8 Hz → 周期 4/2.67/1.6s) 叠出有机起伏。
-// 2026-08-04: AI 底图余烬堆居中 (y≈0.50), 调整锚点。
-const FIRE_CENTER: vec2<f32> = vec2<f32>(0.5, 0.50); // 光晕锚点 (余烬堆中心)
-const FIRE_MASK_RADIUS: f32 = 0.48;    // 呼吸径向衰减半径 (uv)
-const FIRE_BREATH_GAIN: f32 = 0.08;    // 呼吸幅度上限 (乘性; 4% 实测不可读, 翻倍)
+const FIRE_CENTER: vec2<f32> = vec2<f32>(0.4093, 0.3315); // 位移中心 (火焰尖端)
+const FIRE_MASK_RADIUS: f32 = 0.03;    // 位移径向衰减半径 (uv, 只包住火焰尖)
 
 // 余烬: 分列 hash, 每列一颗, 相位随机、速度全列一致 (保公共周期)。
 const EMBER_DENSITY: f32 = 80.0;       // 列密度 (960px 窗 ≈ 12px/列; 加密, 增火星数)
@@ -112,19 +108,6 @@ const EMBER_SWAY: f32 = 0.002;         // 横摆幅度 (uv ≈ 2px; 收窄, 聚�
 const EMBER_BRIGHT: f32 = 0.90;        // 点亮度上限 (additive; 略提亮)
 const EMBER_ON: f32 = 0.66;            // hash > 此值的列才有余烬 (~27 列, 带内 ~15-18 颗)
 const EMBER_COLOR: vec3<f32> = vec3<f32>(1.0, 0.28, 0.06); // 深红余烬色
-
-fn fire_flicker(t: f32) -> f32 {
-    return 0.6 * sin(t * FIRE_W * 2.0)
-        + 0.3 * sin(t * FIRE_W * 3.0 + 1.7)
-        + 0.2 * sin(t * FIRE_W * 5.0 + 4.1);
-}
-
-// 光晕呼吸: 径向 mask × 低频起伏, 返回值域约 ±BREATH_GAIN。
-fn fire_breath(uv: vec2<f32>, t: f32) -> f32 {
-    let d = distance(uv, FIRE_CENTER);
-    let mask = 1.0 - smoothstep(FIRE_MASK_RADIUS * 0.4, FIRE_MASK_RADIUS, d);
-    return fire_flicker(t) * mask * FIRE_BREATH_GAIN;
-}
 
 // 余烬层: 自底部升起, 横向轻摆, 随行程 (life) 淡出。
 // 形状: 纵向拉伸椭圆 (高>宽), 逐粒子随机高宽比 + 尖尾上翘, 模拟真实余烬。
@@ -150,6 +133,20 @@ fn ember_layer(uv: vec2<f32>, t: f32) -> f32 {
     // 亮度: 底部亮 → 顶部暗 (头部核心, 尾部余韵), 叠低频闪烁。
     let fade = (1.0 - life * 0.6) * (0.7 + 0.3 * sin(t * FIRE_W * 4.0 + rnd * 9.0));
     return spot * on * band * fade * EMBER_BRIGHT;
+}
+
+// 火焰 UV 位移: 以火焰中心为原点, 多频正弦叠加造有机摇曳。
+// 采样坐标偏移 → 静态底图火焰纹理自身舞动 (参考 sea_swell 范式)。
+fn fire_sway(uv: vec2<f32>, t: f32) -> vec2<f32> {
+    let d = uv - FIRE_CENTER;
+    let r = length(d);
+    let radial_mask = 1.0 - smoothstep(FIRE_MASK_RADIUS * 0.3, FIRE_MASK_RADIUS, r);
+    // 纯横向摇曳: 火焰左右摆动。
+    let fx = sin(t * 0.785 * 2.0 + d.y * 10.0) * 0.4
+           + sin(t * 0.785 * 3.0 - d.x * 8.0 + 1.7) * 0.3
+           + cos(t * 0.785 * 5.0 + d.y * 12.0 + 4.1) * 0.2;
+    let fy = 0.0;
+    return vec2<f32>(fx, fy) * radial_mask * 0.006;
 }
 
 // ---- 海动效 (海场景) ----
@@ -483,6 +480,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // 场景 UV 位移: 海波涌动 (纵向) 作用于采样坐标本身; 位移随强度缩放,
     // 强度 0 时采样原坐标, 输出与静态逐像素一致。
     var sample_uv = in.uv;
+    if (u.fire_intensity > 0.0) {
+        sample_uv += fire_sway(in.uv, u.time) * u.fire_intensity;
+    }
     if (u.sea_intensity > 0.0) {
         sample_uv += vec2<f32>(0.0, sea_swell(in.uv, u.time) * u.sea_intensity);
     }
@@ -500,11 +500,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             color.a,
         );
     }
+    // 篝火: UV 位移已在 sample_uv 中应用 (fire_sway)。
+    // 底图火焰纹理自身舞动; 余烬粒子作为微量点缀 additive 叠加。
     if (u.fire_intensity > 0.0) {
-        // 呼吸乘性起伏已有辉光 (不改色相) + 余烬暖色 additive (线性空间)。
         color = vec4<f32>(
-            color.rgb * (1.0 + fire_breath(in.uv, u.time) * u.fire_intensity)
-                + EMBER_COLOR * ember_layer(in.uv, u.time) * u.fire_intensity,
+            color.rgb + EMBER_COLOR * ember_layer(in.uv, u.time) * u.fire_intensity,
             color.a,
         );
     }

@@ -46,6 +46,7 @@
 - **动效适配**: FIRE_CENTER.y 0.65→0.50, EMBER_SPAN 0.52→0.38, veil peak 65→45
 - **余烬聚焦**: EMBER_DENSITY 160→60, EMBER_SWAY 0.006→0.002, band收窄至x=0.25-0.50, EMBER_SPAN 0.38→0.15
 - **火星优化**: EMBER_SPEED 0.25→0.40 (加快), EMBER_RADIUS 0.006→0.004 (缩小), EMBER_COLOR→橙红色 (1.0,0.45,0.15)
+- **2026-08-06 UV 位移改造**: fire_breath(径向光晕) + ember_layer(粒子叠加) → fire_sway(UV 位移, 火焰纹理自身横向摇曳); FIRE_CENTER (0.42,0.38) 对齐火焰尖, FIRE_MASK_RADIUS 0.06 只包火焰; 余烬粒子保留为微量点缀
 
 ## 提示词模板
 
