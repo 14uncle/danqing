@@ -18,13 +18,13 @@ use crate::{Color, Constraints, LightTheme, Point, Rect, Size, Theme};
 
 /// LOGO 变体 — 标题栏程序化绘制。
 ///
-/// 每个应用有独立视觉标识, 不强制共享母 logo 结构。
+/// 每个应用有独立视觉标识，不强制共享母 logo 结构。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LogoKind {
     /// 母 logo: 玉色圆角框 + 右下角朱砂圆点破框 ("破框朱砂")。
     #[default]
     Default,
-    /// 番茄钟: 玉色外环 (计时轨道) + 朱砂时针 / 分针 + 轴心。
+    /// 番茄钟：玉色外环 (计时轨道) + 朱砂时针 / 分针 + 轴心。
     Pomodoro,
 }
 
@@ -166,11 +166,11 @@ pub struct TitleBar {
     area: Rect,
     /// 上次在非按钮区按下左键的时间与位置，用于识别双击最大化。
     last_left_press: Option<(Instant, Point)>,
-    /// 主题绑定: 设置后每帧 sync 重取流动色 (场景色调流动)。
+    /// 主题绑定：设置后每帧 sync 重取流动色 (场景色调流动)。
     theme_binding: Option<ThemeBinding>,
     /// 窗口当前是否最大化 (决定按钮绘制 □ 还是 □□)。
     is_maximized: bool,
-    /// 最大化状态绑定: 每帧从应用状态读取, 覆盖 `is_maximized`。
+    /// 最大化状态绑定：每帧从应用状态读取，覆盖 `is_maximized`。
     maximized_binding: Option<MaximizedBinding>,
 }
 
@@ -201,10 +201,10 @@ impl FlowingColors {
     }
 }
 
-/// 主题绑定闭包: 每帧从类型擦除的应用状态产出流动色 (与 `Button::bind_color` 同构)。
+/// 主题绑定闭包：每帧从类型擦除的应用状态产出流动色 (与 `Button::bind_color` 同构)。
 type ThemeBinding = std::boxed::Box<dyn Fn(&dyn Any) -> FlowingColors>;
 
-/// 最大化状态绑定闭包: 每帧从类型擦除的应用状态读取 `is_maximized`。
+/// 最大化状态绑定闭包：每帧从类型擦除的应用状态读取 `is_maximized`。
 type MaximizedBinding = std::boxed::Box<dyn Fn(&dyn Any) -> bool>;
 
 impl TitleBar {
@@ -225,7 +225,7 @@ impl TitleBar {
             margin: theme.spacing_md(),
             logo_size: theme.spacing_xl(),
             logo_gap: theme.spacing_sm(),
-            // 背景透明: 窗口渐变背景贯通到顶, 标题栏融入其中而非一条白带。
+            // 背景透明：窗口渐变背景贯通到顶，标题栏融入其中而非一条白带。
             bg: Color::TRANSPARENT,
             text_color: flowing.text_color,
             button_color: flowing.button_color,
@@ -234,7 +234,7 @@ impl TitleBar {
             button_bg_color: flowing.button_bg_color,
             logo_frame_color: flowing.logo_frame_color,
             logo_fill_color: flowing.logo_fill_color,
-            // 朱砂滴为品牌专属色,不随 theme token 变化。
+            // 朱砂滴为品牌专属色，不随 theme token 变化。
             logo_dot_color: BRAND_CINNABAR,
             logo_kind: LogoKind::default(),
             traffic_close_color: theme.traffic_close(),
@@ -258,7 +258,7 @@ impl TitleBar {
         }
     }
 
-    /// 绑定主题: 每帧从应用状态重取主题, 刷新随场景流动的颜色
+    /// 绑定主题：每帧从应用状态重取主题，刷新随场景流动的颜色
     /// (标题文字 / 按钮符号 / LOGO 框与填充); 其余规格 (尺寸、间距、
     /// 品牌色、红绿灯色) 保持构建时的主题值。
     pub fn bind_theme<S: 'static, T: Theme + 'static>(
@@ -274,7 +274,7 @@ impl TitleBar {
         self
     }
 
-    /// 绑定最大化状态: 每帧从应用状态读取 `is_maximized`, 决定按钮绘制
+    /// 绑定最大化状态：每帧从应用状态读取 `is_maximized`, 决定按钮绘制
     /// □ (最大化) 还是 □□ (还原)。
     ///
     /// 未绑定时默认 `false` (显示最大化图标 □)。
@@ -288,7 +288,7 @@ impl TitleBar {
         self
     }
 
-    /// 直接设置最大化状态 (用于不需要绑定的场景, 如测试)。
+    /// 直接设置最大化状态 (用于不需要绑定的场景，如测试)。
     pub fn set_maximized(&mut self, maximized: bool) {
         self.is_maximized = maximized;
     }
@@ -542,14 +542,14 @@ impl TitleBar {
                     return;
                 }
                 if self.is_maximized {
-                    // 还原图标: 居中完整方框 (前窗) + 右上角 ┌ 形折线 (后窗上边+右边),
-                    // 两条线在右上角汇合, 右边线较短, 暗示背后还有一个窗口。
+                    // 还原图标：居中完整方框 (前窗) + 右上角 ┌ 形折线 (后窗上边 + 右边),
+                    // 两条线在右上角汇合，右边线较短，暗示背后还有一个窗口。
                     let offset = extent * 0.55;
                     let corner_x = cx + extent + offset;
                     let corner_y = cy - extent - offset;
                     // 居中完整方框 (前窗)。
                     self.paint_hollow_square(rects, cx, cy, extent, thickness, color);
-                    // 上方水平线段: 从左 (略内缩) 到拐角点。
+                    // 上方水平线段：从左 (略内缩) 到拐角点。
                     rects.push_rect(
                         Rect::from_xywh(
                             cx - extent + offset,
@@ -560,7 +560,7 @@ impl TitleBar {
                         color,
                         half_thick,
                     );
-                    // 右侧垂直线段: 从拐角点向下, 长度较短。
+                    // 右侧垂直线段：从拐角点向下，长度较短。
                     let right_len = extent * 1.2 + 3.0;
                     rects.push_rect(
                         Rect::from_xywh(
@@ -693,7 +693,7 @@ impl Widget for TitleBar {
     }
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
-        // 背景条 (透明时跳过, 不浪费实例)。
+        // 背景条 (透明时跳过，不浪费实例)。
         if self.bg.a > 0.0 {
             rects.push_rect(area, self.bg, 0.0);
         }
@@ -716,7 +716,7 @@ impl Widget for TitleBar {
                 let fill_radius = (frame_radius - stroke).max(0.0);
                 rects.push_rect(fill_rect, self.logo_fill_color, fill_radius);
 
-                // 朱砂滴: 实心圆，骑跨右下角框线。
+                // 朱砂滴：实心圆，骑跨右下角框线。
                 let dot_size = logo_size * 0.258;
                 let dot_offset = logo_size * 0.781;
                 let dot_cx = logo_rect.origin.x + dot_offset;
@@ -733,7 +733,7 @@ impl Widget for TitleBar {
                 );
             }
             LogoKind::Pomodoro => {
-                // ── 番茄钟: 外环 + 时针 / 分针 (轴心下移) ──
+                // ── 番茄钟：外环 + 时针 / 分针 (轴心下移) ──
                 let cx = logo_rect.origin.x + logo_size * 0.5;
                 let cy = logo_rect.origin.y + logo_size * 0.5;
 
@@ -766,7 +766,7 @@ impl Widget for TitleBar {
                 // 指针轴心下移 12/256 ≈ 4.7%。
                 let py = cy + logo_size * 0.047;
 
-                // 分针 (长细, 3 点钟 = 15 分): 水平向右。
+                // 分针 (长细，3 点钟 = 15 分): 水平向右。
                 let min_len = logo_size * 0.234; // 60/256, 与 SVG 对齐
                 let min_thick = logo_size * 0.055; // dot-queue 最小可见粗度; 仍与环有间隙
                 self.push_axis_aligned_diagonal(
@@ -777,8 +777,8 @@ impl Widget for TitleBar {
                     self.logo_dot_color,
                 );
 
-                // 时针 (短粗, 11 点过 1/4 ≈ 22.5° 左偏); 对角线 dot-queue 比水平
-                // 更容易锯齿, 粗度需略大于 SVG 的 stroke-width=10 以保证可辨。
+                // 时针 (短粗，11 点过 1/4 ≈ 22.5° 左偏); 对角线 dot-queue 比水平
+                // 更容易锯齿，粗度需略大于 SVG 的 stroke-width=10 以保证可辨。
                 let hour_len = logo_size * 0.195; // 50/256
                 let hour_thick = logo_size * 0.07; // dot-queue 对角线最小可辨粗度
                 self.push_axis_aligned_diagonal(
@@ -1157,7 +1157,7 @@ mod tests {
 
     #[test]
     fn bound_theme_refreshes_flowing_colors_each_sync() {
-        // 场景色调流动: 标题栏构建于场景 0 的主题, 但每帧 sync 应随
+        // 场景色调流动：标题栏构建于场景 0 的主题，但每帧 sync 应随
         // 应用状态重取主题色 (否则亮场景下标题文字/按钮符号发虚)。
         struct AppState {
             alt: bool,

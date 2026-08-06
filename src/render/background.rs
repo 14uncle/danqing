@@ -1,13 +1,13 @@
 //! @author 十四叔
 //! @date 2026/07/19
 
-//! 窗口背景图渲染: 将 `assets/background/` 下的渐变 / 光晕 / 噪声图
+//! 窗口背景图渲染：将 `assets/background/` 下的渐变 / 光晕 / 噪声图
 //! 绘制在组件树之下。
 //!
-//! 当前支持一张主背景图与可选的光晕、噪声叠加图, 并提供 Stretch/Fit/Cover
-//! 三种缩放模式。多场景模式下, 场景图按 2 槽 LRU 懒加载:
+//! 当前支持一张主背景图与可选的光晕、噪声叠加图，并提供 Stretch/Fit/Cover
+//! 三种缩放模式。多场景模式下，场景图按 2 槽 LRU 懒加载：
 //! `new` 阶段只预读 PNG 字节 (~1MB), 真正上传为 wgpu 纹理推迟到 `set_frame`
-//! 调用时, 同时常驻最多 2 张 (`from` + `to` 跨淡化的两端)。
+//! 调用时，同时常驻最多 2 张 (`from` + `to` 跨淡化的两端)。
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -20,16 +20,16 @@ pub enum ScaleMode {
     /// 拉伸填满整个窗口 (可能改变宽高比)。
     #[default]
     Stretch,
-    /// 完整显示图片, 留白处显示清屏色。
+    /// 完整显示图片，留白处显示清屏色。
     Fit,
-    /// 等比缩放并裁切, 不留黑边。
+    /// 等比缩放并裁切，不留黑边。
     Cover,
 }
 
 /// 窗口背景配置。
 ///
 /// 由 `WindowConfig` 持有;`Context` 在初始化时读取并上传纹理。
-/// 多场景模式经 [`BackgroundConfig::with_scenes`] 配置,
+/// 多场景模式经 [`BackgroundConfig::with_scenes`] 配置，
 /// 未配置场景时回退到 `image` 单图路径 (行为与阶段 1 一致)。
 #[derive(Debug, Clone, Default)]
 pub struct BackgroundConfig {
@@ -41,9 +41,9 @@ pub struct BackgroundConfig {
     pub glow: Option<PathBuf>,
     /// 可选噪声叠加图路径 (通常为 `assets/background/noise.png`)。
     pub noise: Option<PathBuf>,
-    /// 星野纹理原始 RGBA8 字节与尺寸 (应用层启动时烘焙, 非 PNG 路径 — 与场景图
-    /// 同画布, shader 与场景纹理共用同一组 UV 采样)。
-    /// 未配置时绑 1×1 全黑回退纹理 (group 3 槽位恒可绑, 输出零贡献)。
+    /// 星野纹理原始 RGBA8 字节与尺寸 (应用层启动时烘焙，非 PNG 路径 — 与场景图
+    /// 同画布，shader 与场景纹理共用同一组 UV 采样)。
+    /// 未配置时绑 1×1 全黑回退纹理 (group 3 槽位恒可绑，输出零贡献)。
     pub starfield: Option<(Vec<u8>, (u32, u32))>,
     /// 主背景图缩放模式。
     pub scale: ScaleMode,
@@ -53,7 +53,7 @@ pub struct BackgroundConfig {
     pub noise_opacity: f32,
 }
 
-/// 每帧背景状态: 由 `App::background_frame` 产出, 驱动场景选择与交叉淡化。
+/// 每帧背景状态：由 `App::background_frame` 产出，驱动场景选择与交叉淡化。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BackgroundFrame {
     /// 淡化起点场景索引 (fade=0 时显示)。
@@ -64,17 +64,17 @@ pub struct BackgroundFrame {
     pub fade: f32,
     /// 本帧清屏色 (随场景基调流动)。
     pub clear_color: crate::Color,
-    /// 动效时间 (秒, 注入时间轴; 默认 0, 经 [`BackgroundFrame::with_motion`] 设置)。
+    /// 动效时间 (秒，注入时间轴; 默认 0, 经 [`BackgroundFrame::with_motion`] 设置)。
     pub time: f32,
-    /// 雨丝动效强度 (0.0 ..= 1.0; 默认 0 = 无动效, shader 输出与静态一致)。
+    /// 雨丝动效强度 (0.0 ..= 1.0; 默认 0 = 无动效，shader 输出与静态一致)。
     pub rain_intensity: f32,
-    /// 篝火动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨并存, 交叉淡化期间可同时非零)。
+    /// 篝火动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨并存，交叉淡化期间可同时非零)。
     pub fire_intensity: f32,
     /// 海动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火并存, 交叉淡化期间可同时非零)。
     pub sea_intensity: f32,
     /// 雨钟 (秒): 雨丝下落时间轴 + 山/森林雾漂移时间轴, 暂停时冻结 — 雨丝定格可见 (2026-07-29 用户裁定)。
-    /// 默认 0, 经 [`BackgroundFrame::with_rain_time`] 设置, 直接上传不取模
-    /// (山/森林 mist_pattern 需要连续时间, wrap 会每 8s 重置跳变; 雨层 fract 自带 wrap 无需额外处理)。
+    /// 默认 0, 经 [`BackgroundFrame::with_rain_time`] 设置，直接上传不取模
+    /// (山/森林 mist_pattern 需要连续时间，wrap 会每 8s 重置跳变; 雨层 fract 自带 wrap 无需额外处理)。
     pub rain_time: f32,
     /// 山动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火/海并存, 交叉淡化期间可同时非零)。
     pub mountain_intensity: f32,
@@ -82,8 +82,8 @@ pub struct BackgroundFrame {
     pub forest_intensity: f32,
     /// 星夜动效强度 (0.0 ..= 1.0; 默认 0 = 无动效; 与雨/火/海/山/森林并存, 交叉淡化期间可同时非零)。
     pub starry_intensity: f32,
-    /// 星夜基础星野强度 (0.0 ..= 1.0; 默认 0 = 无星; **按场景权重常驻**, 不含包络 — 暂停星野定格可见,
-    /// 雨场景范式: 静态图去星, 星野运行时程序化渲染)。
+    /// 星夜基础星野强度 (0.0 ..= 1.0; 默认 0 = 无星; **按场景权重常驻**, 不含包络 — 暂停星野定格可见，
+    /// 雨场景范式：静态图去星，星野运行时程序化渲染)。
     pub starry_base: f32,
 }
 
@@ -144,13 +144,13 @@ impl BackgroundFrame {
         self
     }
 
-    /// 设置星夜基础星野强度 (场景权重常驻, 不含包络); 强度夹到 0..1。
+    /// 设置星夜基础星野强度 (场景权重常驻，不含包络); 强度夹到 0..1。
     pub fn with_starry_base(mut self, starry_base: f32) -> Self {
         self.starry_base = starry_base.clamp(0.0, 1.0);
         self
     }
 
-    /// 设置雨钟 (雨丝下落时间轴, 秒); 推进/冻结节奏由调用方控制。
+    /// 设置雨钟 (雨丝下落时间轴，秒); 推进/冻结节奏由调用方控制。
     pub fn with_rain_time(mut self, rain_time: f32) -> Self {
         self.rain_time = rain_time;
         self
@@ -159,7 +159,7 @@ impl BackgroundFrame {
 
 /// 场景动效时间取模周期 (秒): 与 background.wgsl 雨/火/海效果频率的公共周期一致
 /// (雨丝速度 0.125/0.25/0.375、火/海效频率取 1/8 Hz 整数倍 → 公共周期 8s)。
-/// 上传 uniform 前取模, 避免常驻数小时后 f32 时间精度退化导致相位抖动。
+/// 上传 uniform 前取模，避免常驻数小时后 f32 时间精度退化导致相位抖动。
 const MOTION_WRAP_SECS: f32 = 8.0;
 
 /// 动效时间取模 (纯逻辑): 折回 `[0, MOTION_WRAP_SECS)`; 负值按欧几里得余数处理。
@@ -167,7 +167,7 @@ fn wrap_motion_time(time: f32) -> f32 {
     time.rem_euclid(MOTION_WRAP_SECS)
 }
 
-/// 将每帧背景状态解析为合法的场景索引对 (纯逻辑, 便于测试)。
+/// 将每帧背景状态解析为合法的场景索引对 (纯逻辑，便于测试)。
 ///
 /// 索引越界时夹到最后一个场景;场景数为 0 时返回 None (无背景可画)。
 fn resolve_frame(frame: BackgroundFrame, scene_count: usize) -> Option<(usize, usize, f32)> {
@@ -179,7 +179,7 @@ fn resolve_frame(frame: BackgroundFrame, scene_count: usize) -> Option<(usize, u
 }
 
 impl BackgroundConfig {
-    /// 使用指定主背景图创建配置, 其余为默认值。
+    /// 使用指定主背景图创建配置，其余为默认值。
     pub fn with_image(path: impl Into<PathBuf>) -> Self {
         Self {
             image: Some(path.into()),
@@ -187,7 +187,7 @@ impl BackgroundConfig {
         }
     }
 
-    /// 使用场景图列表创建配置 (多场景模式, 覆盖 `image`)。
+    /// 使用场景图列表创建配置 (多场景模式，覆盖 `image`)。
     pub fn with_scenes(paths: impl IntoIterator<Item = impl Into<PathBuf>>) -> Self {
         Self {
             scenes: paths.into_iter().map(Into::into).collect(),
@@ -222,7 +222,7 @@ impl BackgroundConfig {
     }
 }
 
-/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐, 覆盖 13 字段 × 4B 有效数据)。
+/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐，覆盖 13 字段 × 4B 有效数据)。
 pub(crate) const UNIFORM_BUFFER_BYTES: u64 = 64;
 
 /// 单个已上传的背景纹理。
@@ -239,20 +239,20 @@ struct BackgroundTexture {
 const LAYER_COUNT: usize = 3;
 /// 每层 quad 的顶点数。
 const VERTS_PER_LAYER: usize = 6;
-/// 场景纹理 LRU 容量: `from` + `to` 跨淡化的两端, 2 槽即够。
+/// 场景纹理 LRU 容量：`from` + `to` 跨淡化的两端，2 槽即够。
 const SCENE_CACHE_CAPACITY: usize = 2;
 
 /// 背景渲染管线。
 ///
-/// 每层使用独立的 uniform buffer 与顶点区段: `Queue::write_buffer`
-/// 在单次 submit 前统一生效, 同一帧内多次写同一块 buffer 时
-/// 只有最后一次写入可见, 因此跨 draw 复用会导致所有层参数相同。
+/// 每层使用独立的 uniform buffer 与顶点区段：`Queue::write_buffer`
+/// 在单次 submit 前统一生效，同一帧内多次写同一块 buffer 时
+/// 只有最后一次写入可见，因此跨 draw 复用会导致所有层参数相同。
 ///
 /// 场景层 (层 0) 绑定 from/to 两张场景图按 fade 交叉淡化;
-/// 单图与叠加层把同一张图绑到两个纹理槽, fade 恒 0。
+/// 单图与叠加层把同一张图绑到两个纹理槽，fade 恒 0。
 ///
 /// 场景纹理走 2 槽 LRU: `scene_bytes` 在 `new` 阶段全量预读 (~1MB),
-/// `device` / `queue` / `texture_layout` clone 持有用于按需创建纹理,
+/// `device` / `queue` / `texture_layout` clone 持有用于按需创建纹理，
 /// `scene_cache` + `lru_order` 实现按访问顺序的纹理驻留。
 pub struct BackgroundPipeline {
     pipeline: wgpu::RenderPipeline,
@@ -261,25 +261,25 @@ pub struct BackgroundPipeline {
     uniform_binds: [wgpu::BindGroup; LAYER_COUNT],
     /// 三层 quad 共用的顶点缓冲 (每层 [`VERTS_PER_LAYER`] 个顶点)。
     vertex_buf: wgpu::Buffer,
-    /// 场景图原始 PNG 字节 (按场景索引;`new` 阶段预读, 总量约 1MB)。
+    /// 场景图原始 PNG 字节 (按场景索引;`new` 阶段预读，总量约 1MB)。
     scene_bytes: Vec<Vec<u8>>,
-    /// 场景图原始尺寸 (供纹理创建时 `Extent3d` 使用, 与 `scene_bytes` 平行)。
+    /// 场景图原始尺寸 (供纹理创建时 `Extent3d` 使用，与 `scene_bytes` 平行)。
     scene_dims: Vec<(u32, u32)>,
     /// 场景纹理 LRU: 命中 [`SCENE_CACHE_CAPACITY`] 槽。
     scene_cache: HashMap<usize, BackgroundTexture>,
-    /// 场景访问顺序 (front = 最近, back = 最久未用, 淘汰时弹出 back)。
+    /// 场景访问顺序 (front = 最近，back = 最久未用，淘汰时弹出 back)。
     lru_order: VecDeque<usize>,
-    /// 设备句柄 (clone 持有, 用于按需创建纹理; wgpu 30 内部 Arc, clone 廉价)。
+    /// 设备句柄 (clone 持有，用于按需创建纹理; wgpu 30 内部 Arc, clone 廉价)。
     device: wgpu::Device,
-    /// 队列句柄 (clone 持有, 用于按需上传纹理)。
+    /// 队列句柄 (clone 持有，用于按需上传纹理)。
     queue: wgpu::Queue,
-    /// 纹理 bind group layout (clone 持有, 用于按需创建 bind group)。
+    /// 纹理 bind group layout (clone 持有，用于按需创建 bind group)。
     texture_layout: wgpu::BindGroupLayout,
-    /// 光晕叠加纹理 (单一资源, 启动时即用, 不进 LRU)。
+    /// 光晕叠加纹理 (单一资源，启动时即用，不进 LRU)。
     glow: Option<BackgroundTexture>,
-    /// 噪声叠加纹理 (单一资源, 启动时即用, 不进 LRU)。
+    /// 噪声叠加纹理 (单一资源，启动时即用，不进 LRU)。
     noise: Option<BackgroundTexture>,
-    /// 星野纹理 (启动时上传, 常驻): 配置缺失/非法时绑 1×1 全黑回退,
+    /// 星野纹理 (启动时上传，常驻): 配置缺失/非法时绑 1×1 全黑回退，
     /// 保证 group 3 槽位恒可绑 (shader 对星夜外场景 starry_base=0 零贡献)。
     starfield: BackgroundTexture,
     scale: ScaleMode,
@@ -289,7 +289,7 @@ pub struct BackgroundPipeline {
     frame: Option<BackgroundFrame>,
 }
 
-/// 单个顶点: 归一化位置 (0..1) + UV。
+/// 单个顶点：归一化位置 (0..1) + UV。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
@@ -326,7 +326,7 @@ impl BackgroundPipeline {
         let uniform_bufs: [wgpu::Buffer; LAYER_COUNT] = std::array::from_fn(|_| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("background uniform buffer"),
-                // WGSL uniform struct 自动 16-byte 对齐, 13×f32 = 52B 有效数据
+                // WGSL uniform struct 自动 16-byte 对齐，13×f32 = 52B 有效数据
                 // 被 WGSL 当作 64B 处理 (尾部 12B padding, shader 不读)。
                 // 常量 UNIFORM_BUFFER_BYTES 与 UNIFORM_FIELDS 一同被回归护栏覆盖
                 // (uniform_buffer_size_covers_wgsl_struct 测试)。
@@ -419,7 +419,7 @@ impl BackgroundPipeline {
             mapped_at_creation: false,
         });
 
-        // 场景路径列表: 多场景配置优先, 否则回退到单图路径。
+        // 场景路径列表：多场景配置优先，否则回退到单图路径。
         let scene_paths: Vec<&Path> = if !config.scenes.is_empty() {
             config.scenes.iter().map(PathBuf::as_path).collect()
         } else {
@@ -436,9 +436,9 @@ impl BackgroundPipeline {
                     scene_dims.push(dims);
                 }
                 None => {
-                    // 预读失败: 占位空字节保持索引对齐, ensure_loaded 静默
-                    // 跳过, draw 端走缺失分支降级 (clear_color 透出)。
-                    log::warn!("场景图预读失败, 该场景将不显示: {}", path.display());
+                    // 预读失败：占位空字节保持索引对齐，ensure_loaded 静默
+                    // 跳过，draw 端走缺失分支降级 (clear_color 透出)。
+                    log::warn!("场景图预读失败，该场景将不显示：{}", path.display());
                     scene_bytes.push(Vec::new());
                     scene_dims.push((0, 0));
                 }
@@ -452,7 +452,7 @@ impl BackgroundPipeline {
             .noise
             .as_deref()
             .and_then(|p| load_texture(device, queue, &texture_layout, p, "noise"));
-        // 星野: 配置的 RGBA 字节直接上传; 缺失/长度非法时回退 1×1 全黑。
+        // 星野：配置的 RGBA 字节直接上传; 缺失/长度非法时回退 1×1 全黑。
         let starfield = config
             .starfield
             .as_ref()
@@ -493,7 +493,7 @@ impl BackgroundPipeline {
 
     /// 写入应用层产出的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
     ///
-    /// 同时确保 `from` 和 `to` 两个场景的 GPU 纹理在 LRU 中 (按需创建,
+    /// 同时确保 `from` 和 `to` 两个场景的 GPU 纹理在 LRU 中 (按需创建，
     /// 必要时淘汰最久未用项); 这样 `draw` 可以假设两端纹理就绪。
     pub fn set_frame(&mut self, frame: BackgroundFrame) {
         self.frame = Some(frame);
@@ -503,16 +503,16 @@ impl BackgroundPipeline {
 
     /// 确保指定场景索引的 GPU 纹理在 LRU 中。
     ///
-    /// 命中: 刷新 LRU 顺序 (移到 front) 后返回。
-    /// 未命中: 从 `scene_bytes` decode 并创建 wgpu 纹理, 插入缓存;
-    /// 若缓存已满, 弹出 `lru_order` 尾部索引并丢弃其 `BackgroundTexture`
+    /// 命中：刷新 LRU 顺序 (移到 front) 后返回。
+    /// 未命中：从 `scene_bytes` decode 并创建 wgpu 纹理，插入缓存;
+    /// 若缓存已满，弹出 `lru_order` 尾部索引并丢弃其 `BackgroundTexture`
     /// (wgpu 通过 `Drop` 自动释放对应 GPU 资源)。
     fn ensure_loaded(&mut self, idx: usize) {
-        // 越界或预读失败的空字节: 静默跳过, draw 端处理缺失分支。
+        // 越界或预读失败的空字节：静默跳过，draw 端处理缺失分支。
         if idx >= self.scene_bytes.len() || self.scene_bytes[idx].is_empty() {
             return;
         }
-        // LRU 命中: 移到 front, 立即返回。
+        // LRU 命中：移到 front, 立即返回。
         if self.scene_cache.contains_key(&idx) {
             if let Some(pos) = self.lru_order.iter().position(|&i| i == idx) {
                 self.lru_order.remove(pos);
@@ -520,13 +520,13 @@ impl BackgroundPipeline {
             self.lru_order.push_front(idx);
             return;
         }
-        // 未命中: decode + 创建纹理 (PNG 字节在此才解码, 见 read_scene_bytes)。
+        // 未命中：decode + 创建纹理 (PNG 字节在此才解码，见 read_scene_bytes)。
         let bytes = self.scene_bytes[idx].clone();
         let dims = self.scene_dims[idx];
         let Some(tex) = self.create_scene_texture(&bytes, dims, idx) else {
-            // 解码失败: 置空槽位, 后续 ensure_loaded 走空字节静默守卫,
+            // 解码失败：置空槽位，后续 ensure_loaded 走空字节静默守卫，
             // 避免每帧重试解码 + 刷 warn 日志 (set_frame 是每帧调用的)。
-            // 字节不可变, 失败槽位永远不可能之后解码成功, 置空无损。
+            // 字节不可变，失败槽位永远不可能之后解码成功，置空无损。
             self.scene_bytes[idx] = Vec::new();
             return;
         };
@@ -543,7 +543,7 @@ impl BackgroundPipeline {
     }
 
     /// 从预读的 PNG 字节解码并创建 wgpu 纹理 (懒加载的实际解码上传)。
-    /// 解码失败返回 None (调用方跳过插入, draw 端走缺失分支降级)。
+    /// 解码失败返回 None (调用方跳过插入，draw 端走缺失分支降级)。
     fn create_scene_texture(
         &self,
         bytes: &[u8],
@@ -643,13 +643,13 @@ impl BackgroundPipeline {
         let Some((from, to, fade)) = resolve_frame(frame, self.scene_bytes.len()) else {
             return;
         };
-        // 懒加载保障: 调用方未通过 set_frame 预载 (如 showcase 的静态背景) 时,
+        // 懒加载保障：调用方未通过 set_frame 预载 (如 showcase 的静态背景) 时，
         // 首次 draw 自动触发纹理上传;ensure_loaded 命中即 no-op, 不会重复加载。
         self.ensure_loaded(from);
         self.ensure_loaded(to);
         // 场景层动效参数 (雨/火/海/山/森林/星夜强度 + 星野基础 + 动效时间 + 雨钟)。
         // time 取模 8s (雨/火/海/星闪频率对齐 MOTION_WRAP_SECS 公共周期);
-        // rain_time 不取模 (山/森林雾漂移 + 流星触发需要连续时间, 雨层 fract 自带 wrap)。
+        // rain_time 不取模 (山/森林雾漂移 + 流星触发需要连续时间，雨层 fract 自带 wrap)。
         let motion = [
             frame.rain_intensity,
             wrap_motion_time(frame.time),
@@ -688,8 +688,8 @@ impl BackgroundPipeline {
         pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
 
         // 层 0 场景 (from/to 交叉淡化) / 层 1 光晕 / 层 2 噪声
-        // LRU 缺失分支: set_frame 已尝试 ensure_loaded, 但越界或预读
-        // 失败仍可能留下空槽, 这里做优雅降级 — 单图无淡化, 缺则跳过。
+        // LRU 缺失分支：set_frame 已尝试 ensure_loaded, 但越界或预读
+        // 失败仍可能留下空槽，这里做优雅降级 — 单图无淡化，缺则跳过。
         let tex_from = self.scene_cache.get(&from);
         let tex_to = self.scene_cache.get(&to);
         if let (Some(tex_from), Some(tex_to)) = (tex_from, tex_to) {
@@ -697,11 +697,11 @@ impl BackgroundPipeline {
                 &mut pass, queue, target, 0, tex_from, tex_to, self.scale, 1.0, fade, motion,
             );
         } else if let Some(only) = tex_from.or(tex_to) {
-            // 仅一端就绪: 单图绘制, fade=0 (无淡化)
+            // 仅一端就绪：单图绘制，fade=0 (无淡化)
             self.draw_layer(
                 &mut pass, queue, target, 0, only, only, self.scale, 1.0, 0.0, motion,
             );
-        } // 两端都缺失: 不画场景层, 让 clear_color 透出
+        } // 两端都缺失：不画场景层，让 clear_color 透出
         if let Some(glow) = &self.glow {
             self.draw_layer(
                 &mut pass,
@@ -732,8 +732,8 @@ impl BackgroundPipeline {
         }
     }
 
-    /// 绘制单个叠加层: 上传该层顶点与 uniform, 绑定资源后绘制。
-    /// `motion` = [雨丝强度, 取模后的动效时间, 篝火强度, 海强度, 取模后的雨钟, 山强度, 森林强度], 仅场景层 (层 0) 非零。
+    /// 绘制单个叠加层：上传该层顶点与 uniform, 绑定资源后绘制。
+    /// `motion` = [雨丝强度，取模后的动效时间，篝火强度，海强度，取模后的雨钟，山强度，森林强度], 仅场景层 (层 0) 非零。
     #[allow(clippy::too_many_arguments)]
     fn draw_layer(
         &self,
@@ -749,10 +749,10 @@ impl BackgroundPipeline {
         motion: [f32; 9],
     ) {
         // 淡化要求 from/to 同尺寸 (场景生成管线保证统一画布);
-        // UV 按 from 纹理计算, 尺寸不一致时退回只画 from。
+        // UV 按 from 纹理计算，尺寸不一致时退回只画 from。
         let (tex_from, tex_to, fade) =
             if (tex_from.width, tex_from.height) != (tex_to.width, tex_to.height) {
-                log::warn!("场景图尺寸不一致, 跳过淡化");
+                log::warn!("场景图尺寸不一致，跳过淡化");
                 (tex_from, tex_from, 0.0)
             } else {
                 (tex_from, tex_to, fade)
@@ -772,15 +772,15 @@ impl BackgroundPipeline {
         pass.set_bind_group(1, &tex_from.bind_group, &[]);
         pass.set_bind_group(2, &tex_to.bind_group, &[]);
         // group 3 星野纹理恒绑 (未配置时为 1×1 全黑回退); 非星夜场景
-        // starry_base=0, shader 零贡献, 各层同绑无害。
+        // starry_base=0, shader 零贡献，各层同绑无害。
         pass.set_bind_group(3, &self.starfield.bind_group, &[]);
         let first = (layer * VERTS_PER_LAYER) as u32;
         pass.draw(first..first + VERTS_PER_LAYER as u32, 0..1);
     }
 
     /// 按缩放模式计算顶点与 UV, 写入指定层的顶点区段与 uniform buffer。
-    /// uniform 布局 (52B 有效, WGSL 16B 对齐为 64B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, 山强度, 森林强度, 星夜强度, 星夜基础, 屏宽, 屏高]。
-    /// buffer 实际创建 64B (与 WGSL 自动对齐一致, 尾部 12B 是 padding, shader 不读)。
+    /// uniform 布局 (52B 有效，WGSL 16B 对齐为 64B): [opacity, fade, 雨丝强度，动效时间，篝火强度，海强度，雨钟，山强度，森林强度，星夜强度，星夜基础，屏宽，屏高]。
+    /// buffer 实际创建 64B (与 WGSL 自动对齐一致，尾部 12B 是 padding, shader 不读)。
     #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
@@ -867,11 +867,11 @@ impl BackgroundPipeline {
     }
 }
 
-/// 读取场景 PNG 文件字节与尺寸 (尺寸从内存字节解析头, 不解码); 失败时返回 None。
+/// 读取场景 PNG 文件字节与尺寸 (尺寸从内存字节解析头，不解码); 失败时返回 None。
 ///
-/// 与 `load_texture` 不同: 本函数只读原始 PNG 字节 (5 场景合计 ~0.8MB),
-/// 不接触 wgpu 设备, 也不做 RGBA 解码 — 解码推迟到 `ensure_loaded`
-/// 懒加载路径, 避免启动期为 5 张图常驻 ~31MB 解码缓冲。
+/// 与 `load_texture` 不同：本函数只读原始 PNG 字节 (5 场景合计 ~0.8MB),
+/// 不接触 wgpu 设备，也不做 RGBA 解码 — 解码推迟到 `ensure_loaded`
+/// 懒加载路径，避免启动期为 5 张图常驻 ~31MB 解码缓冲。
 /// 尺寸与字节同源 (单次文件读取), 不存在两次读文件之间被替换的不一致窗口。
 fn read_scene_bytes(path: &Path) -> Option<(Vec<u8>, (u32, u32))> {
     let data = std::fs::read(path).ok()?;
@@ -917,7 +917,7 @@ fn load_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        // PNG 资产是 sRGB 编码图像, 采样须 sRGB→linear 解码。
+        // PNG 资产是 sRGB 编码图像，采样须 sRGB→linear 解码。
         format: wgpu::TextureFormat::Rgba8UnormSrgb,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
@@ -973,7 +973,7 @@ fn load_texture(
 ///
 /// 格式用 Rgba8Unorm 而非 Rgba8UnormSrgb: 星野字节是线性累加的强度权重
 /// (非 sRGB 编码图像), 采样不应再施加 sRGB→linear 解码 (会把中暗星
-/// 非线性压暗, 非线性交给 shader 显式表达)。
+/// 非线性压暗，非线性交给 shader 显式表达)。
 fn upload_rgba_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -1002,7 +1002,7 @@ fn upload_rgba_texture(
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        // 星野字节是线性权重, 直通不解码 (见函数 doc)。
+        // 星野字节是线性权重，直通不解码 (见函数 doc)。
         format: wgpu::TextureFormat::Rgba8Unorm,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
@@ -1052,7 +1052,7 @@ fn upload_rgba_texture(
     })
 }
 
-/// 星野缺省回退: 1×1 全黑纹理 (group 3 恒可绑, 输出零贡献)。
+/// 星野缺省回退：1×1 全黑纹理 (group 3 恒可绑，输出零贡献)。
 fn starfield_fallback(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -1243,7 +1243,7 @@ mod tests {
 
     #[test]
     fn with_mountain_is_independent_of_rain_fire_sea_forest() {
-        // 山是第五个并存标量 (与雨/火/海/森林并存, 交叉淡化期间可同时非零)。
+        // 山是第五个并存标量 (与雨/火/海/森林并存，交叉淡化期间可同时非零)。
         let c = crate::Color::BLACK;
         let f = BackgroundFrame::new(0, 0, 0.0, c)
             .with_motion(2.5, 0.4)
@@ -1261,7 +1261,7 @@ mod tests {
 
     #[test]
     fn with_rain_time_sets_clock_and_defaults_zero() {
-        // 雨钟独立于动效时间 (雨丝暂停定格可见, 走自己的冻结时间轴)。
+        // 雨钟独立于动效时间 (雨丝暂停定格可见，走自己的冻结时间轴)。
         let c = crate::Color::BLACK;
         let f = BackgroundFrame::new(0, 0, 0.0, c);
         assert_eq!(f.rain_time, 0.0, "雨钟默认 0 (静态一致)");
@@ -1282,7 +1282,7 @@ mod tests {
 
     #[test]
     fn uniform_buffer_size_covers_wgsl_struct() {
-        // 回归护栏: WGSL `Uniforms` struct 字段数 (UNIFORM_FIELDS) × 4B 必须
+        // 回归护栏：WGSL `Uniforms` struct 字段数 (UNIFORM_FIELDS) × 4B 必须
         // ≤ buffer 大小 (UNIFORM_BUFFER_BYTES),且 buffer 必须 16B 对齐
         // (WGSL uniform 规范)。这是 2026-07-30 山/森林动效漏改触发的护栏 —
         // 之前 buffer 留 32B 但 cast_slice 写 36B,wgpu 启动即 panic。
