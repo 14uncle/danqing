@@ -18,6 +18,10 @@ struct Uniforms {
     rain_time: f32,
     mountain_intensity: f32,
     forest_intensity: f32,
+    starry_intensity: f32,
+    starry_base: f32,
+    screen_w: f32,
+    screen_h: f32,
 }
 
 // ---- 雨幕 (雨场景; 静态图已去丝, 雨全部由本段程序化渲染) ----
@@ -85,41 +89,28 @@ fn rain_overlay(uv: vec2<f32>, t: f32) -> f32 {
 }
 
 // ---- 篝火动效 (篝火场景) ----
-// 光晕呼吸 (乘性, 只起伏已有辉光) + 火星余烬上浮 (暖色 additive 圆点,
-// 形态对齐静态图已有火星点)。参数集中于本段, 调参只动这里。
+// UV 位移: 火焰区域采样坐标偏移, 底图纹理自身舞动 (参考 sea_swell 范式)。
+// 余烬粒子保留作为微量点缀。参数集中于本段, 调参只动这里。
 // 所有频率/速度取 1/8 Hz 整数倍, 与雨共用 8s 公共周期 (Rust 侧 MOTION_WRAP_SECS)。
 const FIRE_W: f32 = 0.7853982;         // 2π/8: 动效基频角速度 (1/8 Hz)
-
-// 呼吸: 3 个正弦叠加 (2/8、3/8、5/8 Hz → 周期 4/2.67/1.6s) 叠出有机起伏。
-const FIRE_CENTER: vec2<f32> = vec2<f32>(0.5, 0.86); // 光晕锚点 (下部火床, 对齐静态图辉光)
-const FIRE_MASK_RADIUS: f32 = 0.48;    // 呼吸径向衰减半径 (uv)
-const FIRE_BREATH_GAIN: f32 = 0.08;    // 呼吸幅度上限 (乘性; 4% 实测不可读, 翻倍)
+const FIRE_CENTER: vec2<f32> = vec2<f32>(0.4093, 0.3315); // 位移中心 (火焰尖端)
+const FIRE_MASK_RADIUS: f32 = 0.03;    // 位移径向衰减半径 (uv, 只包住火焰尖)
 
 // 余烬: 分列 hash, 每列一颗, 相位随机、速度全列一致 (保公共周期)。
-const EMBER_DENSITY: f32 = 160.0;      // 列密度 (960px 窗 ≈ 6px/列)
-const EMBER_SPEED: f32 = 0.25;         // 上浮速度 (循环/秒, 2/8; 一趟 ~4s)
-const EMBER_SPAN: f32 = 0.52;          // 行程: 自火床 (y≈0.86) 升至 y≈0.34 折返
-const EMBER_RADIUS: f32 = 0.0055;      // 点半径 (纵向 uv; 960px 窗 ≈ 7px 直径, 终审裁定)
-const EMBER_ASPECT: f32 = 1.5;         // 场景画布宽高比 (1536×1024), 圆点修正
-const EMBER_SWAY: f32 = 0.006;         // 横摆幅度 (uv ≈ 6px)
-const EMBER_BRIGHT: f32 = 0.85;        // 点亮度上限 (additive; 0.5 在亮橙辉光上对比不足)
-const EMBER_ON: f32 = 0.80;            // hash > 此值的列才有余烬 (~32 列, 带内 ~22-25 颗)
-const EMBER_COLOR: vec3<f32> = vec3<f32>(1.0, 0.78, 0.45); // 热黄 (对齐静态火星点的淡黄)
-
-fn fire_flicker(t: f32) -> f32 {
-    return 0.6 * sin(t * FIRE_W * 2.0)
-        + 0.3 * sin(t * FIRE_W * 3.0 + 1.7)
-        + 0.2 * sin(t * FIRE_W * 5.0 + 4.1);
-}
-
-// 光晕呼吸: 径向 mask × 低频起伏, 返回值域约 ±BREATH_GAIN。
-fn fire_breath(uv: vec2<f32>, t: f32) -> f32 {
-    let d = distance(uv, FIRE_CENTER);
-    let mask = 1.0 - smoothstep(FIRE_MASK_RADIUS * 0.4, FIRE_MASK_RADIUS, d);
-    return fire_flicker(t) * mask * FIRE_BREATH_GAIN;
-}
+const EMBER_DENSITY: f32 = 80.0;       // 列密度 (960px 窗 ≈ 12px/列; 加密, 增火星数)
+const EMBER_SPEED: f32 = 0.25;         // 上浮速度 (循环/秒; 放慢, 悠然浮动)
+const EMBER_Y: f32 = 0.598;            // 发射原点 y (0.50+100px≈0.098, 下移对齐柴堆底)
+const EMBER_SPAN: f32 = 0.345;         // 行程: 0.15+200px≈0.195, 升至 y≈0.253
+const EMBER_RADIUS: f32 = 0.0025;      // 点半径 (纵向 uv; 960px 窗 ≈ 3px 直径)
+const EMBER_HEIGHT_MIN: f32 = 1.3;     // 纵向拉伸最小倍率 (短余烬, 微椭)
+const EMBER_HEIGHT_MAX: f32 = 2.0;     // 纵向拉伸最大倍率 (长余烬, 尾部微翘)
+const EMBER_SWAY: f32 = 0.002;         // 横摆幅度 (uv ≈ 2px; 收窄, 聚焦柴堆)
+const EMBER_BRIGHT: f32 = 0.90;        // 点亮度上限 (additive; 略提亮)
+const EMBER_ON: f32 = 0.66;            // hash > 此值的列才有余烬 (~27 列, 带内 ~15-18 颗)
+const EMBER_COLOR: vec3<f32> = vec3<f32>(1.0, 0.28, 0.06); // 深红余烬色
 
 // 余烬层: 自底部升起, 横向轻摆, 随行程 (life) 淡出。
+// 形状: 纵向拉伸椭圆 (高>宽), 逐粒子随机高宽比 + 尖尾上翘, 模拟真实余烬。
 fn ember_layer(uv: vec2<f32>, t: f32) -> f32 {
     let col = floor(uv.x * EMBER_DENSITY);
     let rnd = rain_hash(col * 1.37 + 53.0); // 与雨不同种子, 避免位置相关
@@ -128,17 +119,34 @@ fn ember_layer(uv: vec2<f32>, t: f32) -> f32 {
     let k = 1.0 + floor(rnd * 3.0);
     let cx = (col + 0.5) / EMBER_DENSITY + sin(t * FIRE_W * k + rnd * 6.2831853) * EMBER_SWAY;
     let life = fract(t * EMBER_SPEED + rnd * 7.0); // 0=点燃(底部) → 1=熄灭(顶端)
-    let cy = FIRE_CENTER.y - life * EMBER_SPAN;
-    // 发射带收窄: 对齐静态图火星散布带 (中部偏右), 带外软裁。
-    let band = smoothstep(0.20, 0.35, cx) * (1.0 - smoothstep(0.75, 0.90, cx));
-    // 圆点 (宽高比修正); 亮度随行程衰减 + 低频闪烁 (4/8 Hz, 整数倍)。
-    let d = distance(
-        vec2<f32>(uv.x * EMBER_ASPECT, uv.y),
-        vec2<f32>(cx * EMBER_ASPECT, cy),
-    );
-    let spot = 1.0 - smoothstep(EMBER_RADIUS * 0.5, EMBER_RADIUS, d);
-    let fade = (1.0 - life) * (0.7 + 0.3 * sin(t * FIRE_W * 4.0 + rnd * 9.0));
+    let cy = EMBER_Y - life * EMBER_SPAN;
+    // 发射带: 聚焦柴堆区域, 带心 x≈0.38, 带外柔裁。
+    let band = smoothstep(0.24, 0.28, cx) * (1.0 - smoothstep(0.48, 0.57, cx));
+    // 逐粒子纵向拉伸倍率 (1.3~2.0 倍), 高宽比随 life 递增 (上翘尾)。
+    let hscale = mix(EMBER_HEIGHT_MIN, EMBER_HEIGHT_MAX, rnd);
+    let tail = 1.0 + life * 0.5; // 尾部微翘, 不过度拉伸
+    // 椭圆距离: dy 除以拉伸因子 → 纵向延伸, 横向保持 (水滴/余烬形)。
+    let dx = uv.x - cx;
+    let dy = (uv.y - cy) / (hscale * tail);
+    let d = sqrt(dx * dx + dy * dy);
+    let spot = 1.0 - smoothstep(EMBER_RADIUS * 0.4, EMBER_RADIUS, d);
+    // 亮度: 底部亮 → 顶部暗 (头部核心, 尾部余韵), 叠低频闪烁。
+    let fade = (1.0 - life * 0.6) * (0.7 + 0.3 * sin(t * FIRE_W * 4.0 + rnd * 9.0));
     return spot * on * band * fade * EMBER_BRIGHT;
+}
+
+// 火焰 UV 位移: 以火焰中心为原点, 多频正弦叠加造有机摇曳。
+// 采样坐标偏移 → 静态底图火焰纹理自身舞动 (参考 sea_swell 范式)。
+fn fire_sway(uv: vec2<f32>, t: f32) -> vec2<f32> {
+    let d = uv - FIRE_CENTER;
+    let r = length(d);
+    let radial_mask = 1.0 - smoothstep(FIRE_MASK_RADIUS * 0.3, FIRE_MASK_RADIUS, r);
+    // 纯横向摇曳: 火焰左右摆动。
+    let fx = sin(t * 0.785 * 2.0 + d.y * 10.0) * 0.4
+           + sin(t * 0.785 * 3.0 - d.x * 8.0 + 1.7) * 0.3
+           + cos(t * 0.785 * 5.0 + d.y * 12.0 + 4.1) * 0.2;
+    let fy = 0.0;
+    return vec2<f32>(fx, fy) * radial_mask * 0.006;
 }
 
 // ---- 海动效 (海场景) ----
@@ -156,23 +164,31 @@ const SEA_MASK_TOP: f32 = 0.55;        // 位移区纵向软入起点 (uv.y, 波
 const SEA_MASK_FULL: f32 = 0.72;       // 软入终点 (以下全量)
 const SEA_SWELL_GAIN: f32 = 0.015;     // 位移幅度上限 (纵向 uv; 960x640 窗 ≈ ±9.6px)
 
-// 碎点: 分列 hash, 位置基本不动, 亮度低频明灭 (频率档位 {1,2}/8 Hz, 整数倍)。
+// 碎点: 分列 hash, 位置基本不动, 亮度低频明灭 (频率档位 {2,3,4}/8 Hz → 周期 4s/2.67s/2s, 同星夜)。
 const GLINT_DENSITY: f32 = 120.0;      // 列密度 (960px 窗 ≈ 8px/列)
-const GLINT_RADIUS: f32 = 0.004;       // 点半径 (纵向 uv; 960px 窗 ≈ 5px 直径)
+const GLINT_RADIUS: f32 = 0.005;       // 点半径 (纵向 uv; 960px 窗 ≈ 6px 直径)
 const GLINT_ASPECT: f32 = 1.5;         // 场景画布宽高比 (1536×1024), 圆点修正
-const GLINT_BAND_TOP: f32 = 0.72;      // 散布带上缘 (uv.y, 对齐静态图第一叠波带)
+const GLINT_BAND_TOP: f32 = 0.48;      // 散布带上缘 (uv.y, 对齐 AI 底图浪花带)
 const GLINT_BAND_SPAN: f32 = 0.26;     // 散布带纵向跨度 (至 uv.y ≈ 0.98)
-const GLINT_GAIN: f32 = 0.14;          // 点亮度上限 (乘性提亮; 0.30 目测突兀, 调参轮 1)
+const GLINT_GAIN: f32 = 0.22;          // 点亮度上限 (乘性提亮; 0.14 太隐, 0.30 目测突兀)
 const GLINT_ON: f32 = 0.88;            // hash > 此值的列才有碎点 (~14 颗)
+
+// 水汽: 浪花破碎带的飘散水雾 (additive, 低 alpha)。
+// 对齐 AI 底图浪花带 (Y≈0.42-0.58), 用 mist_pattern 生成飘动雾气。
+const SEA_MIST_Y: f32 = 0.55;          // 雾带中心 (uv.y, 靠近浪花线)
+const SEA_MIST_HALF: f32 = 0.08;       // 雾带半宽
+const SEA_MIST_ALPHA: f32 = 0.25;      // 峰值 alpha (加浓可见)
+const SEA_MIST_COLOR: vec3<f32> = vec3<f32>(0.75, 0.80, 0.82); // 淡青白, 匹配浪花水雾
 
 // 波带涌动位移场: 返回纵向采样偏移 (uv 单位, 值域约 ±SWELL_GAIN)。
 // 同一偏移施加于 from/to 两张场景图, 交叉淡化两端一致无跳变。
+// 2026-08-06: 改为从远(上)往近(下)行进 — 相位主轴 uv.y, 时间反向。
 fn sea_swell(uv: vec2<f32>, t: f32) -> f32 {
     let mask = smoothstep(SEA_MASK_TOP, SEA_MASK_FULL, uv.y);
     let depth = smoothstep(SEA_MASK_TOP, 1.0, uv.y); // 0 天空 → 1 底部, 近水动得多
-    // 相位含小 y 项: 相邻行位移不同步, 波峰不成直线 (水面感); 同向行进 (调参轮 2)。
-    let w1 = sin(6.2831853 * (2.0 * uv.x + 0.5 * uv.y) - t * SEA_W * 2.0);
-    let w2 = sin(6.2831853 * (3.5 * uv.x - 0.8 * uv.y) - t * SEA_W * 3.0 + 2.3);
+    // 相位主轴 uv.y (纵向), 小 x 项破横向对齐; +t 使波从远(上)往近(下)行进。
+    let w1 = sin(6.2831853 * (2.5 * uv.y + 0.3 * uv.x) + t * SEA_W * 2.0);
+    let w2 = sin(6.2831853 * (4.0 * uv.y - 0.5 * uv.x) + t * SEA_W * 3.0 + 2.3);
     return (0.6 * w1 + 0.4 * w2) * mask * (0.4 + 0.6 * depth) * SEA_SWELL_GAIN;
 }
 
@@ -184,8 +200,8 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
     // 列内 x 抖动避免网格感; y 落在散布带内 (常量, 不漂移)。
     let cx = (col + 0.3 + 0.4 * rnd) / GLINT_DENSITY;
     let cy = GLINT_BAND_TOP + GLINT_BAND_SPAN * rain_hash(col * 3.1 + 113.0);
-    // 明灭频率取档位 {1,2}/8 Hz (整数倍, 保 8s 公共周期); smoothstep 缓起缓落。
-    let k = 1.0 + floor(rnd * 2.0);
+    // 明灭频率取档位 {2,3,4}/8 Hz (整数倍, 保 8s 公共周期); smoothstep 缓起缓落。
+    let k = 2.0 + floor(rnd * 3.0);
     let s = 0.5 + 0.5 * sin(t * SEA_W * k + rnd * 6.2831853);
     let twinkle = s * s * (3.0 - 2.0 * s);
     // 软圆点 (宽高比修正, 同余烬范式); 宽羽化边缘 (0.15R 起软) 避免硬点突兀感。
@@ -195,6 +211,27 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
     );
     let spot = 1.0 - smoothstep(GLINT_RADIUS * 0.15, GLINT_RADIUS, d);
     return spot * on * twinkle * GLINT_GAIN;
+}
+
+// 水汽层: 浪花拍打处向上升起的水雾。
+// 用 haze_noise (双线性 value noise) 生成无结构感的絮状雾,
+// 采样 y 随时间上移模拟升腾。
+fn sea_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
+    let aspect = u.screen_w / max(u.screen_h, 1.0);
+    // 上升: 采样 y 随时间递减 → 雾团从浪花线向上漂浮。
+    let rise_speed = 0.015;
+    let sample_y = uv.y + t * rise_speed;
+    // 双层 noise: 低频定大势, 高频添碎屑。
+    let p1 = vec2<f32>(uv.x * aspect * 4.0, sample_y * 3.0);
+    let p2 = vec2<f32>(uv.x * aspect * 8.0, sample_y * 6.0);
+    let n = haze_noise(p1) * 0.65 + haze_noise(p2) * 0.35;
+    // 浓度: 靠近浪花线最浓, 向上渐淡。
+    let dist = uv.y - SEA_MIST_Y;
+    let rise_fade = smoothstep(0.18, 0.0, dist);
+    let base_fade = 1.0 - smoothstep(0.0, SEA_MIST_HALF, abs(uv.y - SEA_MIST_Y));
+    let x_fade = smoothstep(0.0, 0.12, uv.x) * smoothstep(1.0, 0.88, uv.x);
+    let density = n * rise_fade * base_fade * x_fade;
+    return SEA_MIST_COLOR * density * SEA_MIST_ALPHA;
 }
 
 // ---- 共享: 风驱雾纹 (sum-of-sines 伪噪声, 2D 各向同性, 不动采样坐标) ----
@@ -216,21 +253,39 @@ fn mist_pattern(uv: vec2<f32>, t: f32, speed: f32, scale: f32, phase: f32) -> f3
 }
 
 // ---- 山动效 (山场景) ----
-// 单层暖粉雾融入暮色。mask 0.50-0.88 集中在山脊上空。
-// alpha 0.22 (降自 0.45 — 山脊背景本已暖粉 ~170/255, additive 叠加后
-// 暖上加暖过饱和读作"黄沙"; 降 alpha 后雾薄融入不抢戏)。
-// scale 3.0 (升自 2.0, 雾团 ~125-320px 更细腻不读作"沙粒")。
-const MOUNTAIN_MIST_Y_TOP: f32 = 0.50;
-const MOUNTAIN_MIST_Y_FULL: f32 = 0.80;
-const MOUNTAIN_MIST_Y_END: f32 = 0.88;
-const MOUNTAIN_MIST_ALPHA: f32 = 0.30;
-const MOUNTAIN_MIST_COLOR: vec3<f32> = vec3<f32>(0.920, 0.650, 0.620);
+// 2026-08-04: 适配 AI 底图 (元宝生成山脊+云海)。
+// 图中云海在 Y=0.25-0.55 (山谷间), 山脊间薄雾在 Y=0.45-0.65。
+// 双层动效: 主云海 (缓慢流动) + 薄雾 (轻柔飘动), 颜色匹配图中粉紫色调。
+// alpha 克制, 增强而非遮盖现有云层。
+
+// 主云海: Y=0.25-0.55, 匹配图中云海位置
+const MOUNTAIN_CLOUD_Y_TOP: f32 = 0.25;
+const MOUNTAIN_CLOUD_Y_FULL: f32 = 0.40;
+const MOUNTAIN_CLOUD_Y_END: f32 = 0.55;
+const MOUNTAIN_CLOUD_ALPHA: f32 = 0.18;
+const MOUNTAIN_CLOUD_COLOR: vec3<f32> = vec3<f32>(0.850, 0.720, 0.750);  // 粉紫色, 匹配落日照射的云
+
+// 薄雾: Y=0.45-0.65, 山脊间的流动雾气
+const MOUNTAIN_MIST_Y_TOP: f32 = 0.45;
+const MOUNTAIN_MIST_Y_FULL: f32 = 0.55;
+const MOUNTAIN_MIST_Y_END: f32 = 0.65;
+const MOUNTAIN_MIST_ALPHA: f32 = 0.12;
+const MOUNTAIN_MIST_COLOR: vec3<f32> = vec3<f32>(0.780, 0.680, 0.720);  // 淡粉紫, 更透明
 
 fn mountain_ridge_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
-    let band = smoothstep(MOUNTAIN_MIST_Y_TOP, MOUNTAIN_MIST_Y_FULL, uv.y)
-             * (1.0 - smoothstep(MOUNTAIN_MIST_Y_END, 1.0, uv.y));
-    let p = mist_pattern(uv, t, 0.0625, 3.0, 0.0);
-    return MOUNTAIN_MIST_COLOR * p * band * MOUNTAIN_MIST_ALPHA;
+    // 主云海: 缓慢水平流动, 增强图中云层
+    let cloud_band = smoothstep(MOUNTAIN_CLOUD_Y_TOP, MOUNTAIN_CLOUD_Y_FULL, uv.y)
+                   * (1.0 - smoothstep(MOUNTAIN_CLOUD_Y_FULL, MOUNTAIN_CLOUD_Y_END, uv.y));
+    let cloud_p = mist_pattern(uv, t, 0.04, 2.5, 0.0);  // 更慢速度, 更大尺度
+    let cloud = MOUNTAIN_CLOUD_COLOR * cloud_p * cloud_band * MOUNTAIN_CLOUD_ALPHA;
+
+    // 薄雾: 轻柔飘动, 山脊间流动感
+    let mist_band = smoothstep(MOUNTAIN_MIST_Y_TOP, MOUNTAIN_MIST_Y_FULL, uv.y)
+                  * (1.0 - smoothstep(MOUNTAIN_MIST_Y_FULL, MOUNTAIN_MIST_Y_END, uv.y));
+    let mist_p = mist_pattern(uv, t, 0.0625, 3.0, 1.7);  // 标准速度, 加相位偏移
+    let mist = MOUNTAIN_MIST_COLOR * mist_p * mist_band * MOUNTAIN_MIST_ALPHA;
+
+    return cloud + mist;
 }
 
 // ---- 森林动效 (森林场景) ----
@@ -254,6 +309,125 @@ fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
     return FOREST_MIST_COLOR * pattern * band * FOREST_MIST_ALPHA;
 }
 
+// ---- 星夜动效 (星夜场景) ----
+// 雨场景范式: 静态图去星, 星野全部运行时渲染。
+// 2026-08-03 银河升级 (Task 5, spec: docs/specs/pomodoro-scene-starry-milkyway.md):
+// 星点布点从 48×28 hash 网格 (~100 颗均匀随机) 迁移到真实星表 (Yale BSC5,
+// 6743 颗, CPU 启动烘焙成 starfield_tex)。hash 网格常量 (SF_COLS/ROWS/ON/BIG/
+// WARM/ASPECT) 与 star_cell/star_color 随之退役; 山脊遮挡沿用 SF_BAND_BOT。
+// - 基础星野 (star_field): 采样星野纹理, 常驻 (starry_base = 场景权重, 暂停定格可见)。
+// - 星闪 (star_twinkle): 脉冲场调制纹理采样, 随 starry_intensity 沉降, {2,3,4}/8 Hz 档位。
+// - 流星 (meteor): 随 starry_intensity, rain_time 连续触发 (非 wrap 无跳变), 淡入淡出, 压暗。
+const STAR_W: f32 = 0.7853982;  // 2π/8: 动效基频角速度 (1/8 Hz)
+const SF_BAND_BOT: f32 = 0.80;  // 星带下缘 (山脊上方; 底图山脊 base_y 0.88/0.97, 留缓冲)
+const SF_TWINKLE_AMP: f32 = 0.42; // 星闪明暗双向摆动幅度 (±; 2026-08-02 用户裁定, 勿回调)
+const TW_COLS: f32 = 96.0;      // 星闪脉冲场网格列 (cell ≈16px @1536 画布)
+const TW_ROWS: f32 = 54.0;      // 星闪脉冲场网格行 (cell ≈19px @1024 高)
+
+// 山脊遮挡 mask: 星带下缘以下渐隐 (作用于星野与星闪)。
+fn star_band(y: f32) -> f32 {
+    return 1.0 - smoothstep(SF_BAND_BOT, SF_BAND_BOT + 0.04, y);
+}
+
+// 基础星野 (静态, 常驻): 采样 CPU 烘焙的真实星表纹理 — 位置/亮度/暖色全部
+// 来自星表 (Yale BSC5), 暂停时定格可见 (定格语义)。
+fn star_field(uv: vec2<f32>) -> vec3<f32> {
+    return textureSample(starfield_tex, starfield_smp, uv).rgb * star_band(uv.y);
+}
+
+// 星闪: 细网格脉冲场**调制**星野纹理采样 (不再自绘光点)。
+// cell ≈16×19px ≥ 亮星光点 (≤8px), 绝大多数格 ≤1 颗亮星 → 读作逐星明灭;
+// 亮星贴格边时两半可能不同步, 点径 ≤3px, 可接受。
+// 脉冲逻辑不变 (2026-08-02 裁定): {2,3,4}/8 Hz 档位 → 周期 4s/2.67s/2s;
+// 双极 sin [-1,1] ± SF_TWINKLE_AMP 明暗双向 (单向加亮读作「静态」)。
+fn star_twinkle(uv: vec2<f32>, t: f32) -> vec3<f32> {
+    let cell = vec2<f32>(floor(uv.x * TW_COLS), floor(uv.y * TW_ROWS));
+    let freq_h = rain_hash(cell.x * 19.0 + cell.y * 23.0 + 8.0);  // 独立 hash → 频率真随机
+    let phase_h = rain_hash(cell.x * 31.0 + cell.y * 47.0 + 9.0); // 独立 hash → 相位真随机
+    let k = 2.0 + floor(freq_h * 3.0);  // {2,3,4}/8 Hz
+    let pulse = sin(t * STAR_W * k + phase_h * 6.2831853);   // [-1,1] 双极: 明暗双向
+    let star = textureSample(starfield_tex, starfield_smp, uv).rgb;
+    return star * star_band(uv.y) * pulse * SF_TWINKLE_AMP;
+}
+
+// ---- 暗星雾 (star_haze): 银河「深邃」体量的来源 ----
+// 星表 (≤6.5 等) 给真实结构, 但肉眼银河的密度感主要来自无数暗星 ——
+// 这里用 value noise 生成连续雾密度 (非离散网格点阵, 避免像素画感),
+// 密度按银纬解析 mask 聚集 (b≈0 最密), 与星表亮星带、底图光带共用
+// 同一坐标系 (三层对齐)。
+// mask 常量与 tools/export-stars.py 的固定观测姿态互逆 (Task 8 对齐底图时
+// 两侧同步回填)。
+const HAZE_THETA: f32 = 1.0471976;          // 60° (弧度) = export-stars.py THETA_DEG
+const HAZE_SHIFT: vec2<f32> = vec2<f32>(0.0, -0.03); // = export-stars.py SHIFT_X/Y
+const HAZE_BAND: f32 = 0.10;     // 银纬半宽 (py 单位 ≈ 15° 银纬)
+
+// 银纬 proxy: UV → 逆旋转平面坐标 py (py=0 ⟺ 银道面)。
+// 与 export-stars.py 投影互逆: py=0 的位置只依赖 THETA+SHIFT (与 L_CENTER/FOV
+// 无关); 但 HAZE_BAND 的度数含义随 FOV_V (改 FOV_V 须联动带宽, Task 8 同步回填)。
+fn galactic_py(uv: vec2<f32>) -> f32 {
+    let rx = uv.x - 0.5 - HAZE_SHIFT.x;
+    let ry = 0.5 - uv.y + HAZE_SHIFT.y;
+    return -rx * sin(HAZE_THETA) + ry * cos(HAZE_THETA);
+}
+
+// 双线性 value noise: 在4个整数格点采样 hash, 双线性插值,
+// 输出 [0,1] 连续标量。无离散网格边界, 自然平滑。
+fn haze_noise(p: vec2<f32>) -> f32 {
+    let ix = floor(p.x);
+    let iy = floor(p.y);
+    let fx = fract(p.x);
+    let fy = fract(p.y);
+    // smoothstep 插值核: 三次 Hermite 消除格点处的导数不连续
+    let ux = fx * fx * (3.0 - 2.0 * fx);
+    let uy = fy * fy * (3.0 - 2.0 * fy);
+    let a = rain_hash(ix * 127.1 + iy * 311.7);
+    let b = rain_hash((ix + 1.0) * 127.1 + iy * 311.7);
+    let c = rain_hash(ix * 127.1 + (iy + 1.0) * 311.7);
+    let d = rain_hash((ix + 1.0) * 127.1 + (iy + 1.0) * 311.7);
+    return mix(mix(a, b, ux), mix(c, d, ux), uy);
+}
+
+// 暗星雾 (静态, 常驻): 用 value noise 生成连续雾密度, 沿银道面聚集。
+// 非离散点阵 — 避免网格结构造成的像素画/半调印刷感。
+// 挂 starry_base 与星野同生灭。
+fn star_haze(uv: vec2<f32>) -> vec3<f32> {
+    let band = 1.0 - smoothstep(HAZE_BAND, HAZE_BAND + 0.08, abs(galactic_py(uv)));
+    // 双层 noise 叠加: 低频定大势 (银河带宽), 高频添碎屑 (自然颗粒感)。
+    // 采样坐标乘以画布宽高比修正, 保证各向同性。
+    let aspect = u.screen_w / max(u.screen_h, 1.0);
+    let p = vec2<f32>(uv.x * aspect, uv.y);
+    let n1 = haze_noise(p * 8.0);      // 低频: ~192px 周期 (1536/8)
+    let n2 = haze_noise(p * 24.0) * 0.4; // 高频: ~64px 周期, 振幅衰减
+    let density = (n1 + n2) * band;    // 银纬调制
+    // 微蓝白 (暗星普遍偏冷), 亮度极低, 不闪 — 闪是亮星 (纹理层) 的事。
+    // 底图已含银河光带细节 (尘埃暗隙), haze 只在几乎不可见层面增加深空颗粒感,
+    // 勿喧宾夺主冲掉暗部层次。
+    return vec3<f32>(0.9, 0.93, 1.0) * density * 0.01 * star_band(uv.y);
+}
+
+// 流星: 周期性斜向流星 (rain_time 连续触发, ~24s 一颗, 存续 ~1.4s)。
+// 头部从右上斜向左下, 尾迹朝右上 (头部后方) 指数衰减; 淡入淡出, 压暗避免「爆闪」。
+const METEOR_PERIOD: f32 = 24.0;
+const METEOR_HEAD: f32 = 0.5;   // 头部亮度 (原 0.9 像爆闪灯, 压暗)
+
+fn meteor(uv: vec2<f32>, rt: f32) -> f32 {
+    let idx = floor(rt / METEOR_PERIOD);
+    let phase = rt - idx * METEOR_PERIOD;
+    if (phase >= 1.4) { return 0.0; }
+    let h = rain_hash(idx * 7.31 + 9.1);   // 该颗流星的水平位置 (确定性)
+    let life = phase / 1.4;
+    let head = vec2<f32>(0.80 - h * 0.50 - life * 0.28, 0.14 + h * 0.26 + life * 0.20);
+    let d = uv - head;
+    let dir = normalize(vec2<f32>(0.28, -0.20));   // 尾迹方向 (右上)
+    let along = dot(d, dir);
+    let perp = length(d - dir * along);
+    let trail = exp(-perp * 40.0) * exp(-clamp(along, 0.0, 4.0) * 5.0);
+    let core = exp(-dot(d, d) * 900.0);
+    // 淡入 (避免突然闪光) + 淡出; 整体压暗。
+    let appear = smoothstep(0.0, 0.25, life);
+    return (trail * 0.4 + core * METEOR_HEAD) * appear * (1.0 - life) * 0.9;
+}
+
 @group(0) @binding(0)
 var<uniform> u: Uniforms;
 
@@ -268,6 +442,15 @@ var tex_to: texture_2d<f32>;
 
 @group(2) @binding(1)
 var samp_to: sampler;
+
+// 星野纹理 (星夜场景): CPU 启动烘焙的真实星表星点层, 与场景图同画布,
+// 共用 in.uv 采样 (同一组 Cover 裁剪, 星点与山脊线像素级对齐)。
+// 未配置时 Rust 侧绑 1×1 全黑回退 — 本槽恒可绑。
+@group(3) @binding(0)
+var starfield_tex: texture_2d<f32>;
+
+@group(3) @binding(1)
+var starfield_smp: sampler;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -297,6 +480,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // 场景 UV 位移: 海波涌动 (纵向) 作用于采样坐标本身; 位移随强度缩放,
     // 强度 0 时采样原坐标, 输出与静态逐像素一致。
     var sample_uv = in.uv;
+    if (u.fire_intensity > 0.0) {
+        sample_uv += fire_sway(in.uv, u.time) * u.fire_intensity;
+    }
     if (u.sea_intensity > 0.0) {
         sample_uv += vec2<f32>(0.0, sea_swell(in.uv, u.time) * u.sea_intensity);
     }
@@ -314,11 +500,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             color.a,
         );
     }
+    // 篝火: UV 位移已在 sample_uv 中应用 (fire_sway)。
+    // 底图火焰纹理自身舞动; 余烬粒子作为微量点缀 additive 叠加。
     if (u.fire_intensity > 0.0) {
-        // 呼吸乘性起伏已有辉光 (不改色相) + 余烬暖色 additive (线性空间)。
         color = vec4<f32>(
-            color.rgb * (1.0 + fire_breath(in.uv, u.time) * u.fire_intensity)
-                + EMBER_COLOR * ember_layer(in.uv, u.time) * u.fire_intensity,
+            color.rgb + EMBER_COLOR * ember_layer(in.uv, u.time) * u.fire_intensity,
             color.a,
         );
     }
@@ -326,6 +512,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // 亮场景乘性碎点提亮 (不改色相); 涌动已在上方采样坐标中体现。
         color = vec4<f32>(
             color.rgb * (1.0 + sea_glints(in.uv, u.time) * u.sea_intensity),
+            color.a,
+        );
+        // 水汽: 浪花破碎带 additive 雾气, 增氛围。
+        color = vec4<f32>(
+            color.rgb + sea_mist(in.uv, u.rain_time) * u.sea_intensity,
             color.a,
         );
     }
@@ -345,6 +536,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // 参考雨场景改造范式)。 t 同上, 用 u.rain_time 避免 8s wrap 跳变。
         color = vec4<f32>(
             color.rgb + forest_mist(in.uv, u.rain_time) * u.forest_intensity,
+            color.a,
+        );
+    }
+    if (u.starry_base > 0.0 || u.starry_intensity > 0.0) {
+        // 星夜 (雨场景范式): 基础星野常驻 (starry_base = 场景权重, 暂停定格可见);
+        // 星闪 + 流星随 starry_intensity (包络×权重) 沉降, 暂停 500ms 回静态星野。
+        // 三层合成: 星表亮星 (纹理) + 暗星雾 (银纬聚集) 挂 starry_base;
+        // 星闪/流星挂 starry_intensity。
+        color = vec4<f32>(
+            color.rgb
+                + (star_field(in.uv) + star_haze(in.uv)) * u.starry_base
+                + (star_twinkle(in.uv, u.time) + vec3<f32>(meteor(in.uv, u.rain_time)))
+                    * u.starry_intensity,
             color.a,
         );
     }

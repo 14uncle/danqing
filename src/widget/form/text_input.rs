@@ -503,6 +503,15 @@ impl Widget for TextInput {
         true
     }
 
+    /// 重置焦点视觉: 与 FocusOut 同语义 (清聚焦/IME 合成/拖拽/光标),
+    /// 但隐藏面板收不到 FocusOut, 须主动清除 (面板隐藏时被容器调用)。
+    fn reset_focus(&mut self) {
+        self.focused = false;
+        self.preedit = None;
+        self.dragging = false;
+        self.caret_visible = false;
+    }
+
     fn selected_text(&self) -> Option<String> {
         self.editor.selected_text()
     }

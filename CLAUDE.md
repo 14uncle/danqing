@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 丹青 (danqing) 是一个 Rust 跨平台自绘 UI 框架,使用 `winit` 0.30 处理窗口与事件,`wgpu` 30 自绘,保留模式组件树。基础里程碑 M1~M3 与阶段 1(设计系统 + 品牌视觉)、阶段 2(专注陪伴 POC:番茄钟 × 场景沉浸美学)及后续补完均已关闭并归档到 `tasks/archive/`。
 
 - **当前分支**: `dev`(主分支 `master`)
-- **下一步**: 山/森林场景动效等待用户人工终审。之后候选:第二 POC 剪贴板历史管理器(效率工具族,美学剂量低于专注陪伴族)。**未获用户指示时不要启动新 POC**。
+- **战略**: 2026-08-01 interview-me 确认「著作型旗舰」十年战略(专注陪伴系统 × 十年建造史),见 `docs/intent/companion-flagship.md` + `tasks/plan-flagship-roadmap.md`。里程碑 0「旗舰化第一刀」已完成:山/森林动效终审通过(2026-08-01)、付费边界 spec 确认、数据层 MVP、建造实录三篇草稿。剪贴板降级为引擎复用验证顺延。**未获用户指示时不要启动新 POC**。
 - **性能门槛**: 启动 ≤1s、常驻内存 WS ≤360MB(核显记账);测量用 `tools/benchmark.ps1`。
 
 > 详细架构见 `docs/CONTEXT/architecture.md`;场景动效开发范式见 `docs/CONTEXT/scenes-guidelines.md`。
@@ -74,10 +74,29 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 - 公开 API 一律经 `src/lib.rs` re-export,不暴露深层模块路径给用户。
 - 所有公共类型/函数写中文文档注释;内部实现用英文命名。
 - 新增 `.rs` 文件头必须包含 `//! @author 十四叔` 与 `//! @date yyyy/MM/dd`。
-- 提交前必须: `cargo fmt` + `cargo clippy -- -D warnings` + `cargo test --lib --tests` 全绿。
+- 提交前必须: `cargo fmt` + `cargo clippy -- -D warnings` + `cargo test --lib --tests` 全绿。可用 `Workflow({name: "pre-commit"})` 自动化三件套。
 - 新增组件必须出现在 `examples/showcase.rs` 中(以用代测)。
 - `widget/`、`layout.rs`、`event.rs`、`text/` 保持纯逻辑;平台/GPU 代码只出现在 `window/` 与 `render/`。
 - 阶段 1 组件使用 `src/theme.rs` token,避免魔法颜色/圆角/阴影值。
+
+## Context loading
+
+按任务类型加载上下文,避免一次加载所有文档——聚焦上下文胜过大量上下文。
+
+| 任务类型 | 必须加载 | 可选(深入时加载) | 相关 Memory |
+|----------|----------|-------------------|-------------|
+| **旗舰/十年战略**(数据层/建造实录/付费边界) | `docs/intent/companion-flagship.md` + `tasks/plan-flagship-roadmap.md` | `docs/specs/companion-flagship-pricing.md` | `danqing-flagship-strategy`, `danqing-project-state` |
+| **场景动效**(shader/uniform/动效) | `docs/CONTEXT/scenes-guidelines.md` | 对应场景 spec(`docs/specs/pomodoro-scene-motion*.md`) | `scene-motion-uv-displacement`, `scene-lru-pattern` |
+| **AI 场景底图升级**(生图/去水印/适配) | `memory/ai-scene-upgrade-workflow.md` + `docs/CONTEXT/ai-image-prompts.md` | `tools/remove_watermark.py` + `tools/export-scenes.py` | `ai-scene-uv-displacement-preference`, `ai-scene-no-veil` |
+| **跨模块重构**(依赖/渲染/事件) | `docs/CONTEXT/architecture.md` | 相关模块源码 + 测试 | — |
+| **窗口/平台**(winit/IME/托盘/热键) | `src/window/mod.rs` | `docs/CONTEXT/architecture.md` §平台适配层 | `danqing-visual-debug-tooling` |
+| **新增组件**(widget) | 一个现有同族组件(照模式) | `src/theme.rs` | — |
+| **性能/内存** | `tools/benchmark.ps1` | `docs/CONTEXT/architecture.md` | `wgpu-30-memory-lever`, `minidbg-symbol-preference` |
+| **构建/工具链** | — | `build.rs` + `.cargo/config.toml` | `windows-gnu-toolchain-lld-fix` |
+| **Pomodoro POC** | `examples/pomodoro/CLAUDE.md` | `docs/specs/phase2-pomodoro-poc.md` | — |
+| **Bug 修复** | 最小复现 + `cargo test` 输出 | 相关模块源码 | — |
+
+Agent 启动时的默认加载: `CLAUDE.md` + `MEMORY.md`(已自动加载)。CONTEXT 文档**不在默认加载之列**——仅在上述任务类型触发时按需加载。
 
 ## Documentation layout
 

@@ -22,13 +22,14 @@ use std::time::Duration;
 
 use rodio::Source;
 
-/// 场景音源路径 (与 `scenes::SCENES` 索引对齐：篝火/海/雨/山/森林)。
-pub const SCENE_AUDIO: [&str; 5] = [
+/// 场景音源路径 (与 `scenes::SCENES` 索引对齐：篝火/海/雨/山/森林/星夜)。
+pub const SCENE_AUDIO: [&str; 6] = [
     "assets/audio/bonfire.ogg",
     "assets/audio/sea.ogg",
     "assets/audio/rain.ogg",
     "assets/audio/mountain.ogg",
     "assets/audio/forest.ogg",
+    "assets/audio/starry.ogg",
 ];
 
 /// 环境音目标音量 (固定，无设置 UI)。
@@ -49,24 +50,34 @@ pub struct AmbientMixer {
     anim: Option<(f32, f32, Duration)>,
     /// 上一帧见到的目标增益 (边沿检测：running 与 duck 合成)。
     last_target: f32,
+    /// 全局环境音开关 (false = 目标恒 0, 静音所有场景音景)。
+    enabled: bool,
 }
 
 impl AmbientMixer {
-    /// 创建混音器：包络 0 (静音), 等待首次 running 边沿淡入。
+    /// 创建混音器：包络 0 (静音), 等待首次 running 边沿淡入; 环境音默认开。
     pub fn new() -> Self {
         Self {
             envelope: 0.0,
             anim: None,
             last_target: 0.0,
+            enabled: true,
         }
+    }
+
+    /// 设置全局环境音开关 (false = 静音所有场景音景)。
+    ///
+    /// 关闭后目标增益恒 0 (与暂停同走 300ms 包络淡出), 恢复时从当前值平滑淡入。
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
     }
 
     /// 计算两槽音量：`[(from, v_from), (to, v_to)]`。
     ///
     /// `fade` 为视觉淡化进度 (0..1, 经缓动); `running` 为计时运行态;
     /// `duck` 为相位沉降系数 (Focus = 1.0, Break/LongBreak = [`BREAK_DUCK`])。
-    /// 目标增益 = running ? duck : 0; 目标变化触发 300ms 包络动画，
-    /// 动画进行中反向边沿从当前值续接 (无跳变)。
+    /// 目标增益 = (enabled && running) ? duck : 0 — 环境音关闭时与暂停同走目标 0;
+    /// 目标变化触发 300ms 包络动画，动画进行中反向边沿从当前值续接 (无跳变)。
     pub fn frame_volumes(
         &mut self,
         from: usize,
@@ -76,7 +87,7 @@ impl AmbientMixer {
         duck: f32,
         now: Duration,
     ) -> [(usize, f32); 2] {
-        let target = if running { duck } else { 0.0 };
+        let target = if self.enabled && running { duck } else { 0.0 };
         if target != self.last_target {
             self.anim = Some((self.envelope, target, now));
             self.last_target = target;
@@ -451,6 +462,48 @@ mod tests {
             let v = m.frame_volumes(0, 0, 1.0, false, BREAK_DUCK, ms(t));
             assert_eq!(v[1].1, 0.0, "休息期暂停应静音 (t={t})");
         }
+    }
+
+    #[test]
+    fn muted_scene_audio_stays_silent_while_running() {
+        // 全局环境音开关关闭: 即使计时运行, 目标恒 0, 包络不抬升。
+        let mut m = AmbientMixer::new();
+        m.set_enabled(false);
+        for t in [0, 100, 10_000] {
+            let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(t));
+            assert_eq!(v[1].1, 0.0, "静音时应始终无声 (t={t})");
+        }
+    }
+
+    #[test]
+    fn unmute_fades_back_in_over_300ms() {
+        // 静音运行 → 开声: 从 0 平滑淡入 300ms, 无跳变爆音。
+        let mut m = AmbientMixer::new();
+        m.set_enabled(false);
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(0));
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(300));
+        m.set_enabled(true);
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1000));
+        assert_eq!(v[1].1, 0.0, "开声边沿帧应连续");
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1150));
+        assert!((v[1].1 - 0.3).abs() < 1e-6, "中点应为 0.3: {}", v[1].1);
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1300));
+        assert!((v[1].1 - AMBIENT_VOLUME).abs() < 1e-6, "终点应回全量");
+    }
+
+    #[test]
+    fn mute_mid_session_fades_out_smoothly() {
+        // 运行全量中关声: 300ms 平滑淡出, 无跳变 (边沿帧从当前值续接)。
+        let mut m = AmbientMixer::new();
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(0));
+        m.frame_volumes(0, 0, 1.0, true, 1.0, ms(300)); // 全量
+        m.set_enabled(false);
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1000));
+        assert!((v[1].1 - AMBIENT_VOLUME).abs() < 1e-6, "关声边沿帧应连续");
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1150));
+        assert!((v[1].1 - 0.3).abs() < 1e-6, "中点应为半量: {}", v[1].1);
+        let v = m.frame_volumes(0, 0, 1.0, true, 1.0, ms(1300));
+        assert_eq!(v[1].1, 0.0);
     }
 
     #[test]

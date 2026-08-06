@@ -33,3 +33,6 @@ desktop.ini
 *.profraw
 /coverage
 /flamegraph.svg
+
+# 工具脚本下载缓存 (原始星表等第三方数据不入库, 仅产物入库)
+/tools/.cache/

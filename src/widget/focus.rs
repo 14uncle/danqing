@@ -26,6 +26,8 @@ pub struct FocusManager {
     previous: Option<FocusPath>,
     /// 按深度优先顺序收集的可聚焦节点路径。
     chain: Vec<FocusPath>,
+    /// 与 `chain` 平行的稳定焦点标识 (无标识为 `None`)。
+    chain_ids: Vec<Option<&'static str>>,
     /// 是否已完成首次自动聚焦。
     did_initial_focus: bool,
 }
@@ -39,6 +41,7 @@ impl FocusManager {
     /// 根据组件树重建焦点链，并保留仍有效的当前焦点。
     pub fn rebuild(&mut self, root: &Node) {
         self.chain.clear();
+        self.chain_ids.clear();
         self.collect(root, &mut Vec::new());
 
         // 若当前焦点路径在新树中不再有效，则重置为 None
@@ -122,6 +125,19 @@ impl FocusManager {
         self.current = Some(path);
     }
 
+    /// 按稳定标识聚焦 (见 [`crate::widget::Widget::focus_id`])。
+    ///
+    /// 供 `App::focus_request` 使用: 弹层面板关闭后焦点回到打开面板的按钮。
+    /// 未找到匹配标识时不变更焦点并返回 `false`。
+    pub fn set_focus_by_id(&mut self, id: &str) -> bool {
+        let Some(idx) = self.chain_ids.iter().position(|i| *i == Some(id)) else {
+            return false;
+        };
+        self.previous = self.current.clone();
+        self.current = Some(self.chain[idx].clone());
+        true
+    }
+
     /// 清除当前焦点。
     pub fn clear_focus(&mut self) {
         self.previous = self.current.clone();
@@ -130,7 +146,19 @@ impl FocusManager {
 
     fn collect(&mut self, node: &Node, prefix: &mut FocusPath) {
         if node.focusable() {
+            if let Some(id) = node.focus_id() {
+                // 重复 id 会让按名聚焦 (set_focus_by_id) 静默取第一个, 应用侧难以察觉。
+                debug_assert!(
+                    !self
+                        .chain_ids
+                        .iter()
+                        .flatten()
+                        .any(|existing| *existing == id),
+                    "焦点标识重复: {id} — 按名聚焦会静默取第一个, 请用唯一 id"
+                );
+            }
             self.chain.push(prefix.clone());
+            self.chain_ids.push(node.focus_id());
         }
         for (i, child) in node.children().iter().enumerate() {
             prefix.push(i);
@@ -279,6 +307,29 @@ mod tests {
         // 点击不可聚焦的 Box 区域 (Button 下方)。
         mgr.set_by_click(&tree, crate::Point::new(50.0, 500.0));
         assert!(mgr.current().is_none(), "点击空白应清除焦点");
+    }
+
+    #[test]
+    fn set_focus_by_id_targets_matching_button() {
+        let mut texts = dummy_texts();
+        let mut tree = node(
+            Column::new()
+                .child(Button::new(Text::new("A")).id("alpha"))
+                .child(Button::new(Text::new("B"))),
+        );
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree);
+        assert_eq!(mgr.current(), Some(&vec![0]), "初始自动聚焦第一个可聚焦");
+
+        assert!(mgr.set_focus_by_id("alpha"), "应能按稳定 id 聚焦");
+        assert_eq!(mgr.current(), Some(&vec![0]));
+
+        assert!(
+            !mgr.set_focus_by_id("missing"),
+            "未知 id 应返回 false 且不变更焦点"
+        );
+        assert_eq!(mgr.current(), Some(&vec![0]));
     }
 
     #[test]

@@ -17,12 +17,46 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 // === 阶段时长常量 ===
-const FOCUS_DURATION_SECS: u64 = 25 * 60; // 25 分钟
-const BREAK_DURATION_SECS: u64 = 5 * 60; // 5 分钟
-const LONG_BREAK_DURATION_SECS: u64 = 15 * 60; // 15 分钟
-
 /// 每自然完成多少轮专注进入一次长休息。
 pub const CYCLE_LENGTH: u8 = 4;
+
+/// 默认专注时长（秒）。
+pub const DEFAULT_FOCUS_SECS: u64 = 25 * 60;
+/// 默认短休息时长（秒）。
+pub const DEFAULT_BREAK_SECS: u64 = 5 * 60;
+/// 默认长休息时长（秒）。
+pub const DEFAULT_LONG_BREAK_SECS: u64 = 15 * 60;
+
+/// 可定制的计时时长配置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimerConfig {
+    /// 专注时长（秒）。
+    pub focus_secs: u64,
+    /// 短休息时长（秒）。
+    pub break_secs: u64,
+    /// 长休息时长（秒）。
+    pub long_break_secs: u64,
+}
+
+impl Default for TimerConfig {
+    fn default() -> Self {
+        Self {
+            focus_secs: DEFAULT_FOCUS_SECS,
+            break_secs: DEFAULT_BREAK_SECS,
+            long_break_secs: DEFAULT_LONG_BREAK_SECS,
+        }
+    }
+}
+
+impl TimerConfig {
+    /// 约束到有效范围 [1 分钟, 3 小时]。
+    pub fn clamp(mut self) -> Self {
+        self.focus_secs = self.focus_secs.clamp(60, 10_800);
+        self.break_secs = self.break_secs.clamp(60, 10_800);
+        self.long_break_secs = self.long_break_secs.clamp(60, 10_800);
+        self
+    }
+}
 
 /// 计时阶段。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,12 +70,12 @@ pub enum Phase {
 }
 
 impl Phase {
-    /// 阶段时长。
-    pub fn duration(self) -> Duration {
+    /// 阶段时长（由 config 定制）。
+    pub fn duration(self, config: &TimerConfig) -> Duration {
         match self {
-            Self::Focus => Duration::from_secs(FOCUS_DURATION_SECS),
-            Self::Break => Duration::from_secs(BREAK_DURATION_SECS),
-            Self::LongBreak => Duration::from_secs(LONG_BREAK_DURATION_SECS),
+            Self::Focus => Duration::from_secs(config.focus_secs),
+            Self::Break => Duration::from_secs(config.break_secs),
+            Self::LongBreak => Duration::from_secs(config.long_break_secs),
         }
     }
 
@@ -99,6 +133,9 @@ pub struct TickReport {
     pub advanced: bool,
     /// 本帧自然完成的专注阶段数 (huge overshoot 可能 >1)。
     pub focus_completions: u8,
+    /// 最后一次自然完成的专注在大循环内的轮次 (1..=CYCLE_LENGTH)。
+    /// 无完成时为 0。供会话历史记录「轮次」字段 (2026-08-01 数据层新增)。
+    pub completed_round: u8,
 }
 
 /// 番茄钟状态机。
@@ -112,17 +149,26 @@ pub struct Pomodoro {
     deadline: Option<Duration>,
     /// 当前大循环内已自然完成的专注数 (0..CYCLE_LENGTH)。
     completed_focus: u8,
+    /// 可定制的计时时长配置。
+    config: TimerConfig,
 }
 
 impl Pomodoro {
-    /// 创建番茄钟：专注 25:00 停止态。
+    /// 创建番茄钟：专注 25:00 停止态，使用默认配置。
     pub fn new() -> Self {
+        Self::with_config(TimerConfig::default())
+    }
+
+    /// 用自定义配置创建番茄钟。
+    pub fn with_config(config: TimerConfig) -> Self {
+        let config = config.clamp();
         Self {
             phase: Phase::Focus,
             run: Run::Idle,
-            remaining: Phase::Focus.duration(),
+            remaining: Phase::Focus.duration(&config),
             deadline: None,
             completed_focus: 0,
+            config,
         }
     }
 
@@ -133,6 +179,7 @@ impl Pomodoro {
         remaining: Duration,
         deadline: Option<Duration>,
         completed_focus: u8,
+        config: TimerConfig,
     ) -> Self {
         Self {
             phase,
@@ -140,6 +187,7 @@ impl Pomodoro {
             remaining,
             deadline,
             completed_focus,
+            config: config.clamp(),
         }
     }
 
@@ -156,6 +204,20 @@ impl Pomodoro {
     /// 是否计时中。
     pub fn is_running(&self) -> bool {
         self.run == Run::Running
+    }
+
+    /// 当前计时配置。
+    pub fn config(&self) -> &TimerConfig {
+        &self.config
+    }
+
+    /// 更新计时配置。Running/Paused 时当前 phase 保持旧时长（下一 phase 才生效）;
+    /// Idle 时立即刷新 remaining 快照。
+    pub fn update_config(&mut self, config: TimerConfig) {
+        self.config = config.clamp();
+        if self.run == Run::Idle {
+            self.remaining = self.phase.duration(&self.config);
+        }
     }
 
     /// 当前大循环内已自然完成的专注数 (0..CYCLE_LENGTH)。
@@ -178,9 +240,11 @@ impl Pomodoro {
         }
     }
 
-    /// 重置：回到专注 25:00 停止态。
+    /// 重置：回到专注停止态，轮次计数清零，保留时长配置。
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
-        *self = Self::new();
+        let config = self.config;
+        *self = Self::with_config(config);
     }
 
     /// 立即跳过当前阶段剩余时间，进入下一阶段。
@@ -191,7 +255,7 @@ impl Pomodoro {
     /// 返回是否发生阶段切换 (始终为 true, 排除自身相等)。
     pub fn skip(&mut self, now: Duration) -> bool {
         self.phase = self.phase.skip_target();
-        let next_duration = self.phase.duration();
+        let next_duration = self.phase.duration(&self.config);
         match self.run {
             Run::Running => {
                 self.deadline = Some(now + next_duration);
@@ -215,11 +279,13 @@ impl Pomodoro {
             let deadline = self.deadline.unwrap_or(now);
             if self.phase == Phase::Focus {
                 report.focus_completions += 1;
+                // 记录本次完成的轮次 (pre-advance 的 completed_focus + 1)。
+                report.completed_round = self.completed_focus + 1;
             }
             let (next_phase, next_count) = self.phase.next(self.completed_focus);
             self.phase = next_phase;
             self.completed_focus = next_count;
-            self.deadline = Some(deadline + self.phase.duration());
+            self.deadline = Some(deadline + self.phase.duration(&self.config));
             report.advanced = true;
         }
         if report.advanced {
@@ -267,7 +333,7 @@ mod tests {
         let p = Pomodoro::new();
         assert_eq!(p.phase(), Phase::Focus);
         assert!(!p.is_running());
-        assert_eq!(p.remaining(secs(0)), secs(FOCUS_DURATION_SECS));
+        assert_eq!(p.remaining(secs(0)), secs(DEFAULT_FOCUS_SECS));
         assert_eq!(p.display(secs(0)), "25:00");
     }
 
@@ -276,12 +342,12 @@ mod tests {
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
         assert!(p.is_running());
-        let pause_at = FOCUS_DURATION_SECS / 2;
+        let pause_at = DEFAULT_FOCUS_SECS / 2;
         p.toggle(secs(pause_at));
         assert!(!p.is_running());
         assert_eq!(
             p.remaining(secs(pause_at)),
-            secs(FOCUS_DURATION_SECS - pause_at)
+            secs(DEFAULT_FOCUS_SECS - pause_at)
         );
     }
 
@@ -289,16 +355,16 @@ mod tests {
     fn paused_remaining_is_frozen() {
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
-        p.toggle(secs(FOCUS_DURATION_SECS / 2));
+        p.toggle(secs(DEFAULT_FOCUS_SECS / 2));
         // 暂停后时间推移不改变剩余。
-        let remaining_at_pause = FOCUS_DURATION_SECS - FOCUS_DURATION_SECS / 2;
+        let remaining_at_pause = DEFAULT_FOCUS_SECS - DEFAULT_FOCUS_SECS / 2;
         assert_eq!(p.remaining(secs(999)), secs(remaining_at_pause));
     }
 
     #[test]
     fn resume_continues_from_paused_remaining() {
         let mut p = Pomodoro::new();
-        let pause_at = FOCUS_DURATION_SECS / 2;
+        let pause_at = DEFAULT_FOCUS_SECS / 2;
         p.toggle(secs(0));
         p.toggle(secs(pause_at));
         p.toggle(secs(999)); // 很久后恢复
@@ -306,7 +372,7 @@ mod tests {
         // 恢复后 1s 内剩余 = 暂停时剩余 - 1
         assert_eq!(
             p.remaining(secs(1000)),
-            secs(FOCUS_DURATION_SECS - pause_at - 1)
+            secs(DEFAULT_FOCUS_SECS - pause_at - 1)
         );
     }
 
@@ -314,7 +380,7 @@ mod tests {
     fn tick_before_deadline_does_not_advance() {
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
-        assert!(!p.tick(secs(FOCUS_DURATION_SECS - 1)).advanced);
+        assert!(!p.tick(secs(DEFAULT_FOCUS_SECS - 1)).advanced);
         assert_eq!(p.phase(), Phase::Focus);
     }
 
@@ -322,12 +388,12 @@ mod tests {
     fn tick_past_deadline_auto_advances_and_keeps_running() {
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
-        assert!(p.tick(secs(FOCUS_DURATION_SECS)).advanced);
+        assert!(p.tick(secs(DEFAULT_FOCUS_SECS)).advanced);
         assert_eq!(p.phase(), Phase::Break);
         assert!(p.is_running());
         assert_eq!(
-            p.remaining(secs(FOCUS_DURATION_SECS)),
-            secs(BREAK_DURATION_SECS)
+            p.remaining(secs(DEFAULT_FOCUS_SECS)),
+            secs(DEFAULT_BREAK_SECS)
         );
     }
 
@@ -337,11 +403,11 @@ mod tests {
         p.toggle(secs(0));
         // 帧晚到 3 秒：下一阶段从原终点顺延，余量不亏。
         let overshoot = 3u64;
-        let tick_at = FOCUS_DURATION_SECS + overshoot;
+        let tick_at = DEFAULT_FOCUS_SECS + overshoot;
         assert!(p.tick(secs(tick_at)).advanced);
         assert_eq!(
             p.remaining(secs(tick_at)),
-            secs(BREAK_DURATION_SECS - overshoot)
+            secs(DEFAULT_BREAK_SECS - overshoot)
         );
     }
 
@@ -349,12 +415,12 @@ mod tests {
     fn break_completion_returns_to_focus() {
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
-        p.tick(secs(FOCUS_DURATION_SECS));
-        let cycle = FOCUS_DURATION_SECS + BREAK_DURATION_SECS;
+        p.tick(secs(DEFAULT_FOCUS_SECS));
+        let cycle = DEFAULT_FOCUS_SECS + DEFAULT_BREAK_SECS;
         assert!(p.tick(secs(cycle)).advanced);
         assert_eq!(p.phase(), Phase::Focus);
         assert!(p.is_running());
-        assert_eq!(p.remaining(secs(cycle)), secs(FOCUS_DURATION_SECS));
+        assert_eq!(p.remaining(secs(cycle)), secs(DEFAULT_FOCUS_SECS));
     }
 
     #[test]
@@ -362,7 +428,7 @@ mod tests {
         // 在第二轮 break, 剩 2 分钟 (focus 2: 30-55, break 2: 55-60, 60-58=2)
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
-        let cycle = FOCUS_DURATION_SECS + BREAK_DURATION_SECS;
+        let cycle = DEFAULT_FOCUS_SECS + DEFAULT_BREAK_SECS;
         let tick_at = 2 * cycle - 2 * 60; // 2 个完整 cycle 减 2 分钟 = 58 分钟 = 3480s
         assert!(p.tick(secs(tick_at)).advanced);
         assert_eq!(p.phase(), Phase::Break);
@@ -373,11 +439,11 @@ mod tests {
     fn reset_returns_to_focus_idle() {
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
-        p.tick(secs(FOCUS_DURATION_SECS));
+        p.tick(secs(DEFAULT_FOCUS_SECS));
         p.reset();
         assert_eq!(p.phase(), Phase::Focus);
         assert!(!p.is_running());
-        assert_eq!(p.remaining(secs(999)), secs(FOCUS_DURATION_SECS));
+        assert_eq!(p.remaining(secs(999)), secs(DEFAULT_FOCUS_SECS));
     }
 
     #[test]
@@ -396,7 +462,14 @@ mod tests {
 
     #[test]
     fn restore_preserves_all_fields() {
-        let p = Pomodoro::restore(Phase::Break, Run::Paused, Duration::from_secs(120), None, 2);
+        let p = Pomodoro::restore(
+            Phase::Break,
+            Run::Paused,
+            Duration::from_secs(120),
+            None,
+            2,
+            TimerConfig::default(),
+        );
         assert_eq!(p.phase(), Phase::Break);
         assert_eq!(p.run(), Run::Paused);
         assert!(!p.is_running());
@@ -410,7 +483,14 @@ mod tests {
     #[test]
     fn restore_cycle_count_continues_cycle() {
         // 恢复第 4 轮 (completed_focus=3): 自然完成 Focus 应直接进 LongBreak。
-        let mut p = Pomodoro::restore(Phase::Focus, Run::Running, secs(60), Some(secs(60)), 3);
+        let mut p = Pomodoro::restore(
+            Phase::Focus,
+            Run::Running,
+            secs(60),
+            Some(secs(60)),
+            3,
+            TimerConfig::default(),
+        );
         p.tick(secs(60));
         assert_eq!(p.phase(), Phase::LongBreak);
     }
@@ -424,6 +504,7 @@ mod tests {
             Duration::from_secs(600),
             Some(now + Duration::from_secs(600)),
             0,
+            TimerConfig::default(),
         );
         assert!(p.is_running());
         assert_eq!(p.remaining(now), Duration::from_secs(600));
@@ -433,25 +514,25 @@ mod tests {
     fn skip_in_running_advances_deadline() {
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
-        let skip_at = FOCUS_DURATION_SECS / 2;
+        let skip_at = DEFAULT_FOCUS_SECS / 2;
         assert!(p.skip(secs(skip_at)));
         assert_eq!(p.phase(), Phase::Break);
         assert!(p.is_running());
-        // 新阶段从 now 起算，满量 BREAK_DURATION_SECS
-        assert_eq!(p.remaining(secs(skip_at)), secs(BREAK_DURATION_SECS));
+        // 新阶段从 now 起算，满量 DEFAULT_BREAK_SECS
+        assert_eq!(p.remaining(secs(skip_at)), secs(DEFAULT_BREAK_SECS));
     }
 
     #[test]
     fn skip_in_paused_advances_remaining() {
         let mut p = Pomodoro::new();
-        let skip_at = FOCUS_DURATION_SECS / 2;
+        let skip_at = DEFAULT_FOCUS_SECS / 2;
         p.toggle(secs(0));
         p.toggle(secs(skip_at)); // 暂停
         assert!(p.skip(secs(skip_at)));
         assert_eq!(p.phase(), Phase::Break);
         assert!(!p.is_running());
         // 暂停态下 remaining = 下一阶段满量
-        assert_eq!(p.remaining(secs(999)), secs(BREAK_DURATION_SECS));
+        assert_eq!(p.remaining(secs(999)), secs(DEFAULT_BREAK_SECS));
     }
 
     #[test]
@@ -460,7 +541,7 @@ mod tests {
         assert!(p.skip(secs(0)));
         assert_eq!(p.phase(), Phase::Break);
         assert!(!p.is_running());
-        assert_eq!(p.remaining(secs(999)), secs(BREAK_DURATION_SECS));
+        assert_eq!(p.remaining(secs(999)), secs(DEFAULT_BREAK_SECS));
     }
 
     #[test]
@@ -476,13 +557,13 @@ mod tests {
 
     // === 长休息 + 轮次 (打磨 WS2) ===
 
-    const LONG_BREAK_DURATION_SECS: u64 = 15 * 60; // 15 分钟
+    const LONG_DEFAULT_BREAK_SECS: u64 = 15 * 60; // 15 分钟
 
     /// 测试辅助：从当前时刻推进一个 Focus + Break 短周期 (各在终点 tick 一次)。
     fn run_short_cycle(p: &mut Pomodoro, now: &mut u64) {
-        *now += FOCUS_DURATION_SECS;
+        *now += DEFAULT_FOCUS_SECS;
         p.tick(secs(*now));
-        *now += BREAK_DURATION_SECS;
+        *now += DEFAULT_BREAK_SECS;
         p.tick(secs(*now));
     }
 
@@ -497,11 +578,11 @@ mod tests {
             assert_eq!(p.phase(), Phase::Focus);
         }
         // 第四个 Focus 完成 → LongBreak (满 15 分钟)
-        now += FOCUS_DURATION_SECS;
+        now += DEFAULT_FOCUS_SECS;
         let report = p.tick(secs(now));
         assert_eq!(report.focus_completions, 1);
         assert_eq!(p.phase(), Phase::LongBreak);
-        assert_eq!(p.remaining(secs(now)), secs(LONG_BREAK_DURATION_SECS));
+        assert_eq!(p.remaining(secs(now)), secs(LONG_DEFAULT_BREAK_SECS));
     }
 
     #[test]
@@ -512,17 +593,17 @@ mod tests {
         for _ in 0..3 {
             run_short_cycle(&mut p, &mut now);
         }
-        now += FOCUS_DURATION_SECS;
+        now += DEFAULT_FOCUS_SECS;
         p.tick(secs(now));
         assert_eq!(p.phase(), Phase::LongBreak);
         // 长休息完成：回 Focus, 不算专注完成，轮次已清零
-        now += LONG_BREAK_DURATION_SECS;
+        now += LONG_DEFAULT_BREAK_SECS;
         let report = p.tick(secs(now));
         assert_eq!(report.focus_completions, 0);
         assert_eq!(p.phase(), Phase::Focus);
         assert_eq!(p.completed_focus(), 0);
         // 新一轮从第 1 轮计起：再次完成 Focus 应去 Break 而非 LongBreak
-        now += FOCUS_DURATION_SECS;
+        now += DEFAULT_FOCUS_SECS;
         p.tick(secs(now));
         assert_eq!(p.phase(), Phase::Break);
     }
@@ -541,10 +622,10 @@ mod tests {
         assert_eq!(p.phase(), Phase::Break);
         assert_eq!(p.completed_focus(), 3);
         // 该 Break 完成后回 Focus; 自然完成仍应触发 LongBreak (第 4 轮)。
-        now += 60 + BREAK_DURATION_SECS;
+        now += 60 + DEFAULT_BREAK_SECS;
         p.tick(secs(now));
         assert_eq!(p.phase(), Phase::Focus);
-        now += FOCUS_DURATION_SECS;
+        now += DEFAULT_FOCUS_SECS;
         p.tick(secs(now));
         assert_eq!(p.phase(), Phase::LongBreak);
     }
@@ -554,7 +635,7 @@ mod tests {
         // 完成 1 轮后 reset: 重新走满 4 轮才进 LongBreak。
         let mut p = Pomodoro::new();
         p.toggle(secs(0));
-        p.tick(secs(FOCUS_DURATION_SECS));
+        p.tick(secs(DEFAULT_FOCUS_SECS));
         assert_eq!(p.completed_focus(), 1);
         p.reset();
         assert_eq!(p.completed_focus(), 0);
@@ -563,7 +644,7 @@ mod tests {
         for _ in 0..3 {
             run_short_cycle(&mut p, &mut now);
         }
-        now += FOCUS_DURATION_SECS;
+        now += DEFAULT_FOCUS_SECS;
         p.tick(secs(now));
         assert_eq!(p.phase(), Phase::LongBreak);
     }
@@ -584,12 +665,56 @@ mod tests {
         let report = p.tick(secs(100));
         assert!(!report.advanced);
         assert_eq!(report.focus_completions, 0);
+        assert_eq!(report.completed_round, 0, "无完成时 completed_round 应为 0");
+    }
+
+    #[test]
+    fn completed_round_reflects_round_within_cycle() {
+        // 完成 2 个 Focus (第 1、2 轮): completed_round 应分别为 1、2。
+        let mut p = Pomodoro::new();
+        p.toggle(secs(0));
+        let r1 = p.tick(secs(DEFAULT_FOCUS_SECS));
+        assert_eq!(r1.focus_completions, 1);
+        assert_eq!(r1.completed_round, 1);
+        let r2 = p.tick(secs(
+            DEFAULT_FOCUS_SECS + DEFAULT_BREAK_SECS + DEFAULT_FOCUS_SECS,
+        ));
+        assert_eq!(r2.focus_completions, 1);
+        assert_eq!(r2.completed_round, 2);
+    }
+
+    #[test]
+    fn completed_round_fourth_focus_is_four() {
+        // 第 4 轮 Focus 完成 → LongBreak, completed_round 应为 4 (非清零后的 0)。
+        let mut p = Pomodoro::new();
+        p.toggle(secs(0));
+        let mut now = 0u64;
+        for _ in 0..3 {
+            run_short_cycle(&mut p, &mut now);
+        }
+        now += DEFAULT_FOCUS_SECS;
+        let report = p.tick(secs(now));
+        assert_eq!(p.phase(), Phase::LongBreak);
+        assert_eq!(report.completed_round, 4);
+    }
+
+    #[test]
+    fn completed_round_multi_completion_reports_last_round() {
+        // huge overshoot 一次跨 2 个 Focus: completed_round 为最后一次的轮次。
+        let mut p = Pomodoro::new();
+        p.toggle(secs(0));
+        let report = p.tick(secs(3300)); // F + B + F
+        assert_eq!(report.focus_completions, 2);
+        assert_eq!(report.completed_round, 2);
     }
 
     #[test]
     fn long_break_label_and_duration() {
         assert_eq!(Phase::LongBreak.label(), "长休息");
-        assert_eq!(Phase::LongBreak.duration(), secs(LONG_BREAK_DURATION_SECS));
+        assert_eq!(
+            Phase::LongBreak.duration(&TimerConfig::default()),
+            secs(DEFAULT_LONG_BREAK_SECS)
+        );
     }
 
     #[test]
@@ -599,5 +724,152 @@ mod tests {
         assert_eq!(Phase::Focus.next(3), (Phase::LongBreak, 0));
         assert_eq!(Phase::Break.next(1), (Phase::Focus, 1));
         assert_eq!(Phase::LongBreak.next(0), (Phase::Focus, 0));
+    }
+
+    // === 自定义计时配置 ===
+
+    #[test]
+    fn timer_config_default_is_25_5_15() {
+        let c = TimerConfig::default();
+        assert_eq!(c.focus_secs, 25 * 60);
+        assert_eq!(c.break_secs, 5 * 60);
+        assert_eq!(c.long_break_secs, 15 * 60);
+    }
+
+    #[test]
+    fn timer_config_clamp_below_minimum() {
+        let c = TimerConfig {
+            focus_secs: 30,
+            break_secs: 10,
+            long_break_secs: 5,
+        }
+        .clamp();
+        assert_eq!(c.focus_secs, 60);
+        assert_eq!(c.break_secs, 60);
+        assert_eq!(c.long_break_secs, 60);
+    }
+
+    #[test]
+    fn timer_config_clamp_above_maximum() {
+        let c = TimerConfig {
+            focus_secs: 20_000,
+            break_secs: 20_000,
+            long_break_secs: 20_000,
+        }
+        .clamp();
+        assert_eq!(c.focus_secs, 10_800);
+        assert_eq!(c.break_secs, 10_800);
+        assert_eq!(c.long_break_secs, 10_800);
+    }
+
+    #[test]
+    fn custom_config_changes_phase_duration() {
+        let config = TimerConfig {
+            focus_secs: 10 * 60,
+            break_secs: 3 * 60,
+            long_break_secs: 12 * 60,
+        };
+        let p = Pomodoro::with_config(config);
+        assert_eq!(p.phase(), Phase::Focus);
+        assert_eq!(p.remaining(secs(0)), secs(10 * 60));
+    }
+
+    #[test]
+    fn update_config_idle_takes_effect_immediately() {
+        let mut p = Pomodoro::new();
+        let config = TimerConfig {
+            focus_secs: 10 * 60,
+            break_secs: 2 * 60,
+            long_break_secs: 8 * 60,
+        };
+        p.update_config(config);
+        assert_eq!(p.config().focus_secs, 10 * 60);
+        // Idle 状态下 remaining 立即刷新
+        assert_eq!(p.remaining(secs(0)), secs(10 * 60));
+    }
+
+    #[test]
+    fn update_config_mid_session_preserves_current_phase() {
+        let mut p = Pomodoro::new();
+        p.toggle(secs(0));
+        // 跑了 10 分钟，剩 15 分钟
+        p.tick(secs(10 * 60));
+        assert_eq!(p.remaining(secs(10 * 60)), secs(15 * 60));
+        // 中途改 config：当前 phase 剩余不变
+        let custom = TimerConfig {
+            focus_secs: 5 * 60,
+            break_secs: 1 * 60,
+            long_break_secs: 2 * 60,
+        };
+        p.update_config(custom);
+        // 剩余仍以旧时长 (25min) 为基准
+        assert_eq!(p.remaining(secs(10 * 60)), secs(15 * 60));
+    }
+
+    #[test]
+    fn update_config_applied_to_next_phase() {
+        let mut p = Pomodoro::new();
+        p.toggle(secs(0));
+        // 改 config 为 10min focus / 2min break
+        let custom = TimerConfig {
+            focus_secs: 10 * 60,
+            break_secs: 2 * 60,
+            long_break_secs: 15 * 60,
+        };
+        p.update_config(custom);
+        // tick 到 25min（原 focus 终点）：新 phase 用 custom.break_secs
+        p.tick(secs(25 * 60));
+        assert_eq!(p.phase(), Phase::Break);
+        assert_eq!(p.remaining(secs(25 * 60)), secs(2 * 60));
+    }
+
+    #[test]
+    fn reset_preserves_config() {
+        let mut p = Pomodoro::with_config(TimerConfig {
+            focus_secs: 30 * 60,
+            break_secs: 10 * 60,
+            long_break_secs: 20 * 60,
+        });
+        p.toggle(secs(0));
+        p.tick(secs(30 * 60)); // 完成一个 focus
+        p.reset();
+        assert_eq!(p.config().focus_secs, 30 * 60);
+        assert_eq!(p.phase(), Phase::Focus);
+        assert!(!p.is_running());
+        assert_eq!(p.remaining(secs(999)), secs(30 * 60));
+    }
+
+    #[test]
+    fn restore_with_config_preserves_all() {
+        let config = TimerConfig {
+            focus_secs: 15 * 60,
+            break_secs: 3 * 60,
+            long_break_secs: 10 * 60,
+        };
+        let p = Pomodoro::restore(
+            Phase::Break,
+            Run::Paused,
+            Duration::from_secs(90),
+            None,
+            2,
+            config,
+        );
+        assert_eq!(p.config().focus_secs, 15 * 60);
+        assert_eq!(p.config().break_secs, 3 * 60);
+        assert_eq!(p.config().long_break_secs, 10 * 60);
+        assert_eq!(p.phase(), Phase::Break);
+        assert!(!p.is_running());
+    }
+
+    #[test]
+    fn skip_uses_config_for_next_phase() {
+        let mut p = Pomodoro::with_config(TimerConfig {
+            focus_secs: 10 * 60,
+            break_secs: 2 * 60,
+            long_break_secs: 8 * 60,
+        });
+        p.skip(secs(0));
+        assert_eq!(p.phase(), Phase::Break);
+        assert_eq!(p.remaining(secs(0)), secs(2 * 60));
     }
 }

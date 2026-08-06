@@ -179,7 +179,22 @@ impl Widget for Box {
             // 有子组件: 未显式指定的维度随子组件内容收缩,
             // 避免占满父约束上限、把 Flow 中的后续兄弟挤出屏幕。
             Some(child) => {
-                let child_size = child.layout(constraints, texts);
+                // 显式宽度/高度必须收紧子级约束: 否则含 fill 弹性项的子级
+                // 会按父约束上限扩张, 溢出 Box 显式尺寸 (统计/报告面板值列越界回归)。
+                let child_constraints = match (self.width, self.height) {
+                    (Some(w), _) => Constraints {
+                        min_width: constraints.min_width.min(w),
+                        max_width: constraints.max_width.min(w),
+                        ..constraints
+                    },
+                    (None, Some(h)) => Constraints {
+                        min_height: constraints.min_height.min(h),
+                        max_height: constraints.max_height.min(h),
+                        ..constraints
+                    },
+                    (None, None) => constraints,
+                };
+                let child_size = child.layout(child_constraints, texts);
                 constraints.constrain(Size::new(
                     self.width.unwrap_or(child_size.width),
                     self.height.unwrap_or(child_size.height),
@@ -291,6 +306,58 @@ impl Box {
 mod tests {
     use super::*;
     use crate::LightTheme;
+
+    /// 记录收到布局约束的测试组件。
+    struct ConstraintRecorder {
+        got: std::rc::Rc<std::cell::RefCell<Option<Constraints>>>,
+    }
+
+    impl Widget for ConstraintRecorder {
+        fn sync(&mut self, _: &dyn std::any::Any) {}
+
+        fn layout(&mut self, c: Constraints, _t: &mut TextBatch) -> Size {
+            *self.got.borrow_mut() = Some(c);
+            c.constrain(Size::new(100.0, 20.0))
+        }
+
+        fn paint(&self, _: Rect, _r: &mut RectBatch, _t: &mut TextBatch) {}
+
+        fn event(
+            &mut self,
+            _: &crate::event::Event,
+            _: Rect,
+            _m: &mut crate::widget::MsgQueue,
+        ) -> crate::widget::EventResult {
+            crate::widget::EventResult::Ignored
+        }
+
+        fn children(&self) -> &[crate::widget::Node] {
+            &[]
+        }
+
+        fn children_mut(&mut self) -> &mut [crate::widget::Node] {
+            &mut []
+        }
+    }
+
+    #[test]
+    fn box_with_explicit_width_constrains_child_to_width() {
+        // 回归: Box 显式宽度必须收紧子级约束, 否则含 fill 弹性项的子级
+        // 会按父约束上限扩张 (统计/报告面板值列越界回归)。
+        let got = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let mut texts = TextBatch::new();
+        let mut box_ = Box::new(Color::WHITE)
+            .width(200.0)
+            .child(ConstraintRecorder {
+                got: std::rc::Rc::clone(&got),
+            });
+        box_.layout(Constraints::loose(Size::new(960.0, 640.0)), &mut texts);
+        let c = got.borrow().expect("子级应收到布局约束");
+        assert_eq!(
+            c.max_width, 200.0,
+            "子级最大宽度应被钳到 Box 显式宽度, 而非父约束上限 960"
+        );
+    }
 
     #[test]
     fn themed_box_uses_theme_surface_and_medium_radius() {

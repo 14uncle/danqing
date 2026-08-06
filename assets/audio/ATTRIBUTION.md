@@ -12,6 +12,22 @@
 | `mountain.ogg` | 山 | wind whoosh loop (`wind woosh loop.ogg`) | SketchMan3 | https://opengameart.org/content/wind-whoosh-loop | CC0 |
 | `forest.ogg` | 森林 | Forest Ambience (`Forest_Ambience.mp3`) | TinyWorlds | https://opengameart.org/content/forest-ambience | CC0 |
 
+## 程序化音景 (2026-08-01, 9 场景补全)
+
+`starry` / `snowfield` / `desert` / `cloudsea` 四条为 **`tools/export-ambient.py` 程序化合成**的「风系」音景
+(星夜=夜风, 雪原=雪风, 沙漠=干风, 云海=高空风)。FFT 频谱整形噪声 + 缓阵风包络 + 接缝 crossfade,
+确定性、零外部资产、循环安全。**初版占位** —— 若终审听感不佳, 可换 OpenGameArt CC0 源
+(处理参数与下方一致) 后同步更新本表与 `tests/assets.rs` 体积护栏。
+
+| 文件 | 场景 | 生成方式 | 频谱 | RMS 目标 |
+|------|------|----------|------|----------|
+| `starry.ogg` | 星夜 | 程序化 (`tools/export-ambient.py`) | 低中频风体(200-1k 为主)+ 少量深低鸣, 无中高频嘶 | 0.05 |
+
+> **2026-08-02 重做**: 初版 (220Hz 低通 + 1.2k-10k air 带通) 实测中高频 (>1kHz) 占 ~45% 能量,
+> 用户听感为「雨声/笔记本风扇」。按已通过的山风 (mountain.ogg 96% 能量在 200-1000Hz)
+> 范式重排: 风体移到扬声器可闻段, 1.6kHz 以上硬切。重做后 200-1k 占 ~68%、>1k 仅 ~2%。
+> 参数见 `tools/export-ambient.py` `_spectrum("night")`。
+
 ## 处理参数
 
 ```

@@ -7,13 +7,16 @@
 //! 并把 winit 事件转换为平台无关的内部事件。
 //!
 //! 子模块：
-//! - `event`   应用 → Handler 事件通道 + winit → 内部事件适配
-//! - `icon`    窗口 / 托盘图标加载 + Windows 无边框样式
-//! - `hotkey`  全局热键 ID 常量 + Windows 注册线程
-//! - `tray`    托盘菜单项 ID + 快捷键 label 单一来源 + 跨平台托盘
-//! - `handler` ApplicationHandler 实现 (本模块最大，单独拆出)
+//! - `event`      应用 → Handler 事件通道 + winit → 内部事件适配
+//! - `foreground` 窗口抢前台 / 顶层 (Windows AttachThreadInput)
+//! - `icon`       窗口 / 托盘图标加载 + Windows 无边框样式
+//! - `hotkey`     全局热键 ID 常量 + Windows 注册线程
+//! - `tray`       托盘菜单项 ID + 快捷键 label 单一来源 + 跨平台托盘
+//! - `handler`    ApplicationHandler 实现 (本模块最大，单独拆出)
 
 mod event;
+#[cfg(target_os = "windows")]
+mod foreground;
 mod handler;
 mod hotkey;
 mod icon;
@@ -96,6 +99,8 @@ pub struct WindowConfig {
     pub close_behavior: CloseBehavior,
     /// LOGO 名称 (对应 `assets/logo/{name}_*.png`)。默认 `"logo"`。
     pub logo_name: String,
+    /// 初始是否最大化。默认 `false` (普通尺寸 + 居中)。
+    pub maximized: bool,
 }
 
 impl Default for WindowConfig {
@@ -112,6 +117,7 @@ impl Default for WindowConfig {
             border_thickness: 1.0,
             close_behavior: CloseBehavior::Exit,
             logo_name: "logo".into(),
+            maximized: false,
         }
     }
 }
@@ -120,8 +126,6 @@ impl Default for WindowConfig {
 pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowError> {
     use handler::Handler;
     use hotkey::hotkeys;
-    use icon::load_tray_icon;
-
     let boot = Instant::now();
     let event_loop = EventLoop::new()?;
     let texts_start = Instant::now();
@@ -138,10 +142,16 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
     // 启动全局热键监听线程 (None 表示平台不支持)
     let hotkey_rx = hotkeys::spawn().map(|(rx, _handle)| rx);
     // 安装系统托盘 (图标 + 菜单)。load_tray_icon 失败则降级到无托盘。
-    let tray = load_tray_icon(&config.logo_name).and_then(|icon| {
-        let menu = app.tray_menu();
-        tray::install_tray(icon, menu)
-    });
+    #[cfg(target_os = "windows")]
+    let tray = {
+        use icon::load_tray_icon;
+        load_tray_icon(&config.logo_name).and_then(|icon| {
+            let menu = app.tray_menu();
+            tray::install_tray(icon, menu)
+        })
+    };
+    #[cfg(not(target_os = "windows"))]
+    let tray = None;
     let tree = app.view();
     let mut handler = Handler::new(
         config,
@@ -176,6 +186,12 @@ pub fn run(config: WindowConfig) -> Result<(), WindowError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 默认不最大化 (普通尺寸 + 居中); 需要全屏启动的示例显式设 `maximized: true`。
+    #[test]
+    fn default_config_is_not_maximized() {
+        assert!(!WindowConfig::default().maximized);
+    }
 
     /// 冒烟测试：仅创建事件循环 (链接触发 shim 生成的导入库)。
     /// 若导入库损坏，本测试会以访问违规崩溃。

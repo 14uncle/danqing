@@ -22,8 +22,9 @@ type ActiveBinding = Box<dyn Fn(&dyn Any) -> usize>;
 /// [`Switcher::children`] 只暴露 active 子组件。
 ///
 /// 焦点语义：隐藏面板内的组件不进焦点链; 若焦点恰在隐藏面板内，
-/// 下一帧焦点重建会将其清除，切回后不自动恢复 (组件内残留的
-/// focused 标志不可见，无副作用)。注意焦点路径按索引解析：若切换后
+/// 下一帧焦点重建会将其清除，切回后不自动恢复。活跃面板切换时
+/// `sync` 会主动重置旧面板的焦点视觉 (见 [`Widget::reset_focus`])，
+/// 防止重开面板残留焦点环。注意焦点路径按索引解析：若切换后
 /// 新面板在相同路径上恰好也是可聚焦组件，焦点会静默落在该组件上
 /// (不派发 FocusIn), 应用若介意可在切换消息里一并处理。
 ///
@@ -97,6 +98,7 @@ impl Default for Switcher {
 
 impl Widget for Switcher {
     fn sync(&mut self, state: &dyn Any) {
+        let prev_active = self.active;
         for child in &mut self.children {
             child.sync(state);
         }
@@ -104,6 +106,13 @@ impl Widget for Switcher {
             self.active = binding(state);
         }
         self.clamp_active();
+        // 面板切换: 旧面板被隐藏, FocusOut 经可见切片无法送达其中的旧焦点组件,
+        // 必须主动重置其焦点视觉 (焦点环/光标), 否则重开面板会残留上一会话的环。
+        if self.active != prev_active {
+            if let Some(old) = self.children.get_mut(prev_active) {
+                old.reset_focus();
+            }
+        }
     }
 
     fn animate(&mut self, ctx: &AnimationCtx) {

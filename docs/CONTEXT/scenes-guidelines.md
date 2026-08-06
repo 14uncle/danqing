@@ -97,7 +97,9 @@ struct Uniforms {
 | 篝火 | `docs/specs/pomodoro-scene-motion-bonfire.md` | ✅ 已关闭 |
 | 海 | `docs/specs/pomodoro-scene-motion-sea.md` | ✅ 已关闭 |
 | 雨改造 | `docs/specs/pomodoro-scene-motion-rain-rework.md` | ✅ 已关闭 |
-| 山/森林 | `docs/specs/pomodoro-scene-motion-mountain-forest.md` | ⏳ 待人工终审 |
+| 山/森林 | `docs/specs/pomodoro-scene-motion-mountain-forest.md` | ✅ 已关闭 (2026-08-01 人工终审通过) |
+| 星夜 | `docs/specs/pomodoro-scene-motion-starry.md` | ⏳ 待用户终审 (2026-08-01 实现完成) |
+| 星夜银河升级 | `docs/specs/pomodoro-scene-starry-milkyway.md` | ⏳ 待评审 (2026-08-03, 上位意图: scene-atmosphere-upgrade) |
 
 ## 相关 Memory
 

@@ -18,7 +18,7 @@ Spec: `docs/specs/pomodoro-scene-motion-mountain-forest.md` / Plan: `C:\Users\gw
   - Acceptance: fmt + clippy×2 + test×2 全绿;benchmark PASS(启动 ≤1s、WS ≤360MB);`FOREST_MIST_GAIN = 0.010` 起始值(终审视觉调参点,可在 0.008~0.012 区间调);spec 8 条验收勾选;CLAUDE.md 同步;plan/todo 归档
   - Verify: `tools/benchmark.ps1 -Example pomodoro -Runs 3` + 全部提交门槛
   - Files: `background.wgsl`(常量段)、spec、`CLAUDE.md`、`tasks/`
-- [ ] T5: 人工终审 + 帧差截图归档
-  - Acceptance: GUI 跑 showcase → ◀/▶ 切换到山、森林观察动效"一眼可见但不抢戏";PrintWindow 抓山运行+暂停帧、森林运行+暂停帧裁框帧差(mean abs diff > 阈值、moved_ratio > 0.05);用户终审通过
-  - Verify: 截图归档到 `tasks/archive/`(运行端 + 暂停端 PNG);`docs/specs/pomodoro-scene-motion-mountain-forest.md` 验收 1/2/3 勾选
-  - Status: 代码与门槛全绿,真实 GUI 验证由用户在 showcase 上完成(本次会话未运行 showcase)
+- [x] T5: 人工终审 (2026-08-01 用户通过)
+  - Acceptance: GUI 跑 pomodoro(非 showcase, 山/森林场景在 pomodoro)→ ◀/▶ 切到山、森林观察动效"一眼可见但不抢戏";用户终审通过
+  - Verify: 用户 2026-08-01 目测运行/暂停动效节奏与剂量通过;帧差截图未另归档(开发期已有帧差证据 + benchmark PASS);spec 验收 8 勾选
+  - 修正(终审时记录): ①无 1-5 场景快捷键 — 场景切换仅 ◀/▶ 按钮 + 3 个全局热键(显隐/暂停/退出);②森林副层已去 — 当前 `background.wgsl` 为单层 `forest_mist`(单 `mist_pattern`, SPEED 0.0625 / SCALE 2.0 / ALPHA 0.25),无 LAYER_B2 副层

@@ -6,19 +6,19 @@
 use danqing::{Color, ScenePalette, SceneSpec};
 
 /// POC 场景清单 (数组顺序即 ◀/▶ 切换顺序)。
-pub const SCENES: [SceneSpec; 5] = [
+pub const SCENES: [SceneSpec; 6] = [
     SceneSpec {
         name: "篝火",
         image: "assets/scenes/bonfire.png",
         palette: ScenePalette {
             base: Color::from_srgb8(26, 15, 10),
             accent: Color::from_srgb8(255, 159, 67),
-            text_primary: Color::from_srgb8(250, 244, 235),
-            text_secondary: Color::from_srgb8(199, 184, 166),
+            text_primary: Color::from_srgb8(240, 230, 215),
+            text_secondary: Color::from_srgb8(195, 180, 165),
             surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
             surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
-            backdrop_light: Color::from_srgb8(119, 79, 41),
-            backdrop_dark: Color::from_srgb8(41, 26, 13),
+            backdrop_light: Color::from_srgb8(208, 217, 228),
+            backdrop_dark: Color::from_srgb8(8, 14, 12),
         },
     },
     SceneSpec {
@@ -26,13 +26,13 @@ pub const SCENES: [SceneSpec; 5] = [
         image: "assets/scenes/sea.png",
         palette: ScenePalette {
             base: Color::from_srgb8(168, 221, 232),
-            accent: Color::from_srgb8(12, 74, 110),
-            text_primary: Color::from_srgb8(8, 32, 48),
-            text_secondary: Color::from_srgb8(60, 90, 105),
-            surface: Color::rgba(1.0, 1.0, 1.0, 0.55),
-            surface_input: Color::rgba(1.0, 1.0, 1.0, 0.85),
-            backdrop_light: Color::from_srgb8(226, 245, 247),
-            backdrop_dark: Color::from_srgb8(182, 225, 233),
+            accent: Color::from_srgb8(15, 55, 75),
+            text_primary: Color::from_srgb8(255, 255, 255),
+            text_secondary: Color::from_srgb8(200, 210, 220),
+            surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
+            surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
+            backdrop_light: Color::from_srgb8(255, 235, 204),
+            backdrop_dark: Color::from_srgb8(0, 16, 16),
         },
     },
     SceneSpec {
@@ -45,8 +45,8 @@ pub const SCENES: [SceneSpec; 5] = [
             text_secondary: Color::from_srgb8(195, 205, 213),
             surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
             surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
-            backdrop_light: Color::from_srgb8(102, 114, 125),
-            backdrop_dark: Color::from_srgb8(66, 77, 88),
+            backdrop_light: Color::from_srgb8(193, 207, 210),
+            backdrop_dark: Color::from_srgb8(25, 40, 37),
         },
     },
     SceneSpec {
@@ -59,8 +59,8 @@ pub const SCENES: [SceneSpec; 5] = [
             text_secondary: Color::from_srgb8(205, 198, 218),
             surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
             surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
-            backdrop_light: Color::from_srgb8(149, 130, 146),
-            backdrop_dark: Color::from_srgb8(85, 77, 104),
+            backdrop_light: Color::from_srgb8(170, 130, 147),
+            backdrop_dark: Color::from_srgb8(1, 19, 27),
         },
     },
     SceneSpec {
@@ -73,8 +73,22 @@ pub const SCENES: [SceneSpec; 5] = [
             text_secondary: Color::from_srgb8(186, 201, 187),
             surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
             surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
-            backdrop_light: Color::from_srgb8(105, 123, 109),
-            backdrop_dark: Color::from_srgb8(62, 81, 68),
+            backdrop_light: Color::from_srgb8(169, 202, 193),
+            backdrop_dark: Color::from_srgb8(0, 9, 4),
+        },
+    },
+    SceneSpec {
+        name: "星夜",
+        image: "assets/scenes/starry.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(22, 26, 52),
+            accent: Color::from_srgb8(255, 224, 160),
+            text_primary: Color::from_srgb8(246, 247, 255),
+            text_secondary: Color::from_srgb8(185, 192, 220),
+            surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
+            surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
+            backdrop_light: Color::from_srgb8(231, 242, 247),
+            backdrop_dark: Color::from_srgb8(13, 21, 30),
         },
     },
 ];
@@ -93,7 +107,7 @@ mod tests {
 
     #[test]
     fn all_scenes_pass_contrast_guards() {
-        assert_eq!(SCENES.len(), 5, "POC 应有 5 个场景");
+        assert_eq!(SCENES.len(), 6, "沉浸世界应有 6 个场景");
         for spec in &SCENES {
             let p = &spec.palette;
             for (label, backdrop) in [

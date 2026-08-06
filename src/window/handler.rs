@@ -34,7 +34,9 @@ use crate::widget::{
 use crate::{Point, Rect, Size};
 
 use super::event::{WindowAppEvent, convert_event};
-use super::icon::{apply_windows_undecorated_style, load_window_icon};
+#[cfg(target_os = "windows")]
+use super::icon::apply_windows_undecorated_style;
+use super::icon::{window_icons, with_taskbar_icon};
 
 /// winit 应用处理器，驱动窗口生命周期与事件分发。
 ///
@@ -403,6 +405,76 @@ impl<A: App> Handler<'_, A> {
             }
         }
     }
+
+    /// 渲染一帧并 present (RedrawRequested 与启动预渲染共用)。
+    ///
+    /// 每帧心跳 → sync 绑定 → 焦点重建 → 布局 → 绘制 → 提交 wgpu。
+    /// 渲染失败时退出事件循环 (防御; Context::render 目前恒成功)。
+    fn render_frame(&mut self, event_loop: &ActiveEventLoop) {
+        let frame_start = Instant::now();
+        let mut rects = RectBatch::new();
+        self.texts.clear();
+        let screen = self.window.as_ref().map(|w| {
+            let size = w.inner_size();
+            Size::new(size.width as f32, size.height as f32)
+        });
+        if let Some(screen) = screen {
+            let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
+            // 每帧心跳先行：计时 / 过渡动画推进后，绑定闭包在 sync 中读到新状态。
+            self.app.tick(&ctx);
+            self.tree.sync(self.app);
+            self.tree.animate(&ctx);
+            self.focus.rebuild(&self.tree);
+            // 应用请求恢复焦点 (如面板关闭后回到打开面板的按钮)。请求一次性:
+            // 每帧存在即消费 (focus_restored 清除), 仅在焦点为空时应用 —
+            // 若关闭面板时焦点仍被占用 (如点击面板内组件关闭), 请求静默丢弃,
+            // 避免残留请求在用户稍后清焦 (Esc/点空白) 时误把焦点拉回按钮。
+            if let Some(id) = self.app.focus_request() {
+                self.app.focus_restored();
+                if self.focus.current().is_none() {
+                    self.focus.set_focus_by_id(id);
+                }
+            }
+            let prev = self.focus.previous().map(|p| p.to_vec());
+            let curr = self.focus.current().map(|p| p.to_vec());
+            self.dispatch_focus_changes(prev.as_deref(), curr.as_deref());
+            self.focus.acknowledge();
+            let size = self
+                .tree
+                .layout(crate::Constraints::tight(screen), &mut self.texts);
+            self.root_area = Rect::new(Point::ZERO, size);
+            self.tree.paint(self.root_area, &mut rects, &mut self.texts);
+            // 无边框窗口下自绘边框与圆角。
+            if self.config.border_thickness > 0.0 {
+                rects.push_rounded_border(
+                    self.root_area,
+                    self.config.border_color,
+                    self.config.border_radius,
+                    self.config.border_thickness,
+                );
+            }
+            self.update_ime();
+        }
+        if let Some(context) = &mut self.context {
+            // 应用层提供的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
+            if let Some(frame) = self.app.background_frame() {
+                context.set_background_frame(frame);
+            }
+            // Context::render 目前恒返回 true; 失败路径为防御 (退出事件循环)。
+            if !context.render(&rects, &mut self.texts) {
+                event_loop.exit();
+                return;
+            }
+        }
+        if !self.first_frame_done {
+            self.first_frame_done = true;
+            // 首次调用必为显示前的预渲染 (resume_window 先调再 set_visible)。
+            log::info!("预渲染首帧耗时：{:?}", frame_start.elapsed());
+        }
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
 }
 
 impl<A: App> ApplicationHandler for Handler<'_, A> {
@@ -424,11 +496,19 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 (m_pos.y as f64 + (m_size.height as f64 - window_height) / 2.0).max(0.0),
             )
         });
+        let (window_icon, taskbar_icon) = window_icons(&self.config.logo_name);
         let mut attrs = WindowAttributes::default()
             .with_title(&self.config.title)
             .with_visible(false)
-            .with_window_icon(load_window_icon(&self.config.logo_name))
             .with_inner_size(LogicalSize::new(window_width, window_height));
+        // 任务栏按钮图标取 ICON_BIG; winit 0.30 的 with_window_icon 只设 ICON_SMALL
+        // (标题栏), 不补 ICON_BIG 时任务栏偶发显示系统缺省图标 (见 icon::with_taskbar_icon)。
+        attrs = with_taskbar_icon(attrs, taskbar_icon);
+        attrs = attrs.with_window_icon(window_icon);
+        // 显式居中位置 (同时是最大化窗口的还原位置: 取消最大化后回到屏幕中央)。
+        // 注意: 不设 with_maximized —— winit 的 create_window 对 maximized 属性会调
+        // set_maximized → ShowWindow(SW_MAXIMIZE), 无视 with_visible(false) 直接让
+        // 窗口在 GPU 初始化期间全屏可见 (空表面白屏一闪)。见下方「先显示再最大化」。
         if let Some(pos) = position {
             attrs = attrs.with_position(pos);
         }
@@ -469,15 +549,22 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 return;
             }
         }
+        // 先持有窗口引用: 预渲染首帧需要查询 inner_size。
+        self.window = Some(Arc::clone(&window));
+        // 预渲染首帧: 隐藏时渲染 + present, 显示时直接见内容 — 避免首帧就绪前白屏。
+        // 平台注: 已在 Windows/DX12 验证。Wayland 上隐藏表面未映射, get_current_texture
+        // 返回 Outdated/Lost 导致预渲染帧被跳过 — 优雅退化为旧行为 (无白屏增益, 无崩溃)。
+        self.render_frame(event_loop);
         window.set_visible(true);
+        // 先以普通尺寸显示 (预渲染内容已在屏), 再最大化 — 而非在 create_window 设
+        // maximized (那会让窗口在 GPU 初始化期间全屏白屏)。最大化过程有内容, 无白屏。
+        if self.config.maximized {
+            window.set_maximized(true);
+        }
         log::info!("窗口已显示");
         // 机器可读启动基准 (ASCII, 供 tools/benchmark.ps1 解析)。
         log::info!("perf startup_to_visible {:?}", self.boot.elapsed());
-        self.window = Some(window);
-        // 持续渲染模式：请求首帧，之后每帧结束再请求下一帧
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        // 持续渲染模式: render_frame 末尾已请求首帧, 之后每帧结束再请求下一帧。
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -553,57 +640,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 }
             }
             WindowEvent::RedrawRequested => {
-                let frame_start = Instant::now();
-                let mut rects = RectBatch::new();
-                self.texts.clear();
-                let screen = self.window.as_ref().map(|w| {
-                    let size = w.inner_size();
-                    Size::new(size.width as f32, size.height as f32)
-                });
-                if let Some(screen) = screen {
-                    let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
-                    // 每帧心跳先行：计时 / 过渡动画推进后，绑定闭包在 sync 中读到新状态。
-                    self.app.tick(&ctx);
-                    self.tree.sync(self.app);
-                    self.tree.animate(&ctx);
-                    self.focus.rebuild(&self.tree);
-                    let prev = self.focus.previous().map(|p| p.to_vec());
-                    let curr = self.focus.current().map(|p| p.to_vec());
-                    self.dispatch_focus_changes(prev.as_deref(), curr.as_deref());
-                    self.focus.acknowledge();
-                    let size = self
-                        .tree
-                        .layout(crate::Constraints::tight(screen), &mut self.texts);
-                    self.root_area = Rect::new(Point::ZERO, size);
-                    self.tree.paint(self.root_area, &mut rects, &mut self.texts);
-                    // 无边框窗口下自绘边框与圆角。
-                    if self.config.border_thickness > 0.0 {
-                        rects.push_rounded_border(
-                            self.root_area,
-                            self.config.border_color,
-                            self.config.border_radius,
-                            self.config.border_thickness,
-                        );
-                    }
-                    self.update_ime();
-                }
-                if let Some(context) = &mut self.context {
-                    // 应用层提供的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
-                    if let Some(frame) = self.app.background_frame() {
-                        context.set_background_frame(frame);
-                    }
-                    if !context.render(&rects, &mut self.texts) {
-                        event_loop.exit();
-                        return;
-                    }
-                }
-                if !self.first_frame_done {
-                    self.first_frame_done = true;
-                    log::info!("首帧渲染耗时：{:?}", frame_start.elapsed());
-                }
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
+                self.render_frame(event_loop);
             }
             _ => {}
         }
@@ -641,26 +678,26 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         while let Ok(event) = self.window_event_rx.try_recv() {
             self.apply_window_event(event, event_loop);
         }
-        // 控制流：
-        // 可见时：主动 request_redraw + WaitUntil(16ms), 等效 60fps 重绘。
-        //   WaitUntil 比 Poll 显著省 CPU (空载时 Poll 一秒跑几千次，WaitUntil 仅
-        //   ~60 次), 同时 OS 调度超时 / 外部事件 / 模态菜单 close 仍能及时唤醒
-        //   winit, 行为等价。
+        // 控制流：统一 WaitUntil(16ms) ≈ 60fps, 无论窗口可见与否。
+        //   可见时：主动 request_redraw 驱动渲染; WaitUntil 比 Poll 省 CPU
+        //     (空载时 Poll 一秒跑几千次，WaitUntil 仅 ~60 次), 同时 OS 调度超时 /
+        //     外部事件 / 模态菜单 close 仍能及时唤醒 winit, 行为等价。
+        //   隐藏时：RedrawRequested 不会发 (窗口不可见), 但 about_to_wait 中的
+        //     app.tick() 仍每帧推进 (计时器 / 持久化 / 环境音)。用 WaitUntil 而非
+        //     Poll 限制 tick 频率至 ~60fps, 避免 Poll 空转 (数千 fps) 导致环境音
+        //     player.play()/set_volume() 被高频调用, 干扰音频线程缓冲区 → 噪声。
         //   关键：muda 托盘菜单的 TrackPopupMenu 是 Windows 阻塞 API, 会在主线程
-        //         跑模态消息循环，期间 winit 事件循环被冻结; 菜单关闭后必须主动
-        //         重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
-        //         过滤/丢弃, UI 卡在旧值不更新 (读秒停止、按钮 label 不切)。
-        // 隐藏时：Poll 驱动 app.tick (RedrawRequested 不会发，因为窗口不可见)。
+        //     跑模态消息循环，期间 winit 事件循环被冻结; 菜单关闭后必须主动
+        //     重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
+        //     过滤/丢弃, UI 卡在旧值不更新 (读秒停止、按钮 label 不切)。
         if self.is_visible {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
-        } else {
-            event_loop.set_control_flow(ControlFlow::Poll);
         }
+        event_loop.set_control_flow(ControlFlow::WaitUntil(
+            Instant::now() + Duration::from_millis(16),
+        ));
     }
 }
 
@@ -689,12 +726,28 @@ impl<A: App> Handler<'_, A> {
         self.is_visible = false;
     }
 
+    /// 最大化窗口并同步应用层最大化状态 (标题栏图标据此切换 □/□□)。
+    /// 用于隐藏态阶段流转自动呼出时的"默认最大化"；手动 ToggleVisible 不走此路径。
+    fn maximize_window(&mut self) {
+        if let Some(window) = &self.window {
+            window.set_maximized(true);
+        }
+        self.app.maximized_changed(true);
+    }
+
     /// 显示窗口 + 抢焦点 + 重绘。winit 的 SW_SHOW 默认不抢焦点，
-    /// 显式 focus_window 防止"已显示但被遮" (尤其在另一 app 后台时)。
+    /// 显式抢前台防止"已显示但被遮" (尤其在另一 app 后台时)。
     fn show_window(&self) {
         if let Some(window) = &self.window {
             window.set_visible(true);
             window.request_redraw();
+            // Windows: winit 的 focus_window() 走合成 Alt + SetForegroundWindow,
+            // 对后台常驻进程受前台锁限制而静默失败 —— 窗口"已显示但被遮"。
+            // 用 foreground 模块的 AttachThreadInput 方案硬抢 (先直调, 失败再挂接);
+            // 其它平台保留 winit 原生 focus_window。
+            #[cfg(target_os = "windows")]
+            super::foreground::bring_to_foreground(window);
+            #[cfg(not(target_os = "windows"))]
             window.focus_window();
         }
     }
@@ -713,11 +766,13 @@ impl<A: App> Handler<'_, A> {
             }
             WindowAppEvent::Quit => event_loop.exit(),
             WindowAppEvent::PhaseAdvanced => {
-                // 隐藏态时阶段流转 → 自动呼出 (用户可能没在电脑前，或在另一 app)
+                // 隐藏态时阶段流转 → 自动呼出 (用户可能没在电脑前，或在另一 app)，
+                // 默认最大化呼出 (沉浸主界面)。手动 ToggleVisible 不强制最大化。
                 if !self.is_visible {
                     self.is_visible = true;
-                    log::info!("阶段流转，自动呼出窗口");
+                    log::info!("阶段流转，自动呼出窗口 (默认最大化)");
                     self.show_window();
+                    self.maximize_window();
                 }
             }
         }

@@ -34,6 +34,8 @@ pub struct Button {
     hovered: bool,
     pressed: bool,
     focused: bool,
+    /// 稳定焦点标识 (按名聚焦: 弹层面板关闭后焦点回到打开面板的按钮)。
+    id: Option<&'static str>,
     /// layout 缓存：内容区矩形 (相对自身原点)。
     child_size: Size,
     /// layout 缓存：自身绝对矩形 (用于焦点命中与 IME 区域)。
@@ -62,9 +64,16 @@ impl Button {
             hovered: false,
             pressed: false,
             focused: false,
+            id: None,
             child_size: Size::ZERO,
             area: Rect::default(),
         }
+    }
+
+    /// 设置稳定焦点标识 (按名聚焦: 面板关闭后焦点回到此按钮)。
+    pub fn id(mut self, id: &'static str) -> Self {
+        self.id = Some(id);
+        self
     }
 
     /// 设置点击时产出的消息。
@@ -281,6 +290,17 @@ impl Widget for Button {
 
     fn focusable(&self) -> bool {
         true
+    }
+
+    /// 重置焦点视觉: 清除焦点环与按压态 (面板隐藏时被容器调用)。
+    fn reset_focus(&mut self) {
+        self.focused = false;
+        self.pressed = false;
+    }
+
+    /// 稳定焦点标识 (`.id()` 设置; 供 `App::focus_request` 按名聚焦)。
+    fn focus_id(&self) -> Option<&'static str> {
+        self.id
     }
 
     fn children(&self) -> &[Node] {
