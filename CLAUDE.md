@@ -87,6 +87,7 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 |----------|----------|-------------------|-------------|
 | **旗舰/十年战略**(数据层/建造实录/付费边界) | `docs/intent/companion-flagship.md` + `tasks/plan-flagship-roadmap.md` | `docs/specs/companion-flagship-pricing.md` | `danqing-flagship-strategy`, `danqing-project-state` |
 | **场景动效**(shader/uniform/动效) | `docs/CONTEXT/scenes-guidelines.md` | 对应场景 spec(`docs/specs/pomodoro-scene-motion*.md`) | `scene-motion-uv-displacement`, `scene-lru-pattern` |
+| **AI 场景底图升级**(生图/去水印/适配) | `memory/ai-scene-upgrade-workflow.md` + `docs/CONTEXT/ai-image-prompts.md` | `tools/remove_watermark.py` + `tools/export-scenes.py` | `ai-scene-uv-displacement-preference`, `ai-scene-no-veil` |
 | **跨模块重构**(依赖/渲染/事件) | `docs/CONTEXT/architecture.md` | 相关模块源码 + 测试 | — |
 | **窗口/平台**(winit/IME/托盘/热键) | `src/window/mod.rs` | `docs/CONTEXT/architecture.md` §平台适配层 | `danqing-visual-debug-tooling` |
 | **新增组件**(widget) | 一个现有同族组件(照模式) | `src/theme.rs` | — |
