@@ -38,6 +38,27 @@
 - **水印矩形参考**: 推荐尺寸 ≤350×120 (右下角) 或 ≤300×100 (底部中间); bonfire/forest 曾用 400×224 矩形偏大
 - **去水印方法**: 暗色场景 (starry/bonfire/forest) 用纯色覆盖比纹理合成更干净; `remove_watermark.py` 默认纹理合成适用于亮色/纹理复杂区域
 
+### 雪原 ✅ (2026-08-06)
+- **工具**: 元宝 AI
+- **提示词**: `Vast pristine snow field stretching to distant mountain silhouettes, soft blue-white atmosphere, gentle snowfall particles in air, cold indigo twilight sky, no text, no people, no watermarks, atmospheric depth, cinematic composition, 1536x1024`
+- **结果**: `assets/scenes/snow_ai_2.png` → `snow.png`
+- **动效预留**: 飘雪粒子 (程序化) + 雪面微光 (乘性提亮)
+- **调色板**: base (200, 210, 225) 冷蓝白
+
+### 沙漠 ✅ (2026-08-06)
+- **工具**: 元宝 AI
+- **提示词**: `Rolling sand dunes with smooth curves, warm golden sunset glow at horizon, long shadows across sand ripples, amber and deep orange palette, heat haze atmosphere, no text, no people, no watermarks, vast open landscape, cinematic composition, 1536x1024`
+- **结果**: `assets/scenes/sand_ai_2.png` → `sand.png`
+- **动效预留**: 热浪空气扭曲 (UV 位移) + 沙尘微粒 (additive)
+- **调色板**: base (180, 130, 80) 暖沙色
+
+### 竹林 ✅ (2026-08-06)
+- **工具**: 元宝 AI
+- **提示词**: `Tall thin bamboo stalks in misty grove, soft diffused light filtering through canopy, teal and emerald green palette, atmospheric fog between stalks, serene Eastern aesthetic, no text, no people, no watermarks, cinematic composition, 1536x1024`
+- **结果**: `assets/scenes/bamboo_ai_2.png` → `bamboo.png`
+- **动效预留**: 竹叶摇曳 (UV 位移) + 光斑闪烁 (additive) + 薄雾漂移 (additive)
+- **调色板**: base (30, 60, 50) 深翠绿
+
 ## 待重新生成
 
 ### 山 ✅ (2026-08-04 通过)
@@ -77,6 +98,26 @@ atmospheric, moody, dark palette, depth of field, layered composition
 | 山 | `mountain ridgelines, cloud fog, dusk, layered peaks` |
 | 火 | `bonfire campfire, embers, warm glow, dark forest background` |
 | 星夜 | `milky way, galactic dust lanes, deep indigo night sky, mountain silhouettes` |
+| 雪原 | `snow field, pristine white snow, distant mountain silhouettes, cold blue atmosphere` |
+| 沙漠 | `sand dunes, golden hour sunset, warm amber light, vast desert landscape` |
+| 竹林 | `bamboo grove, thin stalks, soft mist, dappled light, green teal palette` |
+
+## 待生成 (2026-08-06)
+
+### 雪原
+- **提示词**: `Vast pristine snow field stretching to distant mountain silhouettes, soft blue-white atmosphere, gentle snowfall particles in air, cold indigo twilight sky, no text, no people, no watermarks, atmospheric depth, cinematic composition, 1536x1024`
+- **动效预留**: 飘雪粒子 (程序化, 类雨丝范式) + 雪面微光 (乘性提亮)
+- **调色板**: base (200, 210, 225) 冷蓝白
+
+### 沙漠
+- **提示词**: `Rolling sand dunes with smooth curves, warm golden sunset glow at horizon, long shadows across sand ripples, amber and deep orange palette, heat haze atmosphere, no text, no people, no watermarks, vast open landscape, cinematic composition, 1536x1024`
+- **动效预留**: 热浪空气扭曲 (UV 位移, 类海浪范式) + 沙尘微粒 (additive)
+- **调色板**: base (180, 130, 80) 暖沙色
+
+### 竹林
+- **提示词**: `Tall thin bamboo stalks in misty grove, soft diffused light filtering through canopy, teal and emerald green palette, atmospheric fog between stalks, serene Eastern aesthetic, no text, no people, no watermarks, cinematic composition, 1536x1024`
+- **动效预留**: 竹叶摇曳 (UV 位移, 轻柔横摆) + 光斑闪烁 (additive) + 薄雾漂移 (additive, 类森林范式)
+- **调色板**: base (30, 60, 50) 深翠绿
 
 ## 迭代记录格式
 

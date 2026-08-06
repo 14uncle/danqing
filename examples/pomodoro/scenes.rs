@@ -6,7 +6,7 @@
 use danqing::{Color, ScenePalette, SceneSpec};
 
 /// POC 场景清单 (数组顺序即 ◀/▶ 切换顺序)。
-pub const SCENES: [SceneSpec; 6] = [
+pub const SCENES: [SceneSpec; 9] = [
     SceneSpec {
         name: "篝火",
         image: "assets/scenes/bonfire.png",
@@ -89,6 +89,48 @@ pub const SCENES: [SceneSpec; 6] = [
             surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
             backdrop_light: Color::from_srgb8(231, 242, 247),
             backdrop_dark: Color::from_srgb8(13, 21, 30),
+        },
+    },
+    SceneSpec {
+        name: "雪原",
+        image: "assets/scenes/snow.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(200, 210, 225),
+            accent: Color::from_srgb8(80, 120, 160),
+            text_primary: Color::from_srgb8(240, 245, 255),
+            text_secondary: Color::from_srgb8(180, 195, 215),
+            surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
+            surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
+            backdrop_light: Color::from_srgb8(206, 222, 245),
+            backdrop_dark: Color::from_srgb8(10, 52, 98),
+        },
+    },
+    SceneSpec {
+        name: "沙漠",
+        image: "assets/scenes/sand.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(180, 130, 80),
+            accent: Color::from_srgb8(220, 180, 100),
+            text_primary: Color::from_srgb8(255, 245, 230),
+            text_secondary: Color::from_srgb8(200, 170, 130),
+            surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
+            surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
+            backdrop_light: Color::from_srgb8(255, 207, 141),
+            backdrop_dark: Color::from_srgb8(52, 20, 0),
+        },
+    },
+    SceneSpec {
+        name: "竹林",
+        image: "assets/scenes/bamboo.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(30, 60, 50),
+            accent: Color::from_srgb8(100, 180, 130),
+            text_primary: Color::from_srgb8(220, 240, 230),
+            text_secondary: Color::from_srgb8(150, 180, 165),
+            surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
+            surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
+            backdrop_light: Color::from_srgb8(238, 255, 250),
+            backdrop_dark: Color::from_srgb8(5, 38, 30),
         },
     },
 ];

@@ -626,7 +626,7 @@ SCENES = [
         "name": "星夜",
         # AI 生成底图 (元宝, 2026-08-06): 银河光带左下→右上斜跨, 暗山脊剪影。
         # 星点不烘焙 — 运行时由 shader 程序化渲染 (雨场景范式, starry_base 常驻)。
-        "ai_base": "starry_clean.png",
+        "ai_base": "starry.png",
         "palette": {
             "base": (22, 26, 52),
             "accent": (120, 140, 200),
@@ -640,6 +640,48 @@ SCENES = [
             "accent": (255, 224, 160),
             "text_primary": (246, 247, 255),
             "text_secondary": (185, 192, 220),
+            "surface": ((0, 0, 0), 0.25),
+            "surface_input": ((0, 0, 0), 0.38),
+        },
+    },
+    {
+        "key": "snow",
+        "name": "雪原",
+        # AI 生成底图 (元宝, 2026-08-06): 雪原+远山+雾气+飘雪。
+        "ai_base": "snow.png",
+        "palette": {
+            "base": (200, 210, 225),
+            "accent": (80, 120, 160),
+            "text_primary": (240, 245, 255),
+            "text_secondary": (180, 195, 215),
+            "surface": ((0, 0, 0), 0.25),
+            "surface_input": ((0, 0, 0), 0.38),
+        },
+    },
+    {
+        "key": "sand",
+        "name": "沙漠",
+        # AI 生成底图 (元宝, 2026-08-06): 沙丘曲线+落日余晖。
+        "ai_base": "sand.png",
+        "palette": {
+            "base": (180, 130, 80),
+            "accent": (220, 180, 100),
+            "text_primary": (255, 245, 230),
+            "text_secondary": (200, 170, 130),
+            "surface": ((0, 0, 0), 0.25),
+            "surface_input": ((0, 0, 0), 0.38),
+        },
+    },
+    {
+        "key": "bamboo",
+        "name": "竹林",
+        # AI 生成底图 (元宝, 2026-08-06): 翠竹+薄雾+光斑, 东方意境。
+        "ai_base": "bamboo.png",
+        "palette": {
+            "base": (30, 60, 50),
+            "accent": (100, 180, 130),
+            "text_primary": (220, 240, 230),
+            "text_secondary": (150, 180, 165),
             "surface": ((0, 0, 0), 0.25),
             "surface_input": ((0, 0, 0), 0.38),
         },
