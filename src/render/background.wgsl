@@ -171,19 +171,27 @@ const SEA_SWELL_GAIN: f32 = 0.015;     // 位移幅度上限 (纵向 uv; 960x640
 const GLINT_DENSITY: f32 = 120.0;      // 列密度 (960px 窗 ≈ 8px/列)
 const GLINT_RADIUS: f32 = 0.005;       // 点半径 (纵向 uv; 960px 窗 ≈ 6px 直径)
 const GLINT_ASPECT: f32 = 1.5;         // 场景画布宽高比 (1536×1024), 圆点修正
-const GLINT_BAND_TOP: f32 = 0.72;      // 散布带上缘 (uv.y, 对齐静态图第一叠波带)
+const GLINT_BAND_TOP: f32 = 0.48;      // 散布带上缘 (uv.y, 对齐 AI 底图浪花带)
 const GLINT_BAND_SPAN: f32 = 0.26;     // 散布带纵向跨度 (至 uv.y ≈ 0.98)
 const GLINT_GAIN: f32 = 0.22;          // 点亮度上限 (乘性提亮; 0.14 太隐, 0.30 目测突兀)
 const GLINT_ON: f32 = 0.88;            // hash > 此值的列才有碎点 (~14 颗)
 
+// 水汽: 浪花破碎带的飘散水雾 (additive, 低 alpha)。
+// 对齐 AI 底图浪花带 (Y≈0.42-0.58), 用 mist_pattern 生成飘动雾气。
+const SEA_MIST_Y: f32 = 0.55;          // 雾带中心 (uv.y, 靠近浪花线)
+const SEA_MIST_HALF: f32 = 0.08;       // 雾带半宽
+const SEA_MIST_ALPHA: f32 = 0.25;      // 峰值 alpha (加浓可见)
+const SEA_MIST_COLOR: vec3<f32> = vec3<f32>(0.75, 0.80, 0.82); // 淡青白, 匹配浪花水雾
+
 // 波带涌动位移场: 返回纵向采样偏移 (uv 单位, 值域约 ±SWELL_GAIN)。
 // 同一偏移施加于 from/to 两张场景图, 交叉淡化两端一致无跳变。
+// 2026-08-06: 改为从远(上)往近(下)行进 — 相位主轴 uv.y, 时间反向。
 fn sea_swell(uv: vec2<f32>, t: f32) -> f32 {
     let mask = smoothstep(SEA_MASK_TOP, SEA_MASK_FULL, uv.y);
     let depth = smoothstep(SEA_MASK_TOP, 1.0, uv.y); // 0 天空 → 1 底部, 近水动得多
-    // 相位含小 y 项: 相邻行位移不同步, 波峰不成直线 (水面感); 同向行进 (调参轮 2)。
-    let w1 = sin(6.2831853 * (2.0 * uv.x + 0.5 * uv.y) - t * SEA_W * 2.0);
-    let w2 = sin(6.2831853 * (3.5 * uv.x - 0.8 * uv.y) - t * SEA_W * 3.0 + 2.3);
+    // 相位主轴 uv.y (纵向), 小 x 项破横向对齐; +t 使波从远(上)往近(下)行进。
+    let w1 = sin(6.2831853 * (2.5 * uv.y + 0.3 * uv.x) + t * SEA_W * 2.0);
+    let w2 = sin(6.2831853 * (4.0 * uv.y - 0.5 * uv.x) + t * SEA_W * 3.0 + 2.3);
     return (0.6 * w1 + 0.4 * w2) * mask * (0.4 + 0.6 * depth) * SEA_SWELL_GAIN;
 }
 
@@ -206,6 +214,27 @@ fn sea_glints(uv: vec2<f32>, t: f32) -> f32 {
     );
     let spot = 1.0 - smoothstep(GLINT_RADIUS * 0.15, GLINT_RADIUS, d);
     return spot * on * twinkle * GLINT_GAIN;
+}
+
+// 水汽层: 浪花拍打处向上升起的水雾。
+// 用 haze_noise (双线性 value noise) 生成无结构感的絮状雾,
+// 采样 y 随时间上移模拟升腾。
+fn sea_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
+    let aspect = u.screen_w / max(u.screen_h, 1.0);
+    // 上升: 采样 y 随时间递减 → 雾团从浪花线向上漂浮。
+    let rise_speed = 0.015;
+    let sample_y = uv.y + t * rise_speed;
+    // 双层 noise: 低频定大势, 高频添碎屑。
+    let p1 = vec2<f32>(uv.x * aspect * 4.0, sample_y * 3.0);
+    let p2 = vec2<f32>(uv.x * aspect * 8.0, sample_y * 6.0);
+    let n = haze_noise(p1) * 0.65 + haze_noise(p2) * 0.35;
+    // 浓度: 靠近浪花线最浓, 向上渐淡。
+    let dist = uv.y - SEA_MIST_Y;
+    let rise_fade = smoothstep(0.18, 0.0, dist);
+    let base_fade = 1.0 - smoothstep(0.0, SEA_MIST_HALF, abs(uv.y - SEA_MIST_Y));
+    let x_fade = smoothstep(0.0, 0.12, uv.x) * smoothstep(1.0, 0.88, uv.x);
+    let density = n * rise_fade * base_fade * x_fade;
+    return SEA_MIST_COLOR * density * SEA_MIST_ALPHA;
 }
 
 // ---- 共享: 风驱雾纹 (sum-of-sines 伪噪声, 2D 各向同性, 不动采样坐标) ----
@@ -483,6 +512,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // 亮场景乘性碎点提亮 (不改色相); 涌动已在上方采样坐标中体现。
         color = vec4<f32>(
             color.rgb * (1.0 + sea_glints(in.uv, u.time) * u.sea_intensity),
+            color.a,
+        );
+        // 水汽: 浪花破碎带 additive 雾气, 增氛围。
+        color = vec4<f32>(
+            color.rgb + sea_mist(in.uv, u.rain_time) * u.sea_intensity,
             color.a,
         );
     }
