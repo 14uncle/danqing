@@ -22,6 +22,12 @@ struct Uniforms {
     starry_base: f32,
     screen_w: f32,
     screen_h: f32,
+    blacksmith_intensity: f32,
+    cave_intensity: f32,
+    nightmarket_intensity: f32,
+    train_intensity: f32,
+    _pad1: f32,
+    _pad2: f32,
 }
 
 // ---- 雨幕 (雨场景; 静态图已去丝, 雨全部由本段程序化渲染) ----
@@ -309,6 +315,120 @@ fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
     return FOREST_MIST_COLOR * pattern * band * FOREST_MIST_ALPHA;
 }
 
+// ---- 洞穴水滴动效 (洞穴场景) ----
+const CAVE_DROP1_X: f32 = 0.32;
+const CAVE_DROP1_WATER_Y: f32 = 0.76;
+const CAVE_DROP1_START_Y: f32 = 0.15;
+const CAVE_DROP2_X: f32 = 0.44;
+const CAVE_DROP2_WATER_Y: f32 = 0.68;
+const CAVE_DROP2_START_Y: f32 = 0.10;
+const CAVE_DROP_PERIOD: f32 = 5.0;
+const CAVE_DROP_RADIUS: f32 = 0.003;
+const CAVE_RIPPLE_DUR: f32 = 1.5;
+const CAVE_RIPPLE_MAX_R: f32 = 0.08;
+const CAVE_RIPPLE_WIDTH: f32 = 0.004;
+const CAVE_RIPPLE_DISP: f32 = 0.02;
+
+fn cave_single_drop(uv: vec2<f32>, t: f32, drop_x: f32, water_y: f32, start_y: f32, phase: f32, drop_vis: f32, ripple_scale: f32, mask_below: f32, mask_above: f32) -> vec2<f32> {
+    let ct = fract((t + phase) / CAVE_DROP_PERIOD);
+    var brightness = 0.0;
+    var displacement = 0.0;
+    if (ct < 0.5) {
+        let progress = ct / 0.5;
+        let ease = progress * progress;
+        let drop_y = mix(start_y, water_y, ease);
+        let dx = (uv.x - drop_x) / (CAVE_DROP_RADIUS * drop_vis);
+        let dy = (uv.y - drop_y) / (CAVE_DROP_RADIUS * drop_vis * 2.5);
+        let dd = dx * dx + dy * dy;
+        brightness += (1.0 - smoothstep(0.0, 1.0, dd)) * drop_vis * 0.5;
+    }
+    if (ct >= 0.5) {
+        let ripple_t = ct - 0.5;
+        let progress = ripple_t / 0.5;
+        let radius = progress * CAVE_RIPPLE_MAX_R * ripple_scale;
+        let d = distance(vec2<f32>(uv.x, uv.y), vec2<f32>(drop_x, water_y));
+        let ring1 = smoothstep(radius - CAVE_RIPPLE_WIDTH, radius, d) * smoothstep(radius + CAVE_RIPPLE_WIDTH, radius, d);
+        let r2 = radius * 0.6;
+        let ring2 = smoothstep(r2 - CAVE_RIPPLE_WIDTH * 0.6, r2, d) * smoothstep(r2 + CAVE_RIPPLE_WIDTH * 0.6, r2, d) * 0.3;
+        let ring = ring1 + ring2;
+        let water_mask = smoothstep(water_y - mask_below, water_y + mask_above, uv.y);
+        let fade = (1.0 - progress);
+        brightness += ring * fade * water_mask * ripple_scale * 0.25;
+        displacement += ring * fade * CAVE_RIPPLE_DISP * ripple_scale * water_mask * -1.0;
+    }
+    return vec2<f32>(brightness, displacement);
+}
+
+fn cave_droplets(uv: vec2<f32>, t: f32) -> vec2<f32> {
+    let d1 = cave_single_drop(uv, t, CAVE_DROP1_X, CAVE_DROP1_WATER_Y, CAVE_DROP1_START_Y, 0.0, 1.2, 1.2, 0.08, 0.02);
+    let d2 = cave_single_drop(uv, t, CAVE_DROP2_X, CAVE_DROP2_WATER_Y, CAVE_DROP2_START_Y, 1.5, 0.8, 0.25, 0.04, 0.01);
+    return d1 + d2;
+}
+
+// ---- 火车动效 (火车场景) ----
+// 车窗雨滴 (由上往下滑落) + 车厢内光呼吸 (暖色径向渐变)。
+const TR_DROP_DENSITY: f32 = 60.0;
+const TR_DROP_RADIUS: f32 = 0.006;
+const TR_DROP_ON: f32 = 0.65;
+const TR_DROP_GAIN: f32 = 0.3;
+const TR_DROP_BAND_L: f32 = 0.48;
+const TR_DROP_BAND_R: f32 = 0.94;
+const TR_DROP_BAND_TOP: f32 = 0.05;
+const TR_DROP_BAND_BOT: f32 = 0.88;
+const TR_DROP_SPEED: f32 = 0.07;
+const TR_TRAIL_LEN: f32 = 0.03;
+const TR_TRAIL_ALPHA: f32 = 0.2;
+
+const TR_GLOW_CENTER: vec2<f32> = vec2<f32>(0.15, 0.12);
+const TR_GLOW_RADIUS: f32 = 0.35;
+const TR_GLOW_COLOR: vec3<f32> = vec3<f32>(1.0, 0.85, 0.5);
+const TR_GLOW_ALPHA: f32 = 0.12;
+const TR_GLOW_FREQ: f32 = 0.125;
+
+fn train_window_drops(uv: vec2<f32>, t: f32) -> f32 {
+    let col = floor(uv.x * TR_DROP_DENSITY);
+    let rnd = rain_hash(col * 1.37 + 501.0);
+    let on = step(TR_DROP_ON, rain_hash(col * 3.1 + 537.0));
+    let cx = (col + 0.3 + 0.4 * rnd) / TR_DROP_DENSITY;
+
+    let base_y = rain_hash(col * 3.1 + 513.0);
+    let speed_factor = 0.7 + 0.6 * rain_hash(col * 7.3 + 601.0);
+    let drop_speed = TR_DROP_SPEED * speed_factor;
+
+    let travel = TR_DROP_BAND_BOT - TR_DROP_BAND_TOP;
+    let raw_y = base_y + t * drop_speed;
+    let cycle_y = fract(raw_y);
+    let cy = TR_DROP_BAND_TOP + cycle_y * travel;
+
+    let in_window = step(TR_DROP_BAND_L, cx) * step(cx, TR_DROP_BAND_R);
+    let fade_out = 1.0 - smoothstep(0.6, 1.0, cycle_y);
+
+    let k = 1.0 + floor(rnd * 2.0);
+    let s = 0.7 + 0.3 * sin(t * FIRE_W * k + rnd * 6.2831853);
+    let glint = s * s;
+
+    let d = distance(vec2<f32>(uv.x, uv.y), vec2<f32>(cx, cy));
+    let spot = 1.0 - smoothstep(TR_DROP_RADIUS * 0.2, TR_DROP_RADIUS, d);
+
+    let trail_top = cy - TR_TRAIL_LEN;
+    let in_trail_y = smoothstep(trail_top - 0.001, trail_top, uv.y) * smoothstep(cy + 0.001, cy, uv.y);
+    let trail纵向 = (uv.y - trail_top) / TR_TRAIL_LEN;
+    let trail_x_dist = abs(uv.x - cx);
+    let trail横向 = 1.0 - smoothstep(0.0, TR_DROP_RADIUS * 1.5, trail_x_dist);
+    let trail = in_trail_y * trail纵向 * trail横向 * TR_TRAIL_ALPHA;
+
+    let total = max(spot, trail) * on * in_window * glint * fade_out * TR_DROP_GAIN;
+    return total;
+}
+
+fn train_interior_glow(uv: vec2<f32>, t: f32) -> f32 {
+    let d = length(uv - TR_GLOW_CENTER);
+    let radial = 1.0 - smoothstep(TR_GLOW_RADIUS * 0.2, TR_GLOW_RADIUS, d);
+    let interior = 1.0 - smoothstep(0.40, 0.48, uv.x);
+    let breath = 0.5 + 0.5 * sin(t * 6.2831853 * TR_GLOW_FREQ);
+    return radial * interior * breath * TR_GLOW_ALPHA;
+}
+
 // ---- 星夜动效 (星夜场景) ----
 // 雨场景范式: 静态图去星, 星野全部运行时渲染。
 // 2026-08-03 银河升级 (Task 5, spec: docs/specs/pomodoro-scene-starry-milkyway.md):
@@ -536,6 +656,22 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // 参考雨场景改造范式)。 t 同上, 用 u.rain_time 避免 8s wrap 跳变。
         color = vec4<f32>(
             color.rgb + forest_mist(in.uv, u.rain_time) * u.forest_intensity,
+            color.a,
+        );
+    }
+    if (u.cave_intensity > 0.0) {
+        color = vec4<f32>(
+            color.rgb + vec3<f32>(cave_droplets(in.uv, u.time).x) * vec3<f32>(0.8, 0.9, 1.0) * u.cave_intensity,
+            color.a,
+        );
+    }
+    if (u.train_intensity > 0.0) {
+        color = vec4<f32>(
+            color.rgb + vec3<f32>(train_window_drops(in.uv, u.time)) * u.train_intensity,
+            color.a,
+        );
+        color = vec4<f32>(
+            color.rgb + TR_GLOW_COLOR * train_interior_glow(in.uv, u.time) * u.train_intensity,
             color.a,
         );
     }

@@ -94,9 +94,24 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 | **性能/内存** | `tools/benchmark.ps1` | `docs/CONTEXT/architecture.md` | `wgpu-30-memory-lever`, `minidbg-symbol-preference` |
 | **构建/工具链** | — | `build.rs` + `.cargo/config.toml` | `windows-gnu-toolchain-lld-fix` |
 | **Pomodoro POC** | `examples/pomodoro/CLAUDE.md` | `docs/specs/phase2-pomodoro-poc.md` | — |
+| **九场景扩展**(新增场景/动效) | `tasks/plan-nine-scenes.md` + `tasks/todo-nine-scenes.md` | `docs/specs/pomodoro-nine-scenes.md` + 对应场景 spec | `scene-motion-uv-displacement`, `ai-scene-uv-displacement-preference` |
 | **Bug 修复** | 最小复现 + `cargo test` 输出 | 相关模块源码 | — |
 
 Agent 启动时的默认加载: `CLAUDE.md` + `MEMORY.md`(已自动加载)。CONTEXT 文档**不在默认加载之列**——仅在上述任务类型触发时按需加载。
+
+### Context refresh
+
+- 切换主要功能模块时,建议开新会话以避免陈旧上下文干扰。
+- 长会话中主动摘要进展:「目前完成 X、Y、Z,现在开始 W」。
+- 关键工作前主动压缩上下文,避免注意力分散。
+- 若 agent 输出偏离项目规范,检查是否上下文过期——重开会话通常能解决。
+
+### Memory maintenance
+
+- MEMORY.md 索引应与 `memory/` 目录文件一一对应;新增 memory 时必须同步更新索引。
+- memory 内容过时时更新文件本身,而非创建新 memory;删除已失效的 memory。
+- memory 中的 `**Why:**` 和 `**How to apply:**` 行是核心价值——确保每条 memory 都有明确的实践指导。
+- 引用已删除或重命名的 memory 链接(如 `[[name]]`)不报错,但应作为待补充标记及时清理。
 
 ## Documentation layout
 

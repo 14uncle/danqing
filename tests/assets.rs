@@ -76,14 +76,13 @@ fn ofl_license_exists() {
 fn ambient_audio_exists_and_within_size_budget() {
     let audio_dir = assets_dir().join("audio");
     // 与 examples/pomodoro/ambient.rs 的 SCENE_AUDIO 一一对应
-    // (篝火/海/雨/山/森林 CC0 + 星夜 程序化)。
+    // (篝火/海/雨/山/森林 CC0)。
     for name in [
         "bonfire.ogg",
         "sea.ogg",
         "rain.ogg",
         "mountain.ogg",
         "forest.ogg",
-        "starry.ogg",
     ] {
         let path = audio_dir.join(name);
         assert!(path.exists(), "环境音应存在: {}", path.display());

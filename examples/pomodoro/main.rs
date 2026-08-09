@@ -20,7 +20,6 @@ mod flash;
 mod hint;
 mod motion;
 mod scenes;
-mod starfield;
 mod state;
 mod stats;
 mod timer;
@@ -657,8 +656,10 @@ impl App for PomodoroApp {
         let sea = motion::sea_intensity(from, to, fade, self.motion_gain);
         let mountain = motion::mountain_intensity(from, to, fade, self.motion_gain);
         let forest = motion::forest_intensity(from, to, fade, self.motion_gain);
-        let starry = motion::starry_intensity(from, to, fade, self.motion_gain);
-        let starry_base = motion::starry_base(from, to, fade);
+        let blacksmith = motion::blacksmith_intensity(from, to, fade, self.motion_gain);
+        let cave = motion::cave_intensity(from, to, fade, self.motion_gain);
+        let nightmarket = motion::nightmarket_intensity(from, to, fade, self.motion_gain);
+        let train = motion::train_intensity(from, to, fade, self.motion_gain);
         Some(
             BackgroundFrame::new(from, to, fade, self.palette().base)
                 .with_motion(self.now.as_secs_f32(), rain)
@@ -666,8 +667,10 @@ impl App for PomodoroApp {
                 .with_sea(sea)
                 .with_mountain(mountain)
                 .with_forest(forest)
-                .with_starry(starry)
-                .with_starry_base(starry_base)
+                .with_blacksmith(blacksmith)
+                .with_cave(cave)
+                .with_nightmarket(nightmarket)
+                .with_train(train)
                 .with_rain_time(self.rain_clock),
         )
     }
@@ -1371,28 +1374,8 @@ fn run() -> anyhow::Result<()> {
         None => PomodoroApp::new_default(),
     };
 
-    // 星野纹理启动烘焙：真实星表 (Yale BSC5) → RGBA 位图，与场景图同画布
-    // (1536×1024), shader 与场景纹理共用 Cover 裁剪 UV, 星点与山脊线对齐。
-    // 常驻一张 ~6MB 纹理; 烘焙耗时计入启动门槛实测 (spec: 目标 <100ms)。
-    let bake_start = std::time::Instant::now();
-    let catalog = starfield::decode(starfield::STARS_BIN);
-    let starfield_rgba =
-        starfield::bake_starfield_rgba(&catalog, starfield::BAKE_WIDTH, starfield::BAKE_HEIGHT);
-    log::info!(
-        "星野烘焙：{} 星 → {}x{}, 耗时 {:?}",
-        catalog.len(),
-        starfield::BAKE_WIDTH,
-        starfield::BAKE_HEIGHT,
-        bake_start.elapsed(),
-    );
-
-    let background = BackgroundConfig::with_scenes(SCENES.iter().map(|s| s.image))
-        .scale(ScaleMode::Cover)
-        .with_starfield(
-            starfield_rgba,
-            starfield::BAKE_WIDTH,
-            starfield::BAKE_HEIGHT,
-        );
+    let background =
+        BackgroundConfig::with_scenes(SCENES.iter().map(|s| s.image)).scale(ScaleMode::Cover);
     let config = WindowConfig {
         title: "丹青 · 番茄钟".into(),
         size: Size::new(960.0, 640.0),
@@ -1921,128 +1904,6 @@ mod tests {
         app.tick(&ctx);
         let frame = app.background_frame().expect("应有背景帧");
         assert_eq!(frame.forest_intensity, 0.0, "非森林场景森林效恒 0");
-    }
-
-    // ---- 星夜：运行全量 / 暂停沉降 / 非星夜恒 0 ----
-
-    #[test]
-    fn background_frame_carries_starry_motion_when_running_on_starry_scene() {
-        let mut app = PomodoroApp::new_default();
-        app.last_save_at = Duration::from_secs(25 * 60); // 防测试触发真实落盘
-        app.ambient_player.disable_for_test(); // 防测试触碰音频设备
-        app.fader.switch_to(motion::STAR_SCENE, app.now);
-        app.timer.toggle(app.now); // 开始计时
-        // 场景淡化 (800ms) 完成后包络才开始走 (首次 tick 边沿), 再走满 500ms。
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
-        app.tick(&ctx);
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
-        app.tick(&ctx);
-        let frame = app.background_frame().expect("应有背景帧");
-        assert!(
-            (frame.starry_intensity - 1.0).abs() < 1e-6,
-            "星夜场景运行中星夜效应全量：{}",
-            frame.starry_intensity
-        );
-        assert_eq!(frame.rain_intensity, 0.0, "星夜场景雨效恒 0");
-        assert_eq!(frame.fire_intensity, 0.0, "星夜场景火效恒 0");
-        assert_eq!(frame.sea_intensity, 0.0, "星夜场景海效恒 0");
-        assert_eq!(frame.mountain_intensity, 0.0, "星夜场景山效恒 0");
-        assert_eq!(frame.forest_intensity, 0.0, "星夜场景森林效恒 0");
-    }
-
-    #[test]
-    fn background_frame_starry_settles_on_pause() {
-        let mut app = PomodoroApp::new_default();
-        app.last_save_at = Duration::from_secs(25 * 60);
-        app.ambient_player.disable_for_test();
-        app.fader.switch_to(motion::STAR_SCENE, app.now);
-        app.timer.toggle(app.now);
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
-        app.tick(&ctx);
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
-        app.tick(&ctx);
-        // 暂停：边沿帧连续 (仍全量), +250ms 沉降中点 0.5, +500ms 消失。
-        app.timer.toggle(app.now);
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1650));
-        app.tick(&ctx);
-        let frame = app.background_frame().expect("应有背景帧");
-        assert!(
-            (frame.starry_intensity - 1.0).abs() < 1e-6,
-            "暂停边沿帧应连续：{}",
-            frame.starry_intensity
-        );
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
-        app.tick(&ctx);
-        let frame = app.background_frame().expect("应有背景帧");
-        assert!(
-            (frame.starry_intensity - 0.5).abs() < 1e-6,
-            "暂停沉降中点：{}",
-            frame.starry_intensity
-        );
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2150));
-        app.tick(&ctx);
-        let frame = app.background_frame().expect("应有背景帧");
-        assert!(
-            frame.starry_intensity.abs() < 1e-6,
-            "暂停 500ms 后星夜效应消失：{}",
-            frame.starry_intensity
-        );
-    }
-
-    #[test]
-    fn background_frame_starry_stays_zero_on_non_starry_scene() {
-        let mut app = PomodoroApp::new_default();
-        app.last_save_at = Duration::from_secs(25 * 60);
-        app.ambient_player.disable_for_test(); // 默认场景即篝火 (非星夜)
-        app.timer.toggle(app.now);
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
-        app.tick(&ctx);
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
-        app.tick(&ctx);
-        let frame = app.background_frame().expect("应有背景帧");
-        assert_eq!(frame.starry_intensity, 0.0, "非星夜场景星夜效恒 0");
-        assert_eq!(frame.starry_base, 0.0, "非星夜场景星野恒 0");
-    }
-
-    #[test]
-    fn starry_base_persists_when_paused_on_starry_scene() {
-        // 雨场景范式：基础星野按场景权重常驻 — 暂停时星夜效 (包络) 归零，
-        // 但星野保持可见 (定格), 直到离开星夜场景。
-        let mut app = PomodoroApp::new_default();
-        app.last_save_at = Duration::from_secs(25 * 60);
-        app.ambient_player.disable_for_test();
-        app.fader.switch_to(motion::STAR_SCENE, app.now);
-        app.timer.toggle(app.now);
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(900));
-        app.tick(&ctx);
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1400));
-        app.tick(&ctx);
-        // 暂停：边沿帧连续 (intensity 仍 1), +250ms 沉降 0.5, +500ms 归零; 星野全程 1。
-        app.timer.toggle(app.now);
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(1900));
-        app.tick(&ctx);
-        let frame = app.background_frame().expect("应有背景帧");
-        assert!(
-            (frame.starry_intensity - 1.0).abs() < 1e-6,
-            "暂停边沿帧应连续：{}",
-            frame.starry_intensity
-        );
-        assert_eq!(frame.starry_base, 1.0, "暂停边沿星野常驻");
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(2150));
-        app.tick(&ctx);
-        let frame = app.background_frame().expect("应有背景帧");
-        assert!(
-            (frame.starry_intensity - 0.5).abs() < 1e-6,
-            "暂停沉降中点：{}",
-            frame.starry_intensity
-        );
-        assert_eq!(frame.starry_base, 1.0, "星野不随包络沉降 (定格可见)");
-        // 离开星夜 (等淡化 800ms 完成): 星野归零。
-        app.fader.switch_to(motion::FOREST_SCENE, app.now);
-        let ctx = AnimationCtx::new(std::time::Instant::now(), Duration::from_millis(3000));
-        app.tick(&ctx);
-        let frame = app.background_frame().expect("应有背景帧");
-        assert_eq!(frame.starry_base, 0.0, "离开星夜场景星野归零");
     }
 
     #[test]

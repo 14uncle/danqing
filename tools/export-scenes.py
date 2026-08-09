@@ -622,66 +622,53 @@ SCENES = [
         },
     },
     {
-        "key": "starry",
-        "name": "星夜",
-        # AI 生成底图 (元宝, 2026-08-06): 银河光带左下→右上斜跨, 暗山脊剪影。
-        # 星点不烘焙 — 运行时由 shader 程序化渲染 (雨场景范式, starry_base 常驻)。
-        "ai_base": "starry.png",
+        "key": "blacksmith",
+        "name": "铁匠铺",
+        "ai_base": "blacksmith_ai_1.png",
         "palette": {
-            "base": (22, 26, 52),
-            "accent": (120, 140, 200),
-            "text_primary": (220, 225, 240),
-            "text_secondary": (160, 170, 200),
-            "surface": ((0, 0, 0), 0.25),
-            "surface_input": ((0, 0, 0), 0.38),
-        },
-        "palette": {
-            "base": (22, 26, 52),
-            "accent": (255, 224, 160),
-            "text_primary": (246, 247, 255),
-            "text_secondary": (185, 192, 220),
+            "base": (45, 25, 18),
+            "accent": (255, 120, 40),
+            "text_primary": (255, 235, 210),
+            "text_secondary": (200, 175, 155),
             "surface": ((0, 0, 0), 0.25),
             "surface_input": ((0, 0, 0), 0.38),
         },
     },
     {
-        "key": "snow",
-        "name": "雪原",
-        # AI 生成底图 (元宝, 2026-08-06): 雪原+远山+雾气+飘雪。
-        "ai_base": "snow.png",
+        "key": "cave",
+        "name": "洞穴",
+        "ai_base": "cave_ai_2.png",
         "palette": {
-            "base": (200, 210, 225),
-            "accent": (80, 120, 160),
-            "text_primary": (240, 245, 255),
-            "text_secondary": (180, 195, 215),
+            "base": (20, 45, 55),
+            "accent": (80, 200, 220),
+            "text_primary": (220, 245, 250),
+            "text_secondary": (160, 195, 205),
             "surface": ((0, 0, 0), 0.25),
             "surface_input": ((0, 0, 0), 0.38),
         },
     },
     {
-        "key": "sand",
-        "name": "沙漠",
-        # AI 生成底图 (元宝, 2026-08-06): 沙丘曲线+落日余晖。
-        "ai_base": "sand.png",
+        "key": "nightmarket",
+        "name": "夜市",
+        "ai_base": "nightmarket_ai_1.png",
         "palette": {
-            "base": (180, 130, 80),
-            "accent": (220, 180, 100),
-            "text_primary": (255, 245, 230),
-            "text_secondary": (200, 170, 130),
+            "base": (60, 30, 20),
+            "accent": (255, 180, 50),
+            "text_primary": (255, 245, 220),
+            "text_secondary": (210, 185, 160),
             "surface": ((0, 0, 0), 0.25),
             "surface_input": ((0, 0, 0), 0.38),
         },
     },
     {
-        "key": "bamboo",
-        "name": "竹林",
-        # AI 生成底图 (元宝, 2026-08-06): 翠竹+薄雾+光斑, 东方意境。
-        "ai_base": "bamboo.png",
+        "key": "train",
+        "name": "火车",
+        "ai_base": "train_ai_1.png",
         "palette": {
-            "base": (30, 60, 50),
-            "accent": (100, 180, 130),
-            "text_primary": (220, 240, 230),
-            "text_secondary": (150, 180, 165),
+            "base": (50, 45, 55),
+            "accent": (200, 180, 140),
+            "text_primary": (240, 235, 225),
+            "text_secondary": (185, 178, 170),
             "surface": ((0, 0, 0), 0.25),
             "surface_input": ((0, 0, 0), 0.38),
         },
@@ -793,7 +780,7 @@ mod tests {
 
     #[test]
     fn all_scenes_pass_contrast_guards() {
-        assert_eq!(SCENES.len(), 6, "沉浸世界应有 6 个场景");
+        assert_eq!(SCENES.len(), 9, "沉浸世界应有 9 个场景");
         for spec in &SCENES {
             let p = &spec.palette;
             for (label, backdrop) in [
