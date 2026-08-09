@@ -37,3 +37,4 @@ desktop.ini
 
 # 工具脚本下载缓存 (原始星表等第三方数据不入库, 仅产物入库)
 /tools/.cache/
+.claude/settings.local.mimo.json
