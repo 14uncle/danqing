@@ -28,8 +28,7 @@ desktop.ini
 
 # Local Claude Code settings
  /.claude/settings.local.json
- /.claude/settings.local.mimo.json
-
+ 
 # Coverage / profiling
 *.profraw
 /coverage
