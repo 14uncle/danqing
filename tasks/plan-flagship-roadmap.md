@@ -129,23 +129,22 @@
 - **Scope:** S
 - **Status:** ✅ 2026-08-02 用户裁定 Q1-Q5, spec 已确认 (`docs/specs/companion-flagship-sync.md`)
 
-### Task I: 沉浸世界补全 —— 执行后收敛为「仅星夜」(2026-08-01 反馈收敛)
+### Task I: 沉浸世界九场景扩展
 
-- **Description:** 里程碑 1「沉浸世界」的实物主体,原计划补 4 新场景凑齐 9(星夜/雪原/沙漠/云海,2026-08-01 interview-me 裁定)。**实际执行即收敛**: 4 场景资产生成 → 3 轮背景图反馈 → 雪原/沙漠/云海(及迭代中的瀑布/晨雾湖泊/麦田黄昏)**全部刻意删除**,仅星夜晋升为第 6 场景并完整落地。最终阵容 6 场景: 篝火/海/雨/山/森林/星夜。原则(极不重叠)保留,但执行裁决「9 场景过载,星夜已是补全的极」。
+- **Description:** 从 5 场景(篝火/海/雨/山/森林)扩展到 9 场景,新增铁匠铺/洞穴/夜市/火车。每个场景需独立 AI 底图 + shader 动效 + 程序化环境音。
 - **Acceptance criteria:**
-  - [x] 星夜入 `scenes.rs`(SCENES[5], 尾部追加, 索引 0-4 不动; motion.rs 常量 0-5 不失效) — commit 8362494 起, 630a7b4 收敛后定稿
-  - [x] 星夜背景图 + 调色板(护栏: 大字 ≥3:1、控件 ≥4:1, 同 export-scenes.py 规则) — 静态图去星, 星野运行时程序化(用户裁定)
-  - [x] 星夜环境音(ambient.rs SCENE_AUDIO[5] → `assets/audio/starry.ogg`, `tools/export-ambient.py` 程序化合成)+ 动效包络(motion.rs `STAR_SCENE` / `starry_intensity` / `starry_base`)
-  - [x] ◀/▶ 循环覆盖 6 个场景(现逻辑 `% SCENES.len()`,自动覆盖;**不做** 1-6 快捷键——Task A 终审已去)
-  - [x] 星夜动效 spec — `docs/specs/pomodoro-scene-motion-starry.md`(13643cf, 329c1c9)
-  - [x] 用户终审通过(星点数 188→47 用户裁定 / 独立明暗呼吸 / 夜风音效重做 b35c887, 2026-08-02 收尾)
-  - [x] 免费/旗舰边界不变(免费=篝火 1 个)
-  - [x] 深邃银河升级 — Yale BSC5 星表 + AI 底图 + 暗星雾三层合成, 2026-08-04 用户终审通过 (plan-starry-milkyway.md Tasks 1-10)
-- **Verification:** `cargo test --example pomodoro` 全绿 + 用户终审 + benchmark 双门槛不破。
+  - [x] 9 场景入 `scenes.rs`(SCENES 数组长度 9,断言通过)
+  - [x] 4 个新场景 shader 动效(background.wgsl: blacksmith_sparks / cave_drip / nightmarket_lanterns / train_motion)
+  - [x] 4 个新场景动效策略(motion.rs: blacksmith_intensity / cave_intensity / nightmarket_intensity / train_intensity)
+  - [x] 4 个新场景环境音(export-ambient.py 生成 + ambient.rs SCENE_AUDIO 扩展)
+  - [x] 4 个新场景底图(export-scenes.py 配置 + assets/scenes/*.png)
+  - [x] main.rs 接入 4 个新场景强度
+  - [x] 全量测试 + clippy + 手动验证(cargo test --lib --tests 全绿,clippy 零警告)
+- **Verification:** `cargo test --example pomodoro` 全绿 + 9 场景可切换 + 听音辨识
 - **Dependencies:** None(与 E/F/H 并行);场景开发范式参考 Task A 归档(山/森林终审)
-- **Files:** `examples/pomodoro/scenes.rs`, `examples/pomodoro/ambient.rs`, `examples/pomodoro/motion.rs`; `assets/scenes/starry.png`, `assets/audio/starry.ogg`; `docs/specs/pomodoro-scene-motion-starry.md`; `examples/pomodoro/starfield.rs`, `tools/export-stars.py`, `assets/stars.bin`
-- **Scope:** M(执行时含 4 场景, 收敛后仅星夜落地)
-- **Status:** ✅ 2026-08-01 收敛为 6 场景(630a7b4 删沙漠等), 星夜为第 6 场景完整落地; 2026-08-02 星夜收尾(b35c887); 2026-08-04 深邃银河升级终审通过(9c958b3→f58f46e, Tasks 1-10)。**结论: 里程碑交付「星夜」一个极, 不做 9 场景**; 雪原/沙漠/云海如需重启须另立任务。
+- **Files:** `examples/pomodoro/scenes.rs`, `examples/pomodoro/ambient.rs`, `examples/pomodoro/motion.rs`, `examples/pomodoro/main.rs`; `src/render/background.wgsl`; `tools/export-ambient.py`, `tools/export-scenes.py`; `assets/scenes/*.png`, `assets/audio/*.ogg`
+- **Scope:** M
+- **Status:** ✅ 2026-08-09 四新场景动效已提交(commit e2c9693)。最终阵容 9 场景: 篝火/海/雨/山/森林/铁匠铺/洞穴/夜市/火车。
 
 ## 战略决策(已定)
 

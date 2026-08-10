@@ -729,7 +729,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     if (u.nightmarket_intensity > 0.0) {
         // 夜市: 灯笼光晕闪烁 (additive 暖色光斑, 在暗区明显可见)。
-        // 灯笼微摆已在上方 sample_uv 中应用 (nightmarket_sway)。
         color = vec4<f32>(
             color.rgb + NM_GLOW_COLOR * nightmarket_glow(in.uv, u.time) * u.nightmarket_intensity,
             color.a,
