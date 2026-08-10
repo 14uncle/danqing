@@ -32,8 +32,7 @@ pub const MOUNTAIN_SCENE: usize = 3;
 /// 森林场景在 `SCENES` 中的索引 (单测锁定名称，防生成器重排静默错位)。
 pub const FOREST_SCENE: usize = 4;
 
-/// 铁匠铺场景在 `SCENES` 中的索引 (仅测试使用)。
-#[cfg(test)]
+/// 铁匠铺场景在 `SCENES` 中的索引。
 pub const BLACKSMITH_SCENE: usize = 5;
 
 /// 洞穴场景在 `SCENES` 中的索引。
@@ -137,9 +136,9 @@ pub fn forest_intensity(from: usize, to: usize, fade: f32, envelope: f32) -> f32
 }
 
 /// 铁匠铺效强度合成：包络 × 铁匠铺场景淡化权重。
-pub fn blacksmith_intensity(_from: usize, _to: usize, _fade: f32, _envelope: f32) -> f32 {
-    // 动效禁用：底图含烘焙火星，运行时动效暂不渲染
-    0.0
+/// 炉火呼吸 + 金属反光叠加。
+pub fn blacksmith_intensity(from: usize, to: usize, fade: f32, envelope: f32) -> f32 {
+    envelope * scene_weight(BLACKSMITH_SCENE, from, to, fade)
 }
 
 /// 洞穴效强度合成：包络 × 洞穴场景淡化权重。
@@ -398,13 +397,19 @@ mod tests {
     }
 
     #[test]
-    fn blacksmith_intensity_disabled() {
-        // 动效禁用：底图含烘焙火星，运行时动效暂不渲染
-        assert_eq!(blacksmith_intensity(BLACKSMITH_SCENE, 0, 0.0, 1.0), 0.0);
-        assert_eq!(blacksmith_intensity(BLACKSMITH_SCENE, 0, 0.5, 1.0), 0.0);
-        assert_eq!(blacksmith_intensity(BLACKSMITH_SCENE, 0, 1.0, 1.0), 0.0);
-        assert_eq!(blacksmith_intensity(0, BLACKSMITH_SCENE, 0.5, 1.0), 0.0);
+    fn blacksmith_intensity_weights_by_scene_and_fade() {
+        // 铁匠铺为 from: 随 fade 淡出。
+        assert!((blacksmith_intensity(BLACKSMITH_SCENE, 0, 0.0, 1.0) - 1.0).abs() < 1e-6);
+        assert!((blacksmith_intensity(BLACKSMITH_SCENE, 0, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        assert!(blacksmith_intensity(BLACKSMITH_SCENE, 0, 1.0, 1.0).abs() < 1e-6);
+        // 铁匠铺为 to: 随 fade 淡入。
+        assert!((blacksmith_intensity(0, BLACKSMITH_SCENE, 0.5, 1.0) - 0.5).abs() < 1e-6);
+        // 双非铁匠铺：恒 0。
         assert_eq!(blacksmith_intensity(0, 1, 0.5, 1.0), 0.0);
+        // 静止于铁匠铺 (from == to): 权重恒 1, 只随包络缩放。
+        assert!(
+            (blacksmith_intensity(BLACKSMITH_SCENE, BLACKSMITH_SCENE, 1.0, 0.5) - 0.5).abs() < 1e-6
+        );
     }
 
     #[test]

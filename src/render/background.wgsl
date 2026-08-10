@@ -418,6 +418,60 @@ fn nightmarket_glow(uv: vec2<f32>, t: f32) -> f32 {
     return spot * on * brightness * twinkle * NM_GLOW_ALPHA;
 }
 
+// ---- 铁匠铺动效 (铁匠铺场景) ----
+// 三层 additive 叠加: 炉火呼吸 + 火花粒子 + 金属反光。
+// 2026-08-10: 启用动效, 底图烘焙火花保留作为背景层次, 运行时粒子叠加增强动态感。
+// 频率取 1/8 Hz 整数倍, 保 8s 公共周期 (Rust 侧 MOTION_WRAP_SECS)。
+const BS_W: f32 = 0.7853982;  // 2π/8: 动效基频角速度 (1/8 Hz)
+
+// 炉火呼吸: 双炉径向光晕脉动, 模拟熔炉火光闪烁。
+// 左侧主炉 (较大) + 右侧副炉 (较小)。
+const BS_FURNACE_L_CENTER: vec2<f32> = vec2<f32>(0.27, 0.45);  // 左炉位置
+const BS_FURNACE_L_RADIUS: f32 = 0.07;    // 左炉光晕半径 (uv, 缩小)
+const BS_FURNACE_R_CENTER: vec2<f32> = vec2<f32>(0.82, 0.43);  // 右炉位置
+const BS_FURNACE_R_RADIUS: f32 = 0.06;    // 右炉光晕半径 (uv, 更小)
+const BS_FURNACE_COLOR: vec3<f32> = vec3<f32>(1.0, 0.45, 0.1);  // 橙红色, 匹配图中炉火
+const BS_FURNACE_L_ALPHA: f32 = 0.18;      // 左炉峰值 alpha
+const BS_FURNACE_R_ALPHA: f32 = 0.12;      // 右炉峰值 alpha (较暗)
+
+// 火花粒子: 从红热金属向左上方飞溅, 带重力弧线。
+// 固定 36 颗火花, 每个像素遍历所有火花检查距离。
+// 每颗火花有独立的发射时间、角度、速度、重力, 造自然散射。
+// 匹配静态图: 细长线条, 扇形散开, 重力弧线。
+
+// 金属反光: 铁砧表面高光闪烁, 低频脉动。
+const BS_GLINT_CENTER: vec2<f32> = vec2<f32>(0.56, 0.59);  // 铁砧高光位置
+const BS_GLINT_RADIUS: f32 = 0.030;      // 反光区域半径
+const BS_GLINT_COLOR: vec3<f32> = vec3<f32>(0.9, 0.85, 0.75);  // 暖白色金属反光
+const BS_GLINT_ALPHA: f32 = 0.45;        // 峰值 alpha
+const BS_GLINT_FREQ_K: f32 = 2.0;        // 频率档位 (1/8 Hz * K)
+
+// 炉火呼吸层: 双炉径向光晕脉动。
+fn blacksmith_furnace(uv: vec2<f32>, t: f32) -> f32 {
+    // 左炉: 较大光晕, 双频呼吸。
+    let d_l = length(uv - BS_FURNACE_L_CENTER);
+    let radial_l = 1.0 - smoothstep(BS_FURNACE_L_RADIUS * 0.2, BS_FURNACE_L_RADIUS, d_l);
+    let breath_l = 0.5 + 0.3 * sin(t * BS_W * 3.0) + 0.2 * sin(t * BS_W * 5.0 + 1.7);
+    let glow_l = radial_l * breath_l * BS_FURNACE_L_ALPHA;
+
+    // 右炉: 较小光晕, 相位偏移, 频率略不同。
+    let d_r = length(uv - BS_FURNACE_R_CENTER);
+    let radial_r = 1.0 - smoothstep(BS_FURNACE_R_RADIUS * 0.2, BS_FURNACE_R_RADIUS, d_r);
+    let breath_r = 0.5 + 0.3 * sin(t * BS_W * 4.0 + 2.3) + 0.2 * sin(t * BS_W * 6.0 + 4.1);
+    let glow_r = radial_r * breath_r * BS_FURNACE_R_ALPHA;
+
+    return glow_l + glow_r;
+}
+
+// 金属反光层: 铁砧表面高光闪烁。
+fn blacksmith_glint(uv: vec2<f32>, t: f32) -> f32 {
+    let d = length(uv - BS_GLINT_CENTER);
+    let radial = 1.0 - smoothstep(BS_GLINT_RADIUS * 0.3, BS_GLINT_RADIUS, d);
+    // 低频脉动, 模拟锤击间隔节奏感。
+    let pulse = 0.5 + 0.5 * sin(t * BS_W * BS_GLINT_FREQ_K);
+    return radial * pulse * BS_GLINT_ALPHA;
+}
+
 // ---- 火车动效 (火车场景) ----
 // 车窗雨滴 (由上往下滑落) + 车厢内光呼吸 (暖色径向渐变)。
 const TR_DROP_DENSITY: f32 = 60.0;
@@ -714,6 +768,17 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (u.cave_intensity > 0.0) {
         color = vec4<f32>(
             color.rgb + vec3<f32>(cave_droplets(in.uv, u.time).x) * vec3<f32>(0.8, 0.9, 1.0) * u.cave_intensity,
+            color.a,
+        );
+    }
+    if (u.blacksmith_intensity > 0.0) {
+        // 铁匠铺: 炉火呼吸 + 金属反光。
+        color = vec4<f32>(
+            color.rgb + BS_FURNACE_COLOR * blacksmith_furnace(in.uv, u.time) * u.blacksmith_intensity,
+            color.a,
+        );
+        color = vec4<f32>(
+            color.rgb + BS_GLINT_COLOR * blacksmith_glint(in.uv, u.time) * u.blacksmith_intensity,
             color.a,
         );
     }
