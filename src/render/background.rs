@@ -229,7 +229,7 @@ impl BackgroundConfig {
     }
 }
 
-/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐，覆盖 15 字段 × 4B = 60B 有效数据)。
+/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐，覆盖 19 字段 × 4B = 76B 有效数据)。
 pub(crate) const UNIFORM_BUFFER_BYTES: u64 = 80;
 
 /// 单个已上传的背景纹理。

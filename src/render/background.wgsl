@@ -329,7 +329,8 @@ const CAVE_RIPPLE_MAX_R: f32 = 0.08;
 const CAVE_RIPPLE_WIDTH: f32 = 0.004;
 const CAVE_RIPPLE_DISP: f32 = 0.02;
 
-fn cave_single_drop(uv: vec2<f32>, t: f32, drop_x: f32, water_y: f32, start_y: f32, phase: f32, drop_vis: f32, ripple_scale: f32, mask_below: f32, mask_above: f32) -> vec2<f32> {
+fn cave_single_drop(uv: vec2<f32>, t: f32, drop_x: f32, water_y: f32, start_y: f32, phase: f32,
+drop_vis: f32, ripple_scale: f32, mask_below: f32, mask_above: f32) -> vec2<f32> {
     let ct = fract((t + phase) / CAVE_DROP_PERIOD);
     var brightness = 0.0;
     var displacement = 0.0;
@@ -361,8 +362,60 @@ fn cave_single_drop(uv: vec2<f32>, t: f32, drop_x: f32, water_y: f32, start_y: f
 
 fn cave_droplets(uv: vec2<f32>, t: f32) -> vec2<f32> {
     let d1 = cave_single_drop(uv, t, CAVE_DROP1_X, CAVE_DROP1_WATER_Y, CAVE_DROP1_START_Y, 0.0, 1.2, 1.2, 0.08, 0.02);
-    let d2 = cave_single_drop(uv, t, CAVE_DROP2_X, CAVE_DROP2_WATER_Y, CAVE_DROP2_START_Y, 1.5, 0.8, 0.25, 0.04, 0.01);
+    let d2 = cave_single_drop(uv, t, CAVE_DROP2_X, CAVE_DROP2_WATER_Y, CAVE_DROP2_START_Y, 1.5, 0.8, 0.30, 0.04, 0.01);
     return d1 + d2;
+}
+
+// ---- 夜市动效 (夜市场景) ----
+// 灯笼光晕闪烁 (additive 暖色光斑): 随机散布的光点明灭, 营造夜市氛围。
+// 2026-08-10: 适配 AI 底图 (挂满红黄灯笼的夜市街道)。
+// 蒸汽已放弃: 静态底图已有烘焙蒸汽, additive 叠加在亮区被吃掉。
+// UV 位移已放弃: 构图复杂, 位移会扭曲建筑。
+// 频率取 1/8 Hz 整数倍, 保 8s 公共周期 (Rust 侧 MOTION_WRAP_SECS)。
+
+// 灯笼光晕: 暖色光斑随机散布在灯笼区域闪烁, 非均匀带状。
+// 二维 hash 网格布点 (非单列), 避免带状感; 半径/亮度逐点随机。
+const NM_GLOW_COLS: f32 = 12.0;         // 横向网格列数
+const NM_GLOW_ROWS: f32 = 8.0;          // 纵向网格行数
+const NM_GLOW_RADIUS: f32 = 0.028;      // 基准光晕半径 (uv)
+const NM_GLOW_ASPECT: f32 = 1.5;        // 宽高比修正
+const NM_GLOW_BAND_TOP: f32 = 0.05;     // 光晕散布带上缘
+const NM_GLOW_BAND_BOT: f32 = 0.58;     // 光晕散布带下缘 (避开人群)
+const NM_GLOW_ALPHA: f32 = 0.28;        // 峰值 alpha (additive)
+const NM_GLOW_COLOR: vec3<f32> = vec3<f32>(1.0, 0.75, 0.35);  // 暖橙色
+const NM_GLOW_ON: f32 = 0.55;           // hash > 此值的 cell 才有光晕 (~40%)
+
+// 灯笼光晕层: 二维网格布点, 随机散布 + 随机大小/亮度闪烁。
+fn nightmarket_glow(uv: vec2<f32>, t: f32) -> f32 {
+    let cell = vec2<f32>(floor(uv.x * NM_GLOW_COLS), floor(uv.y * NM_GLOW_ROWS));
+    // 逐 cell 独立 hash: 位置偏移、大小、亮度、频率全部随机。
+    let h1 = rain_hash(cell.x * 17.3 + cell.y * 31.7 + 701.0);  // 位置偏移 x
+    let h2 = rain_hash(cell.x * 23.1 + cell.y * 41.3 + 713.0);  // 位置偏移 y
+    let h3 = rain_hash(cell.x * 29.7 + cell.y * 47.9 + 737.0);  // 大小
+    let h4 = rain_hash(cell.x * 37.1 + cell.y * 53.3 + 751.0);  // 亮度基线
+    let h5 = rain_hash(cell.x * 43.9 + cell.y * 59.7 + 769.0);  // 频率档位
+    // 是否点亮: ~45% 的 cell 有光晕。
+    let on = step(NM_GLOW_ON, rain_hash(cell.x * 13.7 + cell.y * 19.3 + 787.0));
+    // cell 内随机偏移 (0.15~0.85 避免贴边)。
+    let cx = (cell.x + 0.15 + 0.7 * h1) / NM_GLOW_COLS;
+    let band_h = NM_GLOW_BAND_BOT - NM_GLOW_BAND_TOP;
+    let cy = NM_GLOW_BAND_TOP + band_h * (0.15 + 0.7 * h2);
+    // 光晕半径: 基准 × (0.6~1.4) 逐点随机, 大小不一更自然。
+    let radius = NM_GLOW_RADIUS * (0.6 + 0.8 * h3);
+    // 亮度: 基线 × (0.5~1.0) 逐点随机。
+    let brightness = 0.5 + 0.5 * h4;
+    // 明灭频率取档位 {2,3,4}/8 Hz; smoothstep 缓起缓落。
+    let k = 2.0 + floor(h5 * 3.0);
+    let phase = rain_hash(cell.x * 61.1 + cell.y * 67.3 + 809.0);
+    let s = 0.5 + 0.5 * sin(t * FIRE_W * k + phase * 6.2831853);
+    let twinkle = s * s * (3.0 - 2.0 * s);
+    // 软圆点 (宽高比修正); 宽羽化边缘。
+    let d = distance(
+        vec2<f32>(uv.x * NM_GLOW_ASPECT, uv.y),
+        vec2<f32>(cx * NM_GLOW_ASPECT, cy),
+    );
+    let spot = 1.0 - smoothstep(radius * 0.15, radius, d);
+    return spot * on * brightness * twinkle * NM_GLOW_ALPHA;
 }
 
 // ---- 火车动效 (火车场景) ----
@@ -412,10 +465,9 @@ fn train_window_drops(uv: vec2<f32>, t: f32) -> f32 {
 
     let trail_top = cy - TR_TRAIL_LEN;
     let in_trail_y = smoothstep(trail_top - 0.001, trail_top, uv.y) * smoothstep(cy + 0.001, cy, uv.y);
-    let trail纵向 = (uv.y - trail_top) / TR_TRAIL_LEN;
     let trail_x_dist = abs(uv.x - cx);
-    let trail横向 = 1.0 - smoothstep(0.0, TR_DROP_RADIUS * 1.5, trail_x_dist);
-    let trail = in_trail_y * trail纵向 * trail横向 * TR_TRAIL_ALPHA;
+    let trail_lat = 1.0 - smoothstep(0.0, TR_DROP_RADIUS * 1.5, trail_x_dist);
+    let trail = in_trail_y * trail_lat * trail_lat * TR_TRAIL_ALPHA;
 
     let total = max(spot, trail) * on * in_window * glint * fade_out * TR_DROP_GAIN;
     return total;
@@ -672,6 +724,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         );
         color = vec4<f32>(
             color.rgb + TR_GLOW_COLOR * train_interior_glow(in.uv, u.time) * u.train_intensity,
+            color.a,
+        );
+    }
+    if (u.nightmarket_intensity > 0.0) {
+        // 夜市: 灯笼光晕闪烁 (additive 暖色光斑, 在暗区明显可见)。
+        // 灯笼微摆已在上方 sample_uv 中应用 (nightmarket_sway)。
+        color = vec4<f32>(
+            color.rgb + NM_GLOW_COLOR * nightmarket_glow(in.uv, u.time) * u.nightmarket_intensity,
             color.a,
         );
     }
