@@ -120,7 +120,7 @@ struct PomodoroApp {
     settings_open: bool,
     /// 统计面板是否打开。
     stats_open: bool,
-    /// 年度报告面板是否打开 (旗舰版深度洞察)。
+    /// 年度报告面板是否打开。
     report_open: bool,
     /// 专注会话历史 (数据层：自然完成的 Focus 记录)。
     history: FocusHistory,
@@ -169,7 +169,7 @@ enum Msg {
     ResetConfig,
     /// 打开 / 关闭统计面板。
     ToggleStats,
-    /// 打开 / 关闭年度报告面板 (旗舰版深度洞察)。
+    /// 打开 / 关闭年度报告面板。
     ToggleReport,
     /// 切换全局环境音开/关 (静音所有场景音景)。
     ToggleSound,
@@ -1215,7 +1215,7 @@ fn current_year() -> u32 {
     chrono::Local::now().year() as u32
 }
 
-/// 年度报告面板浮层：居中玻璃卡片，旗舰版深度洞察
+/// 年度报告面板浮层：居中玻璃卡片，深度洞察
 /// (当前年汇总 + 场景分布 + 近 12 月趋势)。
 fn report_panel(t: SceneTheme) -> impl widget::Widget {
     Stack::new().child(UiBox::new(t.scrim()).radius(0.0)).child(
@@ -1259,7 +1259,7 @@ fn section_label(t: SceneTheme, text: &'static str) -> impl widget::Widget {
         .bind_color(|s: &PomodoroApp| s.palette().text_secondary)
 }
 
-/// 报告面板标题行："年度报告" + 旗舰角标 + 关闭按钮。
+/// 报告面板标题行："年度报告" + 关闭按钮。
 fn report_header(t: SceneTheme) -> impl widget::Widget {
     Row::new()
         .cross_stretch()
@@ -1270,11 +1270,6 @@ fn report_header(t: SceneTheme) -> impl widget::Widget {
                     Text::new("年度报告")
                         .font_size(t.font_size_heading())
                         .bind_color(|s: &PomodoroApp| s.palette().text_primary),
-                )
-                .child(
-                    Text::new("旗舰")
-                        .font_size(t.font_size_small())
-                        .bind_color(|s: &PomodoroApp| s.palette().accent),
                 ),
         ))
         .child(
