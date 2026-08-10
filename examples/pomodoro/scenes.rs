@@ -6,7 +6,7 @@
 use danqing::{Color, ScenePalette, SceneSpec};
 
 /// POC 场景清单 (数组顺序即 ◀/▶ 切换顺序)。
-pub const SCENES: [SceneSpec; 6] = [
+pub const SCENES: [SceneSpec; 9] = [
     SceneSpec {
         name: "篝火",
         image: "assets/scenes/bonfire.png",
@@ -78,17 +78,59 @@ pub const SCENES: [SceneSpec; 6] = [
         },
     },
     SceneSpec {
-        name: "星夜",
-        image: "assets/scenes/starry.png",
+        name: "铁匠铺",
+        image: "assets/scenes/blacksmith.png",
         palette: ScenePalette {
-            base: Color::from_srgb8(22, 26, 52),
-            accent: Color::from_srgb8(255, 224, 160),
-            text_primary: Color::from_srgb8(246, 247, 255),
-            text_secondary: Color::from_srgb8(185, 192, 220),
+            base: Color::from_srgb8(45, 25, 18),
+            accent: Color::from_srgb8(255, 120, 40),
+            text_primary: Color::from_srgb8(255, 235, 210),
+            text_secondary: Color::from_srgb8(200, 175, 155),
             surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
             surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
-            backdrop_light: Color::from_srgb8(231, 242, 247),
-            backdrop_dark: Color::from_srgb8(13, 21, 30),
+            backdrop_light: Color::from_srgb8(252, 235, 158),
+            backdrop_dark: Color::from_srgb8(0, 10, 17),
+        },
+    },
+    SceneSpec {
+        name: "洞穴",
+        image: "assets/scenes/cave.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(20, 45, 55),
+            accent: Color::from_srgb8(80, 200, 220),
+            text_primary: Color::from_srgb8(220, 245, 250),
+            text_secondary: Color::from_srgb8(160, 195, 205),
+            surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
+            surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
+            backdrop_light: Color::from_srgb8(240, 254, 246),
+            backdrop_dark: Color::from_srgb8(6, 26, 31),
+        },
+    },
+    SceneSpec {
+        name: "夜市",
+        image: "assets/scenes/nightmarket.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(60, 30, 20),
+            accent: Color::from_srgb8(255, 180, 50),
+            text_primary: Color::from_srgb8(255, 245, 220),
+            text_secondary: Color::from_srgb8(210, 185, 160),
+            surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
+            surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
+            backdrop_light: Color::from_srgb8(254, 255, 255),
+            backdrop_dark: Color::from_srgb8(34, 30, 23),
+        },
+    },
+    SceneSpec {
+        name: "火车",
+        image: "assets/scenes/train.png",
+        palette: ScenePalette {
+            base: Color::from_srgb8(50, 45, 55),
+            accent: Color::from_srgb8(200, 180, 140),
+            text_primary: Color::from_srgb8(240, 235, 225),
+            text_secondary: Color::from_srgb8(185, 178, 170),
+            surface: Color::rgba(0.0, 0.0, 0.0, 0.25),
+            surface_input: Color::rgba(0.0, 0.0, 0.0, 0.38),
+            backdrop_light: Color::from_srgb8(230, 218, 190),
+            backdrop_dark: Color::from_srgb8(11, 16, 19),
         },
     },
 ];
@@ -107,7 +149,7 @@ mod tests {
 
     #[test]
     fn all_scenes_pass_contrast_guards() {
-        assert_eq!(SCENES.len(), 6, "沉浸世界应有 6 个场景");
+        assert_eq!(SCENES.len(), 9, "沉浸世界应有 9 个场景");
         for spec in &SCENES {
             let p = &spec.palette;
             for (label, backdrop) in [

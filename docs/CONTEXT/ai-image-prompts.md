@@ -28,16 +28,6 @@
 - **动效适配**: 无需改动 shader (雨丝全部程序化渲染); 加暗纱 (peak 75) 压中心亮度保对比度
 - **迭代笔记**: v1 有雨丝(与 shader 冲突)且无地面元素; v2 暴风云+树线剪影更佳
 
-### 星夜 ✅ (2026-08-06 底图升级)
-- **工具**: 元宝 AI
-- **提示词**: `Deep dark night sky with prominent milky way band stretching diagonally from lower-left to upper-right, rich galactic dust lanes and dark nebulae within the band, warm yellowish core glow in upper third, deep indigo/navy background (22,26,52), layered dark mountain silhouettes at bottom edge, no visible individual stars, no text, no people, no watermarks, atmospheric depth, cinematic composition, 1536x1024`
-- **结果**: `assets/scenes/starry_ai_1.png` → `starry_clean.png` → `starry.png`
-- **动效适配**: 无需改动 shader (星野/星闪/流星/星雾均为程序化, 不依赖底图几何)
-- **迭代笔记**: v1 银河层次丰富, 尘埃暗隙可辨; export-scenes.py 需改为 ai_base 模式; 水印在山脊+天空交界处, 纹理合成效果差, 改用周围暗色直接覆盖
-- **export-scenes.py 改动**: 星夜配置从 stops+ridges+veil+milkyway 改为 ai_base: "starry_clean.png"
-- **水印矩形参考**: 推荐尺寸 ≤350×120 (右下角) 或 ≤300×100 (底部中间); bonfire/forest 曾用 400×224 矩形偏大
-- **去水印方法**: 暗色场景 (starry/bonfire/forest) 用纯色覆盖比纹理合成更干净; `remove_watermark.py` 默认纹理合成适用于亮色/纹理复杂区域
-
 ## 待重新生成
 
 ### 山 ✅ (2026-08-04 通过)
@@ -58,6 +48,33 @@
 - **火星优化**: EMBER_SPEED 0.25→0.40 (加快), EMBER_RADIUS 0.006→0.004 (缩小), EMBER_COLOR→橙红色 (1.0,0.45,0.15)
 - **2026-08-06 UV 位移改造**: fire_breath(径向光晕) + ember_layer(粒子叠加) → fire_sway(UV 位移, 火焰纹理自身横向摇曳); FIRE_CENTER (0.42,0.38) 对齐火焰尖, FIRE_MASK_RADIUS 0.06 只包火焰; 余烬粒子保留为微量点缀
 
+## 新增场景 (待生成)
+
+### 铁匠铺
+- **提示词**: `Dark medieval blacksmith forge interior, glowing hot metal on anvil, no sparks, stone walls with warm orange glow from furnace, dark moody atmosphere, no text, no people, cinematic composition, 1536x1024`
+- **动效**: 火花飞溅 (blacksmith_sparks) + 锤击闪光
+- **环境音**: 锤击铁砧节奏 + 风箱呼吸
+- **迭代笔记**: v1 prompt 含 "sparks flying" 导致底图烘焙火星, 与 shader 动效冲突; 改为 "no sparks" 去除
+
+### 洞穴
+- **提示词**: `Deep underground cave with stalactites and stalagmites, underground pool with crystal reflections, bioluminescent glow on cave walls, dark teal/crystal blue palette, no text, no people, cinematic composition, 1536x1024`
+- **动效**: 滴水 + 生物荧光 (cave_drip_and_glow)
+- **环境音**: 滴水回声 + 潮湿环境
+
+### 夜市
+- **提示词 v1**: `Night market street with glowing paper lanterns, steaming food stalls, warm golden lights, atmospheric fog, dark sky background, no text, no people, cinematic composition, 1536x1024`
+- **迭代笔记 v1**: 底图冷清无人，与环境音(西安集市吆喝声)不匹配
+- **提示词 v2**: `Bustling Chinese night market street at night, crowded with people silhouettes, glowing red and yellow paper lanterns strung overhead, steaming food stalls with warm golden lights, atmospheric fog and cooking steam, lively market atmosphere, warm orange/amber palette against dark blue night sky, traditional Chinese architecture, no text, no watermarks, cinematic composition, 1536x1024`
+- **结果**: `assets/scenes/market_ai_6.png` → `nightmarket.png`
+- **动效**: 纸灯笼摆动 + 升腾蒸汽 (nightmarket_effect)
+- **环境音**: 人声嘈杂 + 锅铲翻炒
+- **迭代笔记 v2**: 人群密集、灯笼密布、雾气层次丰富，匹配吆喝声热闹氛围
+
+### 火车
+- **提示词**: `View from inside a vintage train carriage window, passing landscape at dusk, warm interior lighting, rain drops on window glass, cozy atmospheric mood, no text, no people, cinematic composition, 1536x1024`
+- **动效**: 车窗雨滴 + 车厢内光 (train_effect)
+- **环境音**: 铁轨节拍 + 车厢轰鸣
+
 ## 提示词模板
 
 ### 通用约束
@@ -76,7 +93,6 @@ atmospheric, moody, dark palette, depth of field, layered composition
 | 森林 | `misty pine forest, conifers, atmospheric fog, twilight` |
 | 山 | `mountain ridgelines, cloud fog, dusk, layered peaks` |
 | 火 | `bonfire campfire, embers, warm glow, dark forest background` |
-| 星夜 | `milky way, galactic dust lanes, deep indigo night sky, mountain silhouettes` |
 
 ## 迭代记录格式
 

@@ -22,6 +22,12 @@ struct Uniforms {
     starry_base: f32,
     screen_w: f32,
     screen_h: f32,
+    blacksmith_intensity: f32,
+    cave_intensity: f32,
+    nightmarket_intensity: f32,
+    train_intensity: f32,
+    _pad1: f32,
+    _pad2: f32,
 }
 
 // ---- 雨幕 (雨场景; 静态图已去丝, 雨全部由本段程序化渲染) ----
@@ -309,6 +315,226 @@ fn forest_mist(uv: vec2<f32>, t: f32) -> vec3<f32> {
     return FOREST_MIST_COLOR * pattern * band * FOREST_MIST_ALPHA;
 }
 
+// ---- 洞穴水滴动效 (洞穴场景) ----
+const CAVE_DROP1_X: f32 = 0.32;
+const CAVE_DROP1_WATER_Y: f32 = 0.76;
+const CAVE_DROP1_START_Y: f32 = 0.15;
+const CAVE_DROP2_X: f32 = 0.44;
+const CAVE_DROP2_WATER_Y: f32 = 0.68;
+const CAVE_DROP2_START_Y: f32 = 0.10;
+const CAVE_DROP_PERIOD: f32 = 5.0;
+const CAVE_DROP_RADIUS: f32 = 0.003;
+const CAVE_RIPPLE_DUR: f32 = 1.5;
+const CAVE_RIPPLE_MAX_R: f32 = 0.08;
+const CAVE_RIPPLE_WIDTH: f32 = 0.004;
+const CAVE_RIPPLE_DISP: f32 = 0.02;
+
+fn cave_single_drop(uv: vec2<f32>, t: f32, drop_x: f32, water_y: f32, start_y: f32, phase: f32,
+drop_vis: f32, ripple_scale: f32, mask_below: f32, mask_above: f32) -> vec2<f32> {
+    let ct = fract((t + phase) / CAVE_DROP_PERIOD);
+    var brightness = 0.0;
+    var displacement = 0.0;
+    if (ct < 0.5) {
+        let progress = ct / 0.5;
+        let ease = progress * progress;
+        let drop_y = mix(start_y, water_y, ease);
+        let dx = (uv.x - drop_x) / (CAVE_DROP_RADIUS * drop_vis);
+        let dy = (uv.y - drop_y) / (CAVE_DROP_RADIUS * drop_vis * 2.5);
+        let dd = dx * dx + dy * dy;
+        brightness += (1.0 - smoothstep(0.0, 1.0, dd)) * drop_vis * 0.5;
+    }
+    if (ct >= 0.5) {
+        let ripple_t = ct - 0.5;
+        let progress = ripple_t / 0.5;
+        let radius = progress * CAVE_RIPPLE_MAX_R * ripple_scale;
+        let d = distance(vec2<f32>(uv.x, uv.y), vec2<f32>(drop_x, water_y));
+        let ring1 = smoothstep(radius - CAVE_RIPPLE_WIDTH, radius, d) * smoothstep(radius + CAVE_RIPPLE_WIDTH, radius, d);
+        let r2 = radius * 0.6;
+        let ring2 = smoothstep(r2 - CAVE_RIPPLE_WIDTH * 0.6, r2, d) * smoothstep(r2 + CAVE_RIPPLE_WIDTH * 0.6, r2, d) * 0.3;
+        let ring = ring1 + ring2;
+        let water_mask = smoothstep(water_y - mask_below, water_y + mask_above, uv.y);
+        let fade = (1.0 - progress);
+        brightness += ring * fade * water_mask * ripple_scale * 0.25;
+        displacement += ring * fade * CAVE_RIPPLE_DISP * ripple_scale * water_mask * -1.0;
+    }
+    return vec2<f32>(brightness, displacement);
+}
+
+fn cave_droplets(uv: vec2<f32>, t: f32) -> vec2<f32> {
+    let d1 = cave_single_drop(uv, t, CAVE_DROP1_X, CAVE_DROP1_WATER_Y, CAVE_DROP1_START_Y, 0.0, 1.2, 1.2, 0.08, 0.02);
+    let d2 = cave_single_drop(uv, t, CAVE_DROP2_X, CAVE_DROP2_WATER_Y, CAVE_DROP2_START_Y, 1.5, 0.8, 0.30, 0.04, 0.01);
+    return d1 + d2;
+}
+
+// ---- 夜市动效 (夜市场景) ----
+// 灯笼光晕闪烁 (additive 暖色光斑): 随机散布的光点明灭, 营造夜市氛围。
+// 2026-08-10: 适配 AI 底图 (挂满红黄灯笼的夜市街道)。
+// 蒸汽已放弃: 静态底图已有烘焙蒸汽, additive 叠加在亮区被吃掉。
+// UV 位移已放弃: 构图复杂, 位移会扭曲建筑。
+// 频率取 1/8 Hz 整数倍, 保 8s 公共周期 (Rust 侧 MOTION_WRAP_SECS)。
+
+// 灯笼光晕: 暖色光斑随机散布在灯笼区域闪烁, 非均匀带状。
+// 二维 hash 网格布点 (非单列), 避免带状感; 半径/亮度逐点随机。
+const NM_GLOW_COLS: f32 = 12.0;         // 横向网格列数
+const NM_GLOW_ROWS: f32 = 8.0;          // 纵向网格行数
+const NM_GLOW_RADIUS: f32 = 0.028;      // 基准光晕半径 (uv)
+const NM_GLOW_ASPECT: f32 = 1.5;        // 宽高比修正
+const NM_GLOW_BAND_TOP: f32 = 0.05;     // 光晕散布带上缘
+const NM_GLOW_BAND_BOT: f32 = 0.58;     // 光晕散布带下缘 (避开人群)
+const NM_GLOW_ALPHA: f32 = 0.28;        // 峰值 alpha (additive)
+const NM_GLOW_COLOR: vec3<f32> = vec3<f32>(1.0, 0.75, 0.35);  // 暖橙色
+const NM_GLOW_ON: f32 = 0.55;           // hash > 此值的 cell 才有光晕 (~40%)
+
+// 灯笼光晕层: 二维网格布点, 随机散布 + 随机大小/亮度闪烁。
+fn nightmarket_glow(uv: vec2<f32>, t: f32) -> f32 {
+    let cell = vec2<f32>(floor(uv.x * NM_GLOW_COLS), floor(uv.y * NM_GLOW_ROWS));
+    // 逐 cell 独立 hash: 位置偏移、大小、亮度、频率全部随机。
+    let h1 = rain_hash(cell.x * 17.3 + cell.y * 31.7 + 701.0);  // 位置偏移 x
+    let h2 = rain_hash(cell.x * 23.1 + cell.y * 41.3 + 713.0);  // 位置偏移 y
+    let h3 = rain_hash(cell.x * 29.7 + cell.y * 47.9 + 737.0);  // 大小
+    let h4 = rain_hash(cell.x * 37.1 + cell.y * 53.3 + 751.0);  // 亮度基线
+    let h5 = rain_hash(cell.x * 43.9 + cell.y * 59.7 + 769.0);  // 频率档位
+    // 是否点亮: ~45% 的 cell 有光晕。
+    let on = step(NM_GLOW_ON, rain_hash(cell.x * 13.7 + cell.y * 19.3 + 787.0));
+    // cell 内随机偏移 (0.15~0.85 避免贴边)。
+    let cx = (cell.x + 0.15 + 0.7 * h1) / NM_GLOW_COLS;
+    let band_h = NM_GLOW_BAND_BOT - NM_GLOW_BAND_TOP;
+    let cy = NM_GLOW_BAND_TOP + band_h * (0.15 + 0.7 * h2);
+    // 光晕半径: 基准 × (0.6~1.4) 逐点随机, 大小不一更自然。
+    let radius = NM_GLOW_RADIUS * (0.6 + 0.8 * h3);
+    // 亮度: 基线 × (0.5~1.0) 逐点随机。
+    let brightness = 0.5 + 0.5 * h4;
+    // 明灭频率取档位 {2,3,4}/8 Hz; smoothstep 缓起缓落。
+    let k = 2.0 + floor(h5 * 3.0);
+    let phase = rain_hash(cell.x * 61.1 + cell.y * 67.3 + 809.0);
+    let s = 0.5 + 0.5 * sin(t * FIRE_W * k + phase * 6.2831853);
+    let twinkle = s * s * (3.0 - 2.0 * s);
+    // 软圆点 (宽高比修正); 宽羽化边缘。
+    let d = distance(
+        vec2<f32>(uv.x * NM_GLOW_ASPECT, uv.y),
+        vec2<f32>(cx * NM_GLOW_ASPECT, cy),
+    );
+    let spot = 1.0 - smoothstep(radius * 0.15, radius, d);
+    return spot * on * brightness * twinkle * NM_GLOW_ALPHA;
+}
+
+// ---- 铁匠铺动效 (铁匠铺场景) ----
+// 三层 additive 叠加: 炉火呼吸 + 火花粒子 + 金属反光。
+// 2026-08-10: 启用动效, 底图烘焙火花保留作为背景层次, 运行时粒子叠加增强动态感。
+// 频率取 1/8 Hz 整数倍, 保 8s 公共周期 (Rust 侧 MOTION_WRAP_SECS)。
+const BS_W: f32 = 0.7853982;  // 2π/8: 动效基频角速度 (1/8 Hz)
+
+// 炉火呼吸: 双炉径向光晕脉动, 模拟熔炉火光闪烁。
+// 左侧主炉 (较大) + 右侧副炉 (较小)。
+const BS_FURNACE_L_CENTER: vec2<f32> = vec2<f32>(0.27, 0.45);  // 左炉位置
+const BS_FURNACE_L_RADIUS: f32 = 0.07;    // 左炉光晕半径 (uv, 缩小)
+const BS_FURNACE_R_CENTER: vec2<f32> = vec2<f32>(0.82, 0.43);  // 右炉位置
+const BS_FURNACE_R_RADIUS: f32 = 0.06;    // 右炉光晕半径 (uv, 更小)
+const BS_FURNACE_COLOR: vec3<f32> = vec3<f32>(1.0, 0.45, 0.1);  // 橙红色, 匹配图中炉火
+const BS_FURNACE_L_ALPHA: f32 = 0.18;      // 左炉峰值 alpha
+const BS_FURNACE_R_ALPHA: f32 = 0.12;      // 右炉峰值 alpha (较暗)
+
+// 火花粒子: 从红热金属向左上方飞溅, 带重力弧线。
+// 固定 36 颗火花, 每个像素遍历所有火花检查距离。
+// 每颗火花有独立的发射时间、角度、速度、重力, 造自然散射。
+// 匹配静态图: 细长线条, 扇形散开, 重力弧线。
+
+// 金属反光: 铁砧表面高光闪烁, 低频脉动。
+const BS_GLINT_CENTER: vec2<f32> = vec2<f32>(0.56, 0.59);  // 铁砧高光位置
+const BS_GLINT_RADIUS: f32 = 0.030;      // 反光区域半径
+const BS_GLINT_COLOR: vec3<f32> = vec3<f32>(0.9, 0.85, 0.75);  // 暖白色金属反光
+const BS_GLINT_ALPHA: f32 = 0.45;        // 峰值 alpha
+const BS_GLINT_FREQ_K: f32 = 2.0;        // 频率档位 (1/8 Hz * K)
+
+// 炉火呼吸层: 双炉径向光晕脉动。
+fn blacksmith_furnace(uv: vec2<f32>, t: f32) -> f32 {
+    // 左炉: 较大光晕, 双频呼吸。
+    let d_l = length(uv - BS_FURNACE_L_CENTER);
+    let radial_l = 1.0 - smoothstep(BS_FURNACE_L_RADIUS * 0.2, BS_FURNACE_L_RADIUS, d_l);
+    let breath_l = 0.5 + 0.3 * sin(t * BS_W * 3.0) + 0.2 * sin(t * BS_W * 5.0 + 1.7);
+    let glow_l = radial_l * breath_l * BS_FURNACE_L_ALPHA;
+
+    // 右炉: 较小光晕, 相位偏移, 频率略不同。
+    let d_r = length(uv - BS_FURNACE_R_CENTER);
+    let radial_r = 1.0 - smoothstep(BS_FURNACE_R_RADIUS * 0.2, BS_FURNACE_R_RADIUS, d_r);
+    let breath_r = 0.5 + 0.3 * sin(t * BS_W * 4.0 + 2.3) + 0.2 * sin(t * BS_W * 6.0 + 4.1);
+    let glow_r = radial_r * breath_r * BS_FURNACE_R_ALPHA;
+
+    return glow_l + glow_r;
+}
+
+// 金属反光层: 铁砧表面高光闪烁。
+fn blacksmith_glint(uv: vec2<f32>, t: f32) -> f32 {
+    let d = length(uv - BS_GLINT_CENTER);
+    let radial = 1.0 - smoothstep(BS_GLINT_RADIUS * 0.3, BS_GLINT_RADIUS, d);
+    // 低频脉动, 模拟锤击间隔节奏感。
+    let pulse = 0.5 + 0.5 * sin(t * BS_W * BS_GLINT_FREQ_K);
+    return radial * pulse * BS_GLINT_ALPHA;
+}
+
+// ---- 火车动效 (火车场景) ----
+// 车窗雨滴 (由上往下滑落) + 车厢内光呼吸 (暖色径向渐变)。
+const TR_DROP_DENSITY: f32 = 60.0;
+const TR_DROP_RADIUS: f32 = 0.006;
+const TR_DROP_ON: f32 = 0.65;
+const TR_DROP_GAIN: f32 = 0.3;
+const TR_DROP_BAND_L: f32 = 0.48;
+const TR_DROP_BAND_R: f32 = 0.94;
+const TR_DROP_BAND_TOP: f32 = 0.05;
+const TR_DROP_BAND_BOT: f32 = 0.88;
+const TR_DROP_SPEED: f32 = 0.07;
+const TR_TRAIL_LEN: f32 = 0.03;
+const TR_TRAIL_ALPHA: f32 = 0.2;
+
+const TR_GLOW_CENTER: vec2<f32> = vec2<f32>(0.15, 0.12);
+const TR_GLOW_RADIUS: f32 = 0.35;
+const TR_GLOW_COLOR: vec3<f32> = vec3<f32>(1.0, 0.85, 0.5);
+const TR_GLOW_ALPHA: f32 = 0.12;
+const TR_GLOW_FREQ: f32 = 0.125;
+
+fn train_window_drops(uv: vec2<f32>, t: f32) -> f32 {
+    let col = floor(uv.x * TR_DROP_DENSITY);
+    let rnd = rain_hash(col * 1.37 + 501.0);
+    let on = step(TR_DROP_ON, rain_hash(col * 3.1 + 537.0));
+    let cx = (col + 0.3 + 0.4 * rnd) / TR_DROP_DENSITY;
+
+    let base_y = rain_hash(col * 3.1 + 513.0);
+    let speed_factor = 0.7 + 0.6 * rain_hash(col * 7.3 + 601.0);
+    let drop_speed = TR_DROP_SPEED * speed_factor;
+
+    let travel = TR_DROP_BAND_BOT - TR_DROP_BAND_TOP;
+    let raw_y = base_y + t * drop_speed;
+    let cycle_y = fract(raw_y);
+    let cy = TR_DROP_BAND_TOP + cycle_y * travel;
+
+    let in_window = step(TR_DROP_BAND_L, cx) * step(cx, TR_DROP_BAND_R);
+    let fade_out = 1.0 - smoothstep(0.6, 1.0, cycle_y);
+
+    let k = 1.0 + floor(rnd * 2.0);
+    let s = 0.7 + 0.3 * sin(t * FIRE_W * k + rnd * 6.2831853);
+    let glint = s * s;
+
+    let d = distance(vec2<f32>(uv.x, uv.y), vec2<f32>(cx, cy));
+    let spot = 1.0 - smoothstep(TR_DROP_RADIUS * 0.2, TR_DROP_RADIUS, d);
+
+    let trail_top = cy - TR_TRAIL_LEN;
+    let in_trail_y = smoothstep(trail_top - 0.001, trail_top, uv.y) * smoothstep(cy + 0.001, cy, uv.y);
+    let trail_x_dist = abs(uv.x - cx);
+    let trail_lat = 1.0 - smoothstep(0.0, TR_DROP_RADIUS * 1.5, trail_x_dist);
+    let trail = in_trail_y * trail_lat * trail_lat * TR_TRAIL_ALPHA;
+
+    let total = max(spot, trail) * on * in_window * glint * fade_out * TR_DROP_GAIN;
+    return total;
+}
+
+fn train_interior_glow(uv: vec2<f32>, t: f32) -> f32 {
+    let d = length(uv - TR_GLOW_CENTER);
+    let radial = 1.0 - smoothstep(TR_GLOW_RADIUS * 0.2, TR_GLOW_RADIUS, d);
+    let interior = 1.0 - smoothstep(0.40, 0.48, uv.x);
+    let breath = 0.5 + 0.5 * sin(t * 6.2831853 * TR_GLOW_FREQ);
+    return radial * interior * breath * TR_GLOW_ALPHA;
+}
+
 // ---- 星夜动效 (星夜场景) ----
 // 雨场景范式: 静态图去星, 星野全部运行时渲染。
 // 2026-08-03 银河升级 (Task 5, spec: docs/specs/pomodoro-scene-starry-milkyway.md):
@@ -536,6 +762,40 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // 参考雨场景改造范式)。 t 同上, 用 u.rain_time 避免 8s wrap 跳变。
         color = vec4<f32>(
             color.rgb + forest_mist(in.uv, u.rain_time) * u.forest_intensity,
+            color.a,
+        );
+    }
+    if (u.cave_intensity > 0.0) {
+        color = vec4<f32>(
+            color.rgb + vec3<f32>(cave_droplets(in.uv, u.time).x) * vec3<f32>(0.8, 0.9, 1.0) * u.cave_intensity,
+            color.a,
+        );
+    }
+    if (u.blacksmith_intensity > 0.0) {
+        // 铁匠铺: 炉火呼吸 + 金属反光。
+        color = vec4<f32>(
+            color.rgb + BS_FURNACE_COLOR * blacksmith_furnace(in.uv, u.time) * u.blacksmith_intensity,
+            color.a,
+        );
+        color = vec4<f32>(
+            color.rgb + BS_GLINT_COLOR * blacksmith_glint(in.uv, u.time) * u.blacksmith_intensity,
+            color.a,
+        );
+    }
+    if (u.train_intensity > 0.0) {
+        color = vec4<f32>(
+            color.rgb + vec3<f32>(train_window_drops(in.uv, u.time)) * u.train_intensity,
+            color.a,
+        );
+        color = vec4<f32>(
+            color.rgb + TR_GLOW_COLOR * train_interior_glow(in.uv, u.time) * u.train_intensity,
+            color.a,
+        );
+    }
+    if (u.nightmarket_intensity > 0.0) {
+        // 夜市: 灯笼光晕闪烁 (additive 暖色光斑, 在暗区明显可见)。
+        color = vec4<f32>(
+            color.rgb + NM_GLOW_COLOR * nightmarket_glow(in.uv, u.time) * u.nightmarket_intensity,
             color.a,
         );
     }
