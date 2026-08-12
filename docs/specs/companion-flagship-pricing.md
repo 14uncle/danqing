@@ -1,8 +1,10 @@
 # Spec: 旗舰付费边界 —— 免费版 vs 旗舰版
 
+> ⚠️ **已废弃** (2026-08-10): 用户决定 丹青-pomodoro 全部功能免费,零门槛,不设付费分层。本 spec 作为历史记录保留,付费方案不再适用。意图落盘: `docs/intent/pomodoro-free-release.md`。
+
 - @author 十四叔
 - @date 2026/08/01
-- 状态: 已确认 (2026-08-01 用户逐项拍板四项边界; 依据 `docs/intent/companion-flagship.md`)
+- 状态: ~~已确认~~ → **已废弃** (2026-08-10 pomodoro 免费发布决策)
 
 ## 决策目标
 

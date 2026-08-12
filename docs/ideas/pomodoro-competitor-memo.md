@@ -1,9 +1,11 @@
-# 竞品备忘录:功能型番茄钟阵营 vs 丹青旗舰 —— 定位校验
+# 竞品备忘录:功能型番茄钟阵营 vs 丹青 —— 定位校验
+
+> ⚠️ **付费分析已过时** (2026-08-10): pomodoro 全部功能免费,¥68 定价锚点与付费边界不再适用。定位校验("专注陪伴的沉浸世界")仍然有效。
 
 - @author 十四叔
 - @date 2026/08/01
-- 状态: interview-me 定位校验产出 (2026-08-01); 裁决已出, roadmap 反推落地见 `tasks/plan-flagship-roadmap.md`
-- 依据: `docs/intent/companion-flagship.md`(旗舰战略) + `docs/specs/companion-flagship-pricing.md`(付费边界)
+- 状态: ~~裁决已出~~ → **付费部分已废弃** (2026-08-10 pomodoro 免费发布决策)
+- 依据: `docs/intent/companion-flagship.md`(战略) + `docs/intent/pomodoro-free-release.md`(免费决策)
 
 ## 一句话裁决
 

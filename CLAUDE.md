@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 丹青 (danqing) 是一个 Rust 跨平台自绘 UI 框架,使用 `winit` 0.30 处理窗口与事件,`wgpu` 30 自绘,保留模式组件树。基础里程碑 M1~M3 与阶段 1(设计系统 + 品牌视觉)、阶段 2(专注陪伴 POC:番茄钟 × 场景沉浸美学)及后续补完均已关闭并归档到 `tasks/archive/`。
 
 - **当前分支**: `dev`(主分支 `master`)
-- **战略**: 2026-08-01 interview-me 确认「著作型旗舰」十年战略(专注陪伴系统 × 十年建造史),见 `docs/intent/companion-flagship.md` + `tasks/plan-flagship-roadmap.md`。里程碑 0「旗舰化第一刀」已完成:山/森林动效终审通过(2026-08-01)、付费边界 spec 确认、数据层 MVP、建造实录三篇草稿。剪贴板降级为引擎复用验证顺延。**未获用户指示时不要启动新 POC**。
+- **战略**: 丹青-pomodoro 全部功能免费发布(2026-08-10),走通"代码→发布→社区反馈"完整闭环。十年战略见 `docs/intent/companion-flagship.md`(付费部分已废弃),免费决策见 `docs/intent/pomodoro-free-release.md`。里程碑 1 全部编码任务已完成。剪贴板顺延为引擎复用验证。**未获用户指示时不要启动新 POC**。
 - **性能门槛**: 启动 ≤1s、常驻内存 WS ≤360MB(核显记账);测量用 `tools/benchmark.ps1`。
 
 > 详细架构见 `docs/CONTEXT/architecture.md`;场景动效开发范式见 `docs/CONTEXT/scenes-guidelines.md`。
@@ -85,7 +85,7 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 
 | 任务类型 | 必须加载 | 可选(深入时加载) | 相关 Memory |
 |----------|----------|-------------------|-------------|
-| **旗舰/十年战略**(数据层/建造实录/付费边界) | `docs/intent/companion-flagship.md` + `tasks/plan-flagship-roadmap.md` | `docs/specs/companion-flagship-pricing.md` | `danqing-flagship-strategy`, `danqing-project-state` |
+| **十年战略/建造实录** | `docs/intent/companion-flagship.md` + `docs/intent/pomodoro-free-release.md` | `tasks/plan-flagship-roadmap.md` | `danqing-flagship-strategy`, `danqing-project-state` |
 | **场景动效**(shader/uniform/动效) | `docs/CONTEXT/scenes-guidelines.md` | 对应场景 spec(`docs/specs/pomodoro-scene-motion*.md`) | `scene-motion-uv-displacement`, `scene-lru-pattern` |
 | **AI 场景底图升级**(生图/去水印/适配) | `memory/ai-scene-upgrade-workflow.md` + `docs/CONTEXT/ai-image-prompts.md` | `tools/remove_watermark.py` + `tools/export-scenes.py` | `ai-scene-uv-displacement-preference`, `ai-scene-no-veil` |
 | **跨模块重构**(依赖/渲染/事件) | `docs/CONTEXT/architecture.md` | 相关模块源码 + 测试 | — |

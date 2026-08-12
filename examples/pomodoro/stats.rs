@@ -69,7 +69,7 @@ fn default_format_version() -> u32 {
     FORMAT_VERSION
 }
 
-/// 某本地年的年度摘要 (深度洞察, 旗舰版; 纯读聚合, 不触碰写路径)。
+/// 某本地年的年度摘要 (深度洞察; 纯读聚合, 不触碰写路径)。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct YearSummary {
     /// 专注总秒数。
