@@ -678,30 +678,39 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         while let Ok(event) = self.window_event_rx.try_recv() {
             self.apply_window_event(event, event_loop);
         }
-        // 控制流：统一 WaitUntil(16ms) ≈ 60fps, 无论窗口可见与否。
-        //   可见时：主动 request_redraw 驱动渲染; WaitUntil 比 Poll 省 CPU
-        //     (空载时 Poll 一秒跑几千次，WaitUntil 仅 ~60 次), 同时 OS 调度超时 /
-        //     外部事件 / 模态菜单 close 仍能及时唤醒 winit, 行为等价。
-        //   隐藏时：RedrawRequested 不会发 (窗口不可见), 但 about_to_wait 中的
-        //     app.tick() 仍每帧推进 (计时器 / 持久化 / 环境音)。用 WaitUntil 而非
-        //     Poll 限制 tick 频率至 ~60fps, 避免 Poll 空转 (数千 fps) 导致环境音
-        //     player.play()/set_volume() 被高频调用, 干扰音频线程缓冲区 → 噪声。
+        // 控制流策略：根据窗口模式决定 ControlFlow。
+        //   OnDemand (默认): 隐藏态 → Wait (零唤醒, 省电); 可见态 → WaitUntil(16ms)。
+        //   Continuous (番茄钟等): 无论可见与否都用 WaitUntil(16ms), 保持 tick 推进。
+        //
+        //   WaitUntil 比 Poll 省 CPU (空载时 Poll 一秒跑几千次，WaitUntil 仅 ~60 次),
+        //   同时 OS 调度超时 / 外部事件 / 模态菜单 close 仍能及时唤醒 winit。
         //   关键：muda 托盘菜单的 TrackPopupMenu 是 Windows 阻塞 API, 会在主线程
         //     跑模态消息循环，期间 winit 事件循环被冻结; 菜单关闭后必须主动
         //     重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
         //     过滤/丢弃, UI 卡在旧值不更新 (读秒停止、按钮 label 不切)。
+        let control_flow = self.control_flow_for_current_state();
         if self.is_visible {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
         }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(
-            Instant::now() + Duration::from_millis(16),
-        ));
+        event_loop.set_control_flow(control_flow);
     }
 }
 
 impl<A: App> Handler<'_, A> {
+    /// 根据当前窗口模式和可见性决定控制流。
+    ///
+    /// - `OnDemand` + 隐藏 → `Wait` (零唤醒, 省电)
+    /// - `OnDemand` + 可见 → `WaitUntil(16ms)` (事件驱动重绘, ~60fps)
+    /// - `Continuous` (任何状态) → `WaitUntil(16ms)` (番茄钟等需持续 tick)
+    fn control_flow_for_current_state(&self) -> ControlFlow {
+        match self.config.mode {
+            super::WindowMode::OnDemand if !self.is_visible => ControlFlow::Wait,
+            _ => ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16)),
+        }
+    }
+
     /// 关闭请求 (Alt+F4 / 标题栏关闭按钮) 的统一策略：
     /// `CloseBehavior::Hide` 常驻型应用只隐藏窗口; `CloseBehavior::Exit` 退出进程。
     fn handle_close_request(&mut self, event_loop: &ActiveEventLoop, source: &str) {
@@ -781,6 +790,7 @@ impl<A: App> Handler<'_, A> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::WindowMode;
     use super::tab_traverse_allowed;
 
     #[test]
@@ -794,5 +804,74 @@ mod tests {
     fn tab_with_os_focus_traverses() {
         // 持有 OS 焦点期间的 Tab 是用户主动遍历, 必须放行。
         assert!(tab_traverse_allowed(true));
+    }
+
+    /// 按需渲染模式: 隐藏态应使用 Wait (零唤醒)。
+    #[test]
+    fn on_demand_hidden_uses_wait() {
+        let control_flow = control_flow_for_mode(WindowMode::OnDemand, false, false);
+        assert!(
+            matches!(control_flow, winit::event_loop::ControlFlow::Wait),
+            "OnDemand 隐藏态应使用 ControlFlow::Wait"
+        );
+    }
+
+    /// 按需渲染模式: 可见且无动画应使用 WaitUntil (事件驱动重绘)。
+    #[test]
+    fn on_demand_visible_no_animation_uses_wait_until() {
+        let control_flow = control_flow_for_mode(WindowMode::OnDemand, true, false);
+        assert!(
+            matches!(control_flow, winit::event_loop::ControlFlow::WaitUntil(_)),
+            "OnDemand 可见无动画应使用 ControlFlow::WaitUntil"
+        );
+    }
+
+    /// 按需渲染模式: 可见且有动画应使用 WaitUntil (持续渲染)。
+    #[test]
+    fn on_demand_visible_with_animation_uses_wait_until() {
+        let control_flow = control_flow_for_mode(WindowMode::OnDemand, true, true);
+        assert!(
+            matches!(control_flow, winit::event_loop::ControlFlow::WaitUntil(_)),
+            "OnDemand 可见有动画应使用 ControlFlow::WaitUntil"
+        );
+    }
+
+    /// 持续渲染模式: 隐藏态仍使用 WaitUntil (番茄钟等需要持续 tick)。
+    #[test]
+    fn continuous_hidden_uses_wait_until() {
+        let control_flow = control_flow_for_mode(WindowMode::Continuous, false, false);
+        assert!(
+            matches!(control_flow, winit::event_loop::ControlFlow::WaitUntil(_)),
+            "Continuous 隐藏态应使用 ControlFlow::WaitUntil (保持 tick)"
+        );
+    }
+
+    /// 持续渲染模式: 可见态使用 WaitUntil (原有行为)。
+    #[test]
+    fn continuous_visible_uses_wait_until() {
+        let control_flow = control_flow_for_mode(WindowMode::Continuous, true, false);
+        assert!(
+            matches!(control_flow, winit::event_loop::ControlFlow::WaitUntil(_)),
+            "Continuous 可见态应使用 ControlFlow::WaitUntil"
+        );
+    }
+
+    /// 根据窗口模式和可见性决定控制流。
+    ///
+    /// - `OnDemand` + 隐藏 → `Wait` (零唤醒, 省电)
+    /// - `OnDemand` + 可见 → `WaitUntil(16ms)` (事件驱动重绘, ~60fps)
+    /// - `Continuous` (任何状态) → `WaitUntil(16ms)` (番茄钟等需持续 tick)
+    fn control_flow_for_mode(
+        mode: WindowMode,
+        is_visible: bool,
+        has_animation: bool,
+    ) -> winit::event_loop::ControlFlow {
+        use std::time::{Duration, Instant};
+        use winit::event_loop::ControlFlow;
+
+        match mode {
+            WindowMode::OnDemand if !is_visible && !has_animation => ControlFlow::Wait,
+            _ => ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16)),
+        }
     }
 }

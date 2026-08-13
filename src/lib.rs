@@ -32,7 +32,7 @@ pub use theme::{
 pub use window::tray::TrayHandle;
 pub use window::{
     CloseBehavior, GlobalHotkey, WindowAppEvent, WindowConfig, WindowError, WindowEventSender,
-    hotkey_ids, run, run_app, shortcut_for_id, tray, tray_action_ids,
+    WindowMode, hotkey_ids, run, run_app, shortcut_for_id, tray, tray_action_ids,
 };
 // 托盘子模块：re-export tray-icon (含 menu), 供例子构建菜单使用。
 pub use ::tray_icon;
