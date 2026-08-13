@@ -1494,11 +1494,11 @@ mod tests {
         );
         let all_rects = rects.instance_rects();
         assert!(
-            all_rects.iter().any(|r| *r == expected_top),
+            all_rects.contains(&expected_top),
             "还原图标应有上方水平线段，右端到 ({corner_x:.1})"
         );
         assert!(
-            all_rects.iter().any(|r| *r == expected_right),
+            all_rects.contains(&expected_right),
             "还原图标应有右侧垂直线段，从 ({corner_y:.1}) 开始"
         );
     }
