@@ -33,7 +33,7 @@ use crate::widget::Node;
 use crate::{Color, Size};
 
 pub use event::{WindowAppEvent, WindowEventSender};
-pub use hotkey::hotkey_ids;
+pub use hotkey::{GlobalHotkey, hotkey_ids};
 pub use tray::tray_action_ids;
 #[allow(unused_imports)]
 pub use tray::{TrayHandle, shortcut_for_id};
@@ -101,6 +101,10 @@ pub struct WindowConfig {
     pub logo_name: String,
     /// 初始是否最大化。默认 `false` (普通尺寸 + 居中)。
     pub maximized: bool,
+    /// 全局热键声明集合：空 = 不注册不启动热键线程。
+    /// 默认沿袭首个消费者 (番茄钟) 的 Ctrl+Shift+P/S/Q;
+    /// 新产品必须显式声明自己的热键, 否则与番茄钟冲突 (后注册者失败)。
+    pub hotkeys: Vec<GlobalHotkey>,
 }
 
 impl Default for WindowConfig {
@@ -118,6 +122,11 @@ impl Default for WindowConfig {
             close_behavior: CloseBehavior::Exit,
             logo_name: "logo".into(),
             maximized: false,
+            hotkeys: vec![
+                GlobalHotkey::ctrl_shift(hotkey_ids::TOGGLE_VISIBLE, 0x50), // P
+                GlobalHotkey::ctrl_shift(hotkey_ids::START_PAUSE, 0x53),    // S
+                GlobalHotkey::ctrl_shift(hotkey_ids::QUIT, 0x51),           // Q
+            ],
         }
     }
 }
@@ -139,8 +148,8 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
     app.attach_window_sender(WindowEventSender {
         sender: window_event_tx,
     });
-    // 启动全局热键监听线程 (None 表示平台不支持)
-    let hotkey_rx = hotkeys::spawn().map(|(rx, _handle)| rx);
+    // 启动全局热键监听线程 (空声明 / 平台不支持 → None)
+    let hotkey_rx = hotkeys::spawn(&config.hotkeys).map(|(rx, _handle)| rx);
     // 安装系统托盘 (图标 + 菜单)。load_tray_icon 失败则降级到无托盘。
     #[cfg(target_os = "windows")]
     let tray = {
