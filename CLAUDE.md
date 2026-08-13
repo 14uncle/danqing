@@ -93,7 +93,7 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 | **新增组件**(widget) | 一个现有同族组件(照模式) | `src/theme.rs` | — |
 | **性能/内存** | `tools/benchmark.ps1` | `docs/CONTEXT/architecture.md` | `wgpu-30-memory-lever`, `minidbg-symbol-preference` |
 | **构建/工具链** | — | `build.rs` + `.cargo/config.toml` | `windows-gnu-toolchain-lld-fix` |
-| **Pomodoro POC** | `examples/pomodoro/CLAUDE.md` | `docs/specs/phase2-pomodoro-poc.md` | — |
+| **Pomodoro 产品** | `../danqing-pomodoro/CLAUDE.md`(已独立成仓库) | `docs/specs/phase2-pomodoro-poc.md` | — |
 | **九场景扩展**(新增场景/动效) | `tasks/plan-nine-scenes.md` + `tasks/todo-nine-scenes.md` | `docs/specs/pomodoro-nine-scenes.md` + 对应场景 spec | `scene-motion-uv-displacement`, `ai-scene-uv-displacement-preference` |
 | **Bug 修复** | 最小复现 + `cargo test` 输出 | 相关模块源码 | — |
 
