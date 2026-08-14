@@ -87,7 +87,7 @@ pub enum WindowMode {
     /// 事件驱动 redraw。适用于效率工具 (剪贴板管理器等)。
     #[default]
     OnDemand,
-    /// 持续渲染: 隐藏态仍保持 `WaitUntil(16ms)` ≈ 60fps tick。
+    /// 持续渲染：隐藏态仍保持 `WaitUntil(16ms)` ≈ 60fps tick。
     /// 适用于需要持续动画/音频的应用 (番茄钟等)。
     Continuous,
 }
@@ -115,12 +115,12 @@ pub struct WindowConfig {
     pub logo_name: String,
     /// 初始是否最大化。默认 `false` (普通尺寸 + 居中)。
     pub maximized: bool,
-    /// 窗口渲染模式：默认 [`WindowMode::OnDemand`] (按需渲染, 省电)。
+    /// 窗口渲染模式：默认 [`WindowMode::OnDemand`] (按需渲染，省电)。
     /// 番茄钟等需要持续动画的应用应设为 [`WindowMode::Continuous`]。
     pub mode: WindowMode,
     /// 全局热键声明集合：空 = 不注册不启动热键线程。
     /// 默认沿袭首个消费者 (番茄钟) 的 Ctrl+Shift+P/S/Q;
-    /// 新产品必须显式声明自己的热键, 否则与番茄钟冲突 (后注册者失败)。
+    /// 新产品必须显式声明自己的热键，否则与番茄钟冲突 (后注册者失败)。
     pub hotkeys: Vec<GlobalHotkey>,
 }
 

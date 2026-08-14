@@ -55,6 +55,46 @@ impl Image {
     pub fn data(&self) -> &[u8] {
         &self.data
     }
+
+    /// 计算图像主色 (取中心区域平均值)。
+    ///
+    /// 用于最小实现的矩形占位绘制。
+    fn dominant_color(&self) -> Color {
+        if self.data.is_empty() || self.width == 0 || self.height == 0 {
+            return Color::rgba(0.5, 0.5, 0.5, 0.8);
+        }
+
+        // 取中心 16x16 区域的平均值
+        let (cx, cy) = (self.width / 2, self.height / 2);
+        let r = 8.min(self.width / 2).min(self.height / 2);
+        let (mut sr, mut sg, mut sb, mut sa, mut n) = (0u32, 0u32, 0u32, 0u32, 0u32);
+
+        for dy in 0..r.min(8) {
+            for dx in 0..r.min(8) {
+                let px = (cx + dx) % self.width;
+                let py = (cy + dy) % self.height;
+                let off = ((py * self.width + px) * 4) as usize;
+                if off + 3 < self.data.len() {
+                    sr += self.data[off] as u32;
+                    sg += self.data[off + 1] as u32;
+                    sb += self.data[off + 2] as u32;
+                    sa += self.data[off + 3] as u32;
+                    n += 1;
+                }
+            }
+        }
+
+        if n == 0 {
+            return Color::rgba(0.5, 0.5, 0.5, 0.8);
+        }
+
+        Color::rgba(
+            sr as f32 / n as f32 / 255.0,
+            sg as f32 / n as f32 / 255.0,
+            sb as f32 / n as f32 / 255.0,
+            sa as f32 / n as f32 / 255.0,
+        )
+    }
 }
 
 impl Widget for Image {
@@ -77,9 +117,10 @@ impl Widget for Image {
     }
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, _texts: &mut TextBatch) {
-        // 最小实现：绘制一个纯色矩形占位
+        // 最小实现：使用图像主色绘制矩形占位
         // TODO: 实现真正的 RGBA 纹理渲染
-        rects.push_rect(area, Color::rgba(0.5, 0.5, 0.5, 0.8), 0.0);
+        let color = self.dominant_color();
+        rects.push_rect(area, color, 0.0);
     }
 }
 
@@ -149,5 +190,28 @@ mod tests {
         let area = Rect::from_xywh(0.0, 0.0, 100.0, 100.0);
         img.paint(area, &mut rects, &mut texts);
         // 验证 paint 不 panic
+    }
+
+    #[test]
+    fn image_dominant_color() {
+        // 纯红色图像 (2x2)
+        let data = vec![255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255];
+        let img = Image::new(data, 2, 2);
+        let color = img.dominant_color();
+        // 主色应该是红色
+        assert!(color.r > 0.9, "红色分量应该接近 1.0");
+        assert!(color.g < 0.1, "绿色分量应该接近 0.0");
+        assert!(color.b < 0.1, "蓝色分量应该接近 0.0");
+        assert!(color.a > 0.9, "Alpha 分量应该接近 1.0");
+    }
+
+    #[test]
+    fn image_dominant_color_empty() {
+        let img = Image::new(vec![], 0, 0);
+        let color = img.dominant_color();
+        // 空图像应该返回默认灰色
+        assert!(color.r > 0.4 && color.r < 0.6, "红色分量应该在 0.5 附近");
+        assert!(color.g > 0.4 && color.g < 0.6, "绿色分量应该在 0.5 附近");
+        assert!(color.b > 0.4 && color.b < 0.6, "蓝色分量应该在 0.5 附近");
     }
 }
