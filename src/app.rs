@@ -114,4 +114,10 @@ pub trait App: Any {
     /// 焦点恢复请求已被框架应用 (一次性语义)：实现者应清除请求状态。
     /// 默认空实现。
     fn focus_restored(&mut self) {}
+
+    /// 窗口失去 OS 焦点时回调。
+    ///
+    /// 用于实现"失焦自动隐藏"等行为。默认空实现。
+    /// 调用时机：`WindowEvent::Focused(false)` 到达时。
+    fn focus_lost(&mut self) {}
 }

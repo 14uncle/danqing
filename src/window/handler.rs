@@ -578,6 +578,10 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         }
         if let WindowEvent::Focused(gained) = event {
             self.has_os_focus = gained;
+            // 窗口失去焦点时通知应用层 (用于失焦自动隐藏等行为)。
+            if !gained {
+                self.app.focus_lost();
+            }
         }
 
         // 鼠标事件经组件树命中分发，分发后可能更新焦点
