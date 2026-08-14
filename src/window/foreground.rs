@@ -51,6 +51,92 @@ pub fn restore_foreground(hwnd: HWND) {
     bring_hwnd_to_foreground(hwnd);
 }
 
+/// 模拟粘贴快捷键 (Ctrl+V) 到当前前台窗口。
+///
+/// 用于实现剪贴板管理器的粘贴注入功能：
+/// 1. 将内容写入剪贴板
+/// 2. 恢复原前台窗口
+/// 3. 调用本函数模拟 Ctrl+V 粘贴
+///
+/// 注意：此函数需要前台窗口可接收键盘输入；否则注入可能失败。
+/// 失败仅记录警告，不 panic。
+pub fn simulate_paste() {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VkKeyScanW,
+        VK_CONTROL,
+    };
+
+    unsafe {
+        // 获取 V 键的虚拟键码
+        let v_result = VkKeyScanW('v' as u16);
+        let v_key_code = (v_result & 0xFF) as u16;
+        let ctrl_key = VK_CONTROL;
+
+        // 构造 Ctrl 按下 → V 按下 → V 抬起 → Ctrl 抬起 事件序列
+        let inputs = [
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: ctrl_key,
+                        wScan: 0,
+                        dwFlags: 0,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: v_key_code,
+                        wScan: 0,
+                        dwFlags: 0,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+            // V 键抬起
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: v_key_code,
+                        wScan: 0,
+                        dwFlags: KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+            // Ctrl 键抬起
+            INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: ctrl_key,
+                        wScan: 0,
+                        dwFlags: KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            },
+        ];
+
+        let sent = SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        );
+        if sent == 0 {
+            log::warn!("SendInput 模拟 Ctrl+V 失败");
+        }
+    }
+}
+
 /// 把窗口抢到前台 + 提到顶层 (Windows)。对后台常驻进程同样有效。
 ///
 /// 调用方应保证窗口已可见 (`set_visible(true)` 之后)；否则 `SetForegroundWindow`
@@ -193,5 +279,14 @@ mod tests {
 
             DestroyWindow(hwnd);
         }
+    }
+
+    /// 粘贴注入: 模拟 Ctrl+V 按键到前台窗口。
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn simulate_paste_shortcut_does_not_panic() {
+        // 验证 simulate_paste() API 存在且不 panic
+        // 实际效果需要手测验证 (需要真实前台窗口)
+        super::simulate_paste();
     }
 }
