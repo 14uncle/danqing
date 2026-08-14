@@ -4,7 +4,9 @@
 //! 基础组件: 按钮与文本。
 
 mod button;
+mod image;
 mod text;
 
 pub use button::Button;
+pub use image::Image;
 pub use text::Text;

@@ -18,7 +18,7 @@ mod layout;
 mod title_bar;
 mod view;
 
-pub use base::{Button, Text};
+pub use base::{Button, Image, Text};
 pub use focus::FocusManager;
 pub use form::{TextArea, TextInput};
 pub use layout::{Box, Center, Column, Padding, Row, Stack};

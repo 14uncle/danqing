@@ -373,8 +373,24 @@ fn page_base(t: &LightTheme) -> impl Widget + 'static {
     page(
         t,
         "基础 base — 按钮与文本",
-        card(t, "按钮与计数", counter_row(t)),
+        Column::new()
+            .gap(t.spacing_lg())
+            .cross_stretch()
+            .child(card(t, "按钮与计数", counter_row(t)))
+            .child(card(t, "Image 组件", image_demo())),
     )
+}
+
+/// Image 组件演示：创建一个 2x2 的 RGBA 图像并显示。
+fn image_demo() -> impl Widget + 'static {
+    // 创建一个 2x2 的 RGBA 图像 (红、绿、蓝、黄)
+    let data = vec![
+        255, 0, 0, 255, // 红色
+        0, 255, 0, 255, // 绿色
+        0, 0, 255, 255, // 蓝色
+        255, 255, 0, 255, // 黄色
+    ];
+    widget::Image::new(data, 2, 2)
 }
 
 /// 布局页：盒模型与流式排布。
