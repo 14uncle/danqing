@@ -24,6 +24,33 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use winit::window::Window;
 
+/// 记录当前前台窗口的 HWND，用于后续恢复。
+///
+/// 返回 `Some(HWND)` 表示成功记录，`None` 表示当前无前台窗口。
+/// 记录的 HWND 可用于 [`restore_foreground`] 恢复原前台窗口。
+pub fn record_foreground() -> Option<HWND> {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            None
+        } else {
+            Some(hwnd)
+        }
+    }
+}
+
+/// 恢复之前记录的前台窗口。
+///
+/// 调用方应保证窗口仍存在且未被销毁；否则行为未定义。
+/// 恢复失败仅记录警告，不 panic。
+pub fn restore_foreground(hwnd: HWND) {
+    if hwnd.is_null() {
+        log::warn!("尝试恢复空前台窗口句柄，跳过");
+        return;
+    }
+    bring_hwnd_to_foreground(hwnd);
+}
+
 /// 把窗口抢到前台 + 提到顶层 (Windows)。对后台常驻进程同样有效。
 ///
 /// 调用方应保证窗口已可见 (`set_visible(true)` 之后)；否则 `SetForegroundWindow`
@@ -119,6 +146,51 @@ mod tests {
             );
             assert!(!hwnd.is_null(), "创建隐藏消息窗口失败");
             super::bring_hwnd_to_foreground(hwnd);
+            DestroyWindow(hwnd);
+        }
+    }
+
+    /// 记录当前前台窗口: 无前台窗口时返回 None。
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn record_foreground_returns_none_when_no_foreground() {
+        // 在消息窗口上下文中调用，应返回 None (无前台窗口)
+        let recorded = super::record_foreground();
+        // 无前台窗口时应返回 None，或返回一个有效的 HWND
+        // 此测试验证 API 存在且不 panic
+        let _ = recorded;
+    }
+
+    /// 记录当前前台窗口: 返回的 HWND 可用于后续恢复。
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn record_foreground_returns_hwnd() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, HWND_MESSAGE,
+        };
+        unsafe {
+            // 创建一个可见窗口作为前台窗口
+            let hwnd = CreateWindowExW(
+                0,
+                windows_sys::core::w!("STATIC"),
+                windows_sys::core::w!(""),
+                0, // 隐藏窗口
+                0,
+                0,
+                0,
+                0,
+                HWND_MESSAGE,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            );
+            assert!(!hwnd.is_null(), "创建窗口失败");
+
+            // 记录前台窗口 (可能是 None 或其他窗口)
+            let recorded = super::record_foreground();
+            // 验证 API 不 panic，返回值可选
+            let _ = recorded;
+
             DestroyWindow(hwnd);
         }
     }

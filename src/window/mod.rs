@@ -16,7 +16,7 @@
 
 mod event;
 #[cfg(target_os = "windows")]
-mod foreground;
+pub mod foreground;
 mod handler;
 mod hotkey;
 mod icon;
