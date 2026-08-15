@@ -815,6 +815,9 @@ impl<A: App> Handler<'_, A> {
             }
             WindowAppEvent::SetClearColor(color) => {
                 self.config.clear_color = color;
+                if let Some(ctx) = self.context.as_mut() {
+                    ctx.set_clear_color(color);
+                }
             }
         }
     }
