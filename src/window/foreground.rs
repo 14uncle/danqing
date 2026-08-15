@@ -39,6 +39,11 @@ pub fn record_foreground() -> Option<HWND> {
 ///
 /// 调用方应保证窗口仍存在且未被销毁；否则行为未定义。
 /// 恢复失败仅记录警告，不 panic。
+///
+/// **警告 (2026-08-15 实测)**: 在「持有 IME 输入的窗口仍可见且聚焦」时调用,
+/// 焦点被硬拽走会杀死 Win11 26200+ 的 TSF↔IMM32 会话 —— 输入法永久死亡
+/// (重启进程才恢复, flutter/flutter#190042 同款)。剪贴板类应用的正确顺序:
+/// 先隐藏自身窗口, 待焦点自然回落后再注入 (见 simulate_paste 调用方)。
 pub fn restore_foreground(hwnd: HWND) {
     if hwnd.is_null() {
         log::warn!("尝试恢复空前台窗口句柄，跳过");

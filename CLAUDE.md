@@ -78,6 +78,26 @@ render/mod.rs 提交 wgpu(矩形 SDF pass + 文本图集 pass)
 - 新增组件必须出现在 `examples/showcase.rs` 中(以用代测)。
 - `widget/`、`layout.rs`、`event.rs`、`text/` 保持纯逻辑;平台/GPU 代码只出现在 `window/` 与 `render/`。
 - 阶段 1 组件使用 `src/theme.rs` token,避免魔法颜色/圆角/阴影值。
+- 新增组件范式:见 `docs/CONTEXT/widget-guidelines.md`;最小模板:
+
+```rust
+pub struct MyWidget { child: Option<Node>, color: Color, area: Rect }
+
+impl MyWidget {
+    pub fn new(/* 必要参数 */) -> Self { Self::themed(&LightTheme, /* ... */) }
+    pub fn themed(theme: &impl Theme, /* 必要参数 */) -> Self {
+        Self { color: theme.accent(), /* ... */ }
+    }
+    // Builder 方法返回 Self ...
+}
+
+impl Widget for MyWidget {
+    fn layout(&mut self, c: Constraints, t: &mut TextBatch) -> Size { /* ... */ }
+    fn paint(&self, area: Rect, r: &mut RectBatch, t: &mut TextBatch) { /* ... */ }
+    fn children(&self) -> &[Node] { /* ... */ }
+    fn children_mut(&mut self) -> &mut [Node] { /* ... */ }
+}
+```
 
 ## Context loading
 
