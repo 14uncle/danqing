@@ -320,6 +320,8 @@ impl Widget for Scrollable {
     }
 
     fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+        // 与 paint 一致: 图像同样裁剪到视口, 滚出视口的不进批次
+        images.push_clip(area);
         let child_area = Rect::new(
             Point::new(
                 area.origin.x - self.scroll_offset.x,
@@ -328,6 +330,7 @@ impl Widget for Scrollable {
             self.child_size,
         );
         self.child.paint_image(child_area, images);
+        images.pop_clip();
     }
 
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
@@ -514,5 +517,44 @@ mod tests {
         scroll.sync(&State { rev: 1, top: 800.0 });
         assert!((scroll.scroll_offset.y - 750.0).abs() < f32::EPSILON);
         assert_eq!(scroll.applied_rev, 1);
+    }
+
+    /// 子组件在子坐标系底部推图像; 视口高 100。
+    struct BottomImage;
+    impl Widget for BottomImage {
+        fn layout(&mut self, _c: Constraints, _t: &mut TextBatch) -> Size {
+            Size::new(100.0, 1000.0)
+        }
+        fn paint(&self, _a: Rect, _r: &mut RectBatch, _t: &mut TextBatch) {}
+        fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+            let data = [255u8; 4];
+            images.push_image(
+                &data,
+                1,
+                1,
+                Rect::from_xywh(area.origin.x, area.origin.y + 950.0, 40.0, 40.0),
+            );
+        }
+    }
+
+    /// paint 有 push_clip/pop_clip, paint_image 也必须裁剪到视口,
+    /// 否则滚出视口的图像仍会被绘制 (clipboard 列表缩略图场景踩实)。
+    #[test]
+    fn paint_image_clips_to_viewport() {
+        let mut texts = TextBatch::new();
+        let mut scroll = Scrollable::new(BottomImage);
+        scroll.layout(Constraints::tight(Size::new(100.0, 100.0)), &mut texts);
+        let viewport = Rect::from_xywh(0.0, 0.0, 100.0, 100.0);
+
+        // 未滚动: 图像在子坐标 950..990, 完全在视口之下 → 应被裁掉
+        let mut images = crate::render::ImageBatch::new();
+        scroll.paint_image(viewport, &mut images);
+        assert_eq!(images.len(), 0, "视口外的图像不应进入批次");
+
+        // 滚动 900: 图像落在视口 y 50..90 → 保留
+        scroll.handle_wheel((0.0, -900.0 / 25.0)); // 每单位 25px
+        let mut images = crate::render::ImageBatch::new();
+        scroll.paint_image(viewport, &mut images);
+        assert_eq!(images.len(), 1, "滚入视口的图像应保留");
     }
 }
