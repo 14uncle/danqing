@@ -712,12 +712,16 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
 impl<A: App> Handler<'_, A> {
     /// 根据当前窗口模式和可见性决定控制流。
     ///
-    /// - `OnDemand` + 隐藏 → `Wait` (零唤醒, 省电)
+    /// - `OnDemand` + 隐藏 → `WaitUntil(100ms)` (低频轮询, 确保热键及时响应)
     /// - `OnDemand` + 可见 → `WaitUntil(16ms)` (事件驱动重绘, ~60fps)
     /// - `Continuous` (任何状态) → `WaitUntil(16ms)` (番茄钟等需持续 tick)
     fn control_flow_for_current_state(&self) -> ControlFlow {
         match self.config.mode {
-            super::WindowMode::OnDemand if !self.is_visible => ControlFlow::Wait,
+            // 隐藏态使用 100ms 轮询: 既保证热键及时响应, 又避免零唤醒导致热键失效
+            // (ControlFlow::Wait 无法被标准库 mpsc 通道唤醒)
+            super::WindowMode::OnDemand if !self.is_visible => {
+                ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100))
+            }
             _ => ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16)),
         }
     }
@@ -781,6 +785,20 @@ impl<A: App> Handler<'_, A> {
                 if self.is_visible {
                     self.show_window();
                 } else {
+                    self.hide_window();
+                }
+            }
+            WindowAppEvent::ShowWindow => {
+                // 仅显示窗口 (不切换)。用于 focus_lost 等场景。
+                if !self.is_visible {
+                    self.is_visible = true;
+                    self.show_window();
+                }
+            }
+            WindowAppEvent::HideWindow => {
+                // 仅隐藏窗口 (不切换)。用于 focus_lost 和关闭按钮。
+                if self.is_visible {
+                    self.is_visible = false;
                     self.hide_window();
                 }
             }

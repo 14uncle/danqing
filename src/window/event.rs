@@ -25,6 +25,10 @@ pub enum WindowAppEvent {
     /// 切换窗口可见性 (Handler 翻转内部状态后应用到 winit)。
     /// 单一事实源在 Handler, App 不持有副本以避免失同步。
     ToggleVisible,
+    /// 仅显示窗口 (不切换)。用于 focus_lost 等场景：窗口已隐藏时不再重复显示。
+    ShowWindow,
+    /// 仅隐藏窗口 (不切换)。用于 focus_lost 和关闭按钮：避免 toggle 导致的反复显隐。
+    HideWindow,
     /// 退出应用 (事件循环收到后 `event_loop.exit()`)。
     Quit,
     /// 阶段流转通知：隐藏态时 Handler 自动呼出窗口 + 抢焦点。
@@ -43,6 +47,18 @@ impl WindowEventSender {
     /// 请求 Handler 翻转窗口可见性。
     pub fn toggle_visible(&self) {
         let _ = self.sender.send(WindowAppEvent::ToggleVisible);
+    }
+
+    /// 请求 Handler 显示窗口 (仅显示，不切换)。
+    /// 用于 focus_lost 等场景：窗口已隐藏时不再重复显示。
+    pub fn show_window(&self) {
+        let _ = self.sender.send(WindowAppEvent::ShowWindow);
+    }
+
+    /// 请求 Handler 隐藏窗口 (仅隐藏，不切换)。
+    /// 用于 focus_lost 和关闭按钮：避免 toggle 导致的反复显隐。
+    pub fn hide_window(&self) {
+        let _ = self.sender.send(WindowAppEvent::HideWindow);
     }
 
     /// 退出应用。
