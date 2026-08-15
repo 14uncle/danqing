@@ -82,6 +82,10 @@ impl Widget for Column {
         self.flow.paint(area.origin, rects, texts);
     }
 
+    fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+        self.flow.paint_image(area.origin, images);
+    }
+
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
         self.flow.event(area.origin, event, msgs)
     }

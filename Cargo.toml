@@ -29,6 +29,8 @@ anyhow = "1"
 env_logger = "0.11"
 # examples/common/log.rs 的日志时间戳。
 chrono = "0.4"
+# showcase 示例：打开本地图片文件对话框。
+rfd = "0.15"
 
 [build-dependencies]
 winresource = "0.1"

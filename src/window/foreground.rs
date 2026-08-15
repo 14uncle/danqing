@@ -31,11 +31,7 @@ use winit::window::Window;
 pub fn record_foreground() -> Option<HWND> {
     unsafe {
         let hwnd = GetForegroundWindow();
-        if hwnd.is_null() {
-            None
-        } else {
-            Some(hwnd)
-        }
+        if hwnd.is_null() { None } else { Some(hwnd) }
     }
 }
 
@@ -62,8 +58,8 @@ pub fn restore_foreground(hwnd: HWND) {
 /// 失败仅记录警告，不 panic。
 pub fn simulate_paste() {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VkKeyScanW,
-        VK_CONTROL,
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_CONTROL,
+        VkKeyScanW,
     };
 
     unsafe {

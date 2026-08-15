@@ -222,6 +222,13 @@ impl Widget for Box {
         }
     }
 
+    fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+        let surface = area.snap_to_pixels();
+        if let Some(child) = &self.child {
+            child.paint_image(surface, images);
+        }
+    }
+
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
         // 先分发给子组件: 移动类全发, 其他类命中才发
         if let Some(child) = &mut self.child {

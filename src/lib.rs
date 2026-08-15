@@ -21,8 +21,8 @@ pub use app::{AnimationCtx, App};
 pub use event::{Event, ImeEvent, Key, MouseButton, NamedKey, WindowAction};
 pub use layout::{Color, Constraints, Edges, FlowChild, Point, Rect, Size, distribute};
 pub use render::{
-    BackgroundConfig, BackgroundFrame, Context as RenderContext, RectBatch, RenderError, ScaleMode,
-    TextBatch,
+    BackgroundConfig, BackgroundFrame, Context as RenderContext, ImageBatch, RectBatch,
+    RenderError, ScaleMode, TextBatch,
 };
 pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo, Line, break_lines};
 pub use theme::{

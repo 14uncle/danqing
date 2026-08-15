@@ -26,7 +26,7 @@ use winit::{
 
 use crate::app::{AnimationCtx, App};
 use crate::event::{Event, ImeEvent, Key, NamedKey, WindowAction};
-use crate::render::{Context, RectBatch, TextBatch};
+use crate::render::{Context, ImageBatch, RectBatch, TextBatch};
 use crate::widget::{
     FocusManager, MsgQueue, Node, event_at_path, ime_area_at_path, selected_text_at_path,
     wants_ime_at_path,
@@ -86,6 +86,8 @@ pub(super) struct Handler<'a, A: App> {
     /// 且此时 winit 已清零修饰键状态，无法靠 Alt 识别。唯一可靠的判据是
     /// 到达时窗口尚未持有 OS 焦点 (见 [`dispatch_focused_event`] 的 Tab 守卫)。
     has_os_focus: bool,
+    /// 图像纹理收集器 (每帧清空，paint 阶段填充)。
+    images: ImageBatch,
 }
 
 impl<'a, A: App> Handler<'a, A> {
@@ -128,6 +130,7 @@ impl<'a, A: App> Handler<'a, A> {
             window_event_rx,
             is_visible: true,
             has_os_focus: false,
+            images: ImageBatch::new(),
         }
     }
 }
@@ -414,6 +417,7 @@ impl<A: App> Handler<'_, A> {
         let frame_start = Instant::now();
         let mut rects = RectBatch::new();
         self.texts.clear();
+        self.images = ImageBatch::new();
         let screen = self.window.as_ref().map(|w| {
             let size = w.inner_size();
             Size::new(size.width as f32, size.height as f32)
@@ -444,6 +448,7 @@ impl<A: App> Handler<'_, A> {
                 .layout(crate::Constraints::tight(screen), &mut self.texts);
             self.root_area = Rect::new(Point::ZERO, size);
             self.tree.paint(self.root_area, &mut rects, &mut self.texts);
+            self.tree.paint_image(self.root_area, &mut self.images);
             // 无边框窗口下自绘边框与圆角。
             if self.config.border_thickness > 0.0 {
                 rects.push_rounded_border(
@@ -461,7 +466,7 @@ impl<A: App> Handler<'_, A> {
                 context.set_background_frame(frame);
             }
             // Context::render 目前恒返回 true; 失败路径为防御 (退出事件循环)。
-            if !context.render(&rects, &mut self.texts) {
+            if !context.render(&rects, &mut self.texts, &mut self.images) {
                 event_loop.exit();
                 return;
             }
@@ -578,8 +583,10 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         }
         if let WindowEvent::Focused(gained) = event {
             self.has_os_focus = gained;
-            // 窗口失去焦点时通知应用层 (用于失焦自动隐藏等行为)。
-            if !gained {
+            // 窗口焦点变化时通知应用层 (用于失焦自动隐藏等行为)。
+            if gained {
+                self.app.focus_gained();
+            } else {
                 self.app.focus_lost();
             }
         }
@@ -787,6 +794,9 @@ impl<A: App> Handler<'_, A> {
                     self.show_window();
                     self.maximize_window();
                 }
+            }
+            WindowAppEvent::SetClearColor(color) => {
+                self.config.clear_color = color;
             }
         }
     }

@@ -66,6 +66,11 @@ pub trait Widget {
     /// `area` 为父组件摆放本组件的矩形 (布局结果)。
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch);
 
+    /// 绘制图像纹理：向 ImageBatch 推送纹理实例。
+    ///
+    /// 默认实现无操作。Image 组件覆盖此方法以推送纹理。
+    fn paint_image(&self, _area: Rect, _images: &mut crate::render::ImageBatch) {}
+
     /// 事件处理 (鼠标事件经命中分发到达; 键盘 /IME 事件经焦点路由到达)。
     ///
     /// `area` 与 paint 收到的矩形一致; 组件可经 `msgs` 产出应用消息

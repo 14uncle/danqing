@@ -45,6 +45,8 @@ struct Showcase {
     selected: usize,
     /// 窗口是否已最大化 (决定标题栏按钮图标 □/□□)。
     is_maximized: bool,
+    /// 当前显示的图像 (RGBA 数据，宽，高)。
+    image_data: Option<(Vec<u8>, u32, u32)>,
 }
 
 /// 应用消息。
@@ -61,6 +63,8 @@ enum Msg {
     TextareaChanged(String),
     /// 切换分类面板。
     Select(usize),
+    /// 打开本地图片。
+    OpenImage,
 }
 
 impl App for Showcase {
@@ -79,6 +83,22 @@ impl App for Showcase {
             Msg::InputChanged(s) => self.input_value = s,
             Msg::TextareaChanged(s) => self.textarea_value = s,
             Msg::Select(i) => self.selected = i,
+            Msg::OpenImage => {
+                // 打开文件对话框选择图片
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("图片", &["png", "jpg", "jpeg", "gif", "bmp"])
+                    .pick_file()
+                {
+                    match image::open(&path) {
+                        Ok(img) => {
+                            let rgba = img.to_rgba8();
+                            let (w, h) = rgba.dimensions();
+                            self.image_data = Some((rgba.into_raw(), w, h));
+                        }
+                        Err(e) => log::warn!("加载图片失败：{e}"),
+                    }
+                }
+            }
         }
     }
 
@@ -377,20 +397,163 @@ fn page_base(t: &LightTheme) -> impl Widget + 'static {
             .gap(t.spacing_lg())
             .cross_stretch()
             .child(card(t, "按钮与计数", counter_row(t)))
-            .child(card(t, "Image 组件", image_demo())),
+            .child(card(t, "Image 组件", ImageDemo::new())),
     )
 }
 
-/// Image 组件演示：创建一个 2x2 的 RGBA 图像并显示。
-fn image_demo() -> impl Widget + 'static {
-    // 创建一个 2x2 的 RGBA 图像 (柔和的蓝绿色调)
-    let data = vec![
-        100, 150, 180, 255, // 浅蓝
-        120, 160, 170, 255, // 蓝绿
-        90, 140, 160, 255,  // 深蓝
-        110, 150, 170, 255, // 中间色
-    ];
-    widget::Image::new(data, 2, 2)
+/// Image 组件演示：显示 LOGO 图片，支持打开本地图片。
+struct ImageDemo {
+    image: widget::Image,
+    open_button: Node,
+    /// 当前加载的图片尺寸 (用于显示文字信息)。
+    image_info: Option<(u32, u32)>,
+}
+
+impl ImageDemo {
+    fn new() -> Self {
+        let t = theme();
+        // 默认显示 LOGO 图片
+        let (data, width, height) = load_logo();
+        Self {
+            image: widget::Image::new(data, width, height),
+            open_button: Box::new(
+                Button::themed(
+                    &t,
+                    Text::new("打开图片")
+                        .font_size(t.font_size_body())
+                        .color(Color::WHITE),
+                )
+                .on_click(|| Msg::OpenImage),
+            ),
+            image_info: Some((width, height)),
+        }
+    }
+
+    /// 获取按钮实际尺寸 (包含 padding)。
+    fn open_button_size(&self) -> Size {
+        // Button 的 padding: Edges::symmetric(spacing_lg, spacing_md)
+        // 竖直方向 padding = spacing_md * 2
+        // 文字高度 ≈ font_size * 1.2
+        // 总高度 = font_size * 1.2 + spacing_md * 2
+        let t = theme();
+        let text_height = t.font_size_body() as f32 * 1.2;
+        let height = text_height + t.spacing_md() * 2.0;
+        Size::new(100.0, height)
+    }
+}
+
+impl Widget for ImageDemo {
+    fn sync(&mut self, state: &dyn std::any::Any) {
+        let state = state
+            .downcast_ref::<Showcase>()
+            .expect("ImageDemo 绑定状态类型不匹配");
+        self.open_button.sync(state);
+        // 如果有加载的图片，更新 image
+        if let Some((data, w, h)) = &state.image_data {
+            self.image = widget::Image::new(data.clone(), *w, *h);
+            self.image_info = Some((*w, *h));
+        }
+    }
+
+    fn layout(
+        &mut self,
+        constraints: danqing::Constraints,
+        texts: &mut danqing::TextBatch,
+    ) -> Size {
+        // 第一行：按钮 + 图片信息 (横向排列)
+        let button_size = self.open_button_size();
+        // 让按钮进行 layout 以缓存其内部状态
+        self.open_button
+            .layout(danqing::Constraints::tight(button_size), texts);
+        let row_height = button_size.height.max(20.0);
+
+        // 图片区域
+        let image_size = self.image.layout(
+            danqing::Constraints::loose(Size::new(
+                constraints.max_width,
+                constraints.max_height - row_height - 8.0,
+            )),
+            texts,
+        );
+        Size::new(image_size.width, image_size.height + row_height + 8.0)
+    }
+
+    fn paint(&self, area: Rect, rects: &mut danqing::RectBatch, texts: &mut danqing::TextBatch) {
+        // 第一行：按钮在左，图片信息在右
+        // 按钮使用其自身计算的尺寸
+        let button_size = self.open_button_size();
+        let button_area = Rect::from_xywh(
+            area.origin.x,
+            area.origin.y,
+            button_size.width,
+            button_size.height,
+        );
+        self.open_button.paint(button_area, rects, texts);
+
+        // 图片信息在按钮后面
+        if let Some((w, h)) = &self.image_info {
+            let info = format!("{}×{} px", w, h);
+            let baseline =
+                button_area.origin.y + button_area.size.height * 0.5 + texts.ascent(12.0) * 0.3;
+            texts.push_text(
+                &info,
+                button_area.origin.x + button_area.size.width + 8.0,
+                baseline,
+                12,
+                crate::Color::rgba(0.6, 0.6, 0.6, 1.0),
+            );
+        }
+
+        // 图片在下方
+        let image_area = Rect::from_xywh(
+            area.origin.x,
+            button_area.origin.y + button_size.height + 8.0,
+            area.size.width,
+            area.size.height - button_size.height - 8.0,
+        );
+        self.image.paint(image_area, rects, texts);
+    }
+
+    fn paint_image(&self, area: Rect, images: &mut danqing::ImageBatch) {
+        // 图片在下方
+        let button_size = self.open_button_size();
+        let image_area = Rect::from_xywh(
+            area.origin.x,
+            area.origin.y + button_size.height + 8.0,
+            area.size.width,
+            area.size.height - button_size.height - 8.0,
+        );
+        self.image.paint_image(image_area, images);
+    }
+
+    fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
+        let button_height = 36.0;
+        let button_area =
+            Rect::from_xywh(area.origin.x, area.origin.y, area.size.width, button_height);
+        self.open_button.event(event, button_area, msgs)
+    }
+}
+
+/// 从 assets/logo/logo_256.png 加载 LOGO 图片。
+fn load_logo() -> (Vec<u8>, u32, u32) {
+    let path = std::path::Path::new("assets/logo/logo_256.png");
+    match image::open(path) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            (rgba.into_raw(), w, h)
+        }
+        Err(_) => {
+            // 回退：创建一个 2x2 的默认图片
+            let data = vec![
+                100, 150, 180, 255, // 浅蓝
+                120, 160, 170, 255, // 蓝绿
+                90, 140, 160, 255, // 深蓝
+                110, 150, 170, 255, // 中间色
+            ];
+            (data, 2, 2)
+        }
+    }
 }
 
 /// 布局页：盒模型与流式排布。
@@ -602,6 +765,7 @@ fn main() -> anyhow::Result<()> {
         textarea_value: String::new(),
         selected: 0,
         is_maximized: false,
+        image_data: None,
     };
 
     let t = theme();

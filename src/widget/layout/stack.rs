@@ -77,6 +77,12 @@ impl Widget for Stack {
         }
     }
 
+    fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+        for child in &self.children {
+            child.paint_image(area, images);
+        }
+    }
+
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
         for child in self.children.iter_mut().rev() {
             if child.event(event, area, msgs) == EventResult::Consumed {

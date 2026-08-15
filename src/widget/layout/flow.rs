@@ -219,6 +219,13 @@ impl Flow {
         }
     }
 
+    /// 递归绘制图像纹理 (相对原点平移)。
+    pub fn paint_image(&self, origin: crate::Point, images: &mut crate::render::ImageBatch) {
+        for (child, area) in self.children.iter().zip(self.areas.iter()) {
+            child.paint_image(area.translate(origin.x, origin.y), images);
+        }
+    }
+
     /// 事件分发：移动类广播全树;其他事件沿命中路径 (后绘制者优先)。
     pub fn event(
         &mut self,

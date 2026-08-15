@@ -1,16 +1,7 @@
 //! @author 十四叔
 //! @date 2026/07/31
 //!
-//! 构建脚本: Windows 可执行文件嵌入图标资源。
+//! 构建脚本: 仅保留 rerun-if-changed 路径追踪。
+//! 图标嵌入已移至各产品仓库的 build.rs (库 crate 不应嵌入 Windows 资源)。
 
-fn main() {
-    #[cfg(target_os = "windows")]
-    {
-        if let Err(e) = winresource::WindowsResource::new()
-            .set_icon("assets/logo/pomodoro.ico")
-            .compile()
-        {
-            eprintln!("图标嵌入失败（不影响功能）: {e}");
-        }
-    }
-}
+fn main() {}

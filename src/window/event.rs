@@ -15,6 +15,7 @@ use winit::{
     keyboard::{Key as WinitKey, ModifiersState, NamedKey as WinitNamedKey},
 };
 
+use crate::Color;
 use crate::Point;
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 
@@ -28,6 +29,8 @@ pub enum WindowAppEvent {
     Quit,
     /// 阶段流转通知：隐藏态时 Handler 自动呼出窗口 + 抢焦点。
     PhaseAdvanced,
+    /// 动态更新窗口背景色 (主题切换等场景)。
+    SetClearColor(Color),
 }
 
 /// 应用持有的窗口事件发送器 (轻量 clone, 内部是 mpsc Sender)。
@@ -50,6 +53,11 @@ impl WindowEventSender {
     /// 通知 Handler 阶段已流转 (隐藏态时 Handler 决定是否自动呼出)。
     pub fn phase_advanced(&self) {
         let _ = self.sender.send(WindowAppEvent::PhaseAdvanced);
+    }
+
+    /// 动态更新窗口背景色。
+    pub fn set_clear_color(&self, color: Color) {
+        let _ = self.sender.send(WindowAppEvent::SetClearColor(color));
     }
 }
 

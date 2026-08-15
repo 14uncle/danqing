@@ -266,6 +266,17 @@ impl Widget for Scrollable {
         self.draw_scrollbar(area, rects);
     }
 
+    fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+        let child_area = Rect::new(
+            Point::new(
+                area.origin.x - self.scroll_offset.x,
+                area.origin.y - self.scroll_offset.y,
+            ),
+            self.child_size,
+        );
+        self.child.paint_image(child_area, images);
+    }
+
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
         self.area.set(area);
         let inside = match event.position() {

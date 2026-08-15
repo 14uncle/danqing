@@ -141,6 +141,12 @@ impl Widget for Switcher {
         }
     }
 
+    fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+        if let Some(child) = self.children.get(self.active) {
+            child.paint_image(Rect::new(area.origin, self.active_size), images);
+        }
+    }
+
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
         match self.children.get_mut(self.active) {
             Some(child) => child.event(event, Rect::new(area.origin, self.active_size), msgs),

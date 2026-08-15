@@ -120,4 +120,10 @@ pub trait App: Any {
     /// 用于实现"失焦自动隐藏"等行为。默认空实现。
     /// 调用时机：`WindowEvent::Focused(false)` 到达时。
     fn focus_lost(&mut self) {}
+
+    /// 窗口获得 OS 焦点时回调。
+    ///
+    /// 用于跟踪焦点状态 (如剪贴板管理器的首次焦点守卫)。默认空实现。
+    /// 调用时机：`WindowEvent::Focused(true)` 到达时。
+    fn focus_gained(&mut self) {}
 }
