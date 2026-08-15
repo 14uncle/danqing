@@ -137,6 +137,18 @@ impl TextInput {
         self.editor.text()
     }
 
+    /// 清空文本 (可撤销)。
+    ///
+    /// 保留组件实例与焦点状态 —— 需要「清空输入」时不要用新建实例替代:
+    /// FocusIn 只派发一次, 新实例永远等不到焦点态 (光标不显示)。
+    ///
+    /// 不产生 `on_change` 消息: 应用状态侧须自行同步清空 (下帧 bind 也会纠回)。
+    pub fn clear(&mut self) {
+        self.editor.select_all();
+        self.editor.cut_selection();
+        self.preedit = None;
+    }
+
     /// 光标位置 (测试用)。
     #[cfg(test)]
     pub(crate) fn cursor(&self) -> usize {
@@ -568,6 +580,14 @@ mod tests {
 
     fn input() -> TextInput {
         TextInput::new().text("Hello")
+    }
+
+    #[test]
+    fn clear_empties_text_and_resets_cursor() {
+        let mut t = TextInput::new().text("要清空的文本");
+        t.clear();
+        assert_eq!(t.value(), "");
+        assert_eq!(t.cursor(), 0);
     }
 
     #[test]
