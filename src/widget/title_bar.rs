@@ -26,6 +26,8 @@ pub enum LogoKind {
     Default,
     /// 番茄钟：玉色外环 (计时轨道) + 朱砂时针 / 分针 + 轴心。
     Pomodoro,
+    /// 剪贴板：深色圆角矩形 + 青色夹子 + 青色横线。
+    Clipboard,
 }
 
 /// 标题栏按钮布局样式。
@@ -154,6 +156,10 @@ pub struct TitleBar {
     font_size: u16,
     /// 三个按钮状态，按角色序索引 (0= 关闭，1= 最大化，2= 最小化)。
     buttons: [TitleButton; 3],
+    /// 是否显示最小化按钮。
+    show_minimize: bool,
+    /// 是否显示最大化按钮。
+    show_maximize: bool,
     /// 关闭按钮回调。
     on_close: Option<ActionFactory>,
     /// 最小化按钮回调。
@@ -246,6 +252,8 @@ impl TitleBar {
             traffic_leading: theme.spacing_md(),
             font_size: theme.font_size_body(),
             buttons: [TitleButton::default(); 3],
+            show_minimize: true,
+            show_maximize: true,
             on_close: None,
             on_minimize: None,
             on_maximize: None,
@@ -304,6 +312,18 @@ impl TitleBar {
         self
     }
 
+    /// 设置是否显示最小化按钮 (默认显示)。
+    pub fn show_minimize(mut self, show: bool) -> Self {
+        self.show_minimize = show;
+        self
+    }
+
+    /// 设置是否显示最大化按钮 (默认显示)。
+    pub fn show_maximize(mut self, show: bool) -> Self {
+        self.show_maximize = show;
+        self
+    }
+
     /// 设置 LOGO 变体，覆盖默认母 logo。
     pub fn logo_kind(mut self, kind: LogoKind) -> Self {
         self.logo_kind = kind;
@@ -349,15 +369,40 @@ impl TitleBar {
             TitleBarStyle::Standard => {
                 let size = self.height;
                 let right = area.origin.x + area.size.width;
-                let x = right - (pos as f32 + 1.0) * size - pos as f32 * self.button_gap;
+                // 计算此按钮之前 (更靠右) 有多少可见按钮
+                let visible_before = placed
+                    .iter()
+                    .take(pos)
+                    .filter(|r| self.is_button_visible(**r))
+                    .count();
+                let x = right
+                    - (visible_before as f32 + 1.0) * size
+                    - visible_before as f32 * self.button_gap;
                 Rect::from_xywh(x, area.origin.y, size, size)
             }
             TitleBarStyle::TrafficLights => {
                 let d = self.traffic_diameter;
-                let x = area.origin.x + self.traffic_leading + pos as f32 * (d + self.traffic_gap);
+                // 计算此按钮之前有多少可见按钮
+                let visible_before = placed
+                    .iter()
+                    .take(pos)
+                    .filter(|r| self.is_button_visible(**r))
+                    .count();
+                let x = area.origin.x
+                    + self.traffic_leading
+                    + visible_before as f32 * (d + self.traffic_gap);
                 let y = area.origin.y + (self.height - d) / 2.0;
                 Rect::from_xywh(x, y, d, d)
             }
+        }
+    }
+
+    /// 判断指定角色按钮是否应显示。
+    fn is_button_visible(&self, role: ButtonRole) -> bool {
+        match role {
+            ButtonRole::Close => true,
+            ButtonRole::Minimize => self.show_minimize,
+            ButtonRole::Maximize => self.show_maximize,
         }
     }
 
@@ -390,6 +435,7 @@ impl TitleBar {
     fn hit_button(&self, area: Rect, position: Point) -> Option<ButtonRole> {
         ButtonRole::ALL
             .into_iter()
+            .filter(|role| self.is_button_visible(*role))
             .find(|role| self.button_rect(area, *role).contains(position))
     }
 
@@ -797,6 +843,54 @@ impl Widget for TitleBar {
                     pivot_r,
                 );
             }
+            LogoKind::Clipboard => {
+                // ── 剪贴板：深色圆角矩形 + 青色夹子 + 青色横线 ──
+                let x = logo_rect.origin.x;
+                let y = logo_rect.origin.y;
+                let s = logo_size;
+                let accent = self.logo_frame_color;
+
+                // 主体：用 text_secondary 做底色 (深色主题下是灰色,
+                // 浅色主题下是深灰)，确保在两种背景上都可见。
+                let body_inset = s * 0.12;
+                let body_rect = logo_rect.inset(body_inset);
+                let body_r = s * 0.14;
+                rects.push_rect(body_rect, self.button_color, body_r);
+
+                // 夹子：顶部居中圆角矩形
+                let clip_w = s * 0.36;
+                let clip_h = s * 0.22;
+                let clip_x = x + (s - clip_w) / 2.0;
+                let clip_y = y + s * 0.04;
+                let clip_r = s * 0.08;
+                rects.push_rect(
+                    Rect::from_xywh(clip_x, clip_y, clip_w, clip_h),
+                    accent,
+                    clip_r,
+                );
+                // 夹子缺口 (与主体同色覆盖，形成 U 形)
+                let notch_w = clip_w * 0.52;
+                let notch_h = clip_h * 0.45;
+                let notch_x = clip_x + (clip_w - notch_w) / 2.0;
+                let notch_y = clip_y + clip_h - notch_h;
+                rects.push_rect(
+                    Rect::from_xywh(notch_x, notch_y, notch_w, notch_h),
+                    self.button_color,
+                    0.0,
+                );
+
+                // 三条横线 (文字行)
+                let line_x = body_rect.origin.x + s * 0.16;
+                let line_w = body_rect.size.width - s * 0.32;
+                let line_h = s * 0.055;
+                let line_r = line_h / 2.0;
+                let line_gap = s * 0.105;
+                let line_start_y = body_rect.origin.y + s * 0.32;
+                for i in 0..3 {
+                    let ly = line_start_y + i as f32 * line_gap;
+                    rects.push_rect(Rect::from_xywh(line_x, ly, line_w, line_h), accent, line_r);
+                }
+            }
         }
 
         // 标题文字，垂直居中。
@@ -819,6 +913,9 @@ impl Widget for TitleBar {
                 // (其他平台) 处理，自绘圆角反而无法与真实窗体圆角 / 最大化
                 // 直角状态保持一致。
                 for role in self.style.placed_roles() {
+                    if !self.is_button_visible(role) {
+                        continue;
+                    }
                     let bg = self.button_rect(area, role);
                     let icon = self.button_icon_rect(bg);
                     if let Some(bg_color) = self.button_background_color(role) {
@@ -830,6 +927,9 @@ impl Widget for TitleBar {
             TitleBarStyle::TrafficLights => {
                 // 红绿灯：始终绘制主题色实心圆，仅 hover 时叠加深色符号。
                 for role in self.style.placed_roles() {
+                    if !self.is_button_visible(role) {
+                        continue;
+                    }
                     let circle = self.button_rect(area, role);
                     rects.push_rect(circle, self.traffic_color(role), circle.size.width / 2.0);
                     if self.buttons[role.index()].hovered {
