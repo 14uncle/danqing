@@ -17,10 +17,10 @@ use std::time::{Duration, Instant};
 
 use winit::{
     application::ApplicationHandler,
-    dpi::{LogicalPosition, LogicalSize},
-    event::WindowEvent,
+    dpi::{LogicalPosition, LogicalSize, PhysicalSize},
+    event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow},
-    keyboard::ModifiersState,
+    keyboard::{KeyCode, ModifiersState, PhysicalKey},
     window::{Window as WinitWindow, WindowAttributes, WindowId},
 };
 
@@ -86,6 +86,23 @@ pub(super) struct Handler<'a, A: App> {
     /// 且此时 winit 已清零修饰键状态，无法靠 Alt 识别。唯一可靠的判据是
     /// 到达时窗口尚未持有 OS 焦点 (见 [`dispatch_focused_event`] 的 Tab 守卫)。
     has_os_focus: bool,
+    /// 最后一次可信的客户区尺寸 (物理像素)，窗口创建时取真实 inner_size 初始化。
+    ///
+    /// Windows 坑 (2026-08-16 定位「剪贴板唤起列表不全」根因):
+    /// set_visible(false) 隐藏窗口后，系统补发一个 160x28 的幻影 WM_SIZE
+    /// (历史 minimized 占位尺寸), 而再次 set_visible(true) 时并不补发真实
+    /// 尺寸 —— winit 缓存的 inner_size 就此卡死在幻影值：布局视口归零
+    /// (Scrollable 纠偏被无限推迟)、surface 尺寸与窗口失配导致
+    /// get_current_texture 永久 Outdated, 窗口定格在隐藏前的最后一帧。
+    /// 对策：隐藏态的 Resized 一律不信 (见 window_event), 每帧布局尺寸以
+    /// 本字段为准而非再问 winit, 显示时用 request_inner_size 自愈 winit 缓存。
+    /// 已知取舍：隐藏期间的 DPI 变化 (拖到别的显示器) 同样被忽略, 唤起时
+    /// 会以旧物理像素强制回尺寸 —— 对固定尺寸弹窗影响小, 下次真实尺寸
+    /// 变化即自愈。
+    last_real_size: PhysicalSize<u32>,
+    /// 热键主键吞键守卫 (热键触发时置入, 主键抬起 / 失焦时清除)。
+    /// 详见 [`hotkey_swallow_filter`]。
+    swallow_hotkey_key: Option<KeyCode>,
     /// 图像纹理收集器 (每帧清空，paint 阶段填充)。
     images: ImageBatch,
 }
@@ -130,6 +147,8 @@ impl<'a, A: App> Handler<'a, A> {
             window_event_rx,
             is_visible: true,
             has_os_focus: false,
+            last_real_size: PhysicalSize::new(0, 0),
+            swallow_hotkey_key: None,
             images: ImageBatch::new(),
         }
     }
@@ -143,6 +162,113 @@ use super::{CloseBehavior, WindowConfig};
 /// (此时 `has_os_focus == false`); 用户主动遍历只发生在持有 OS 焦点期间。
 fn tab_traverse_allowed(has_os_focus: bool) -> bool {
     has_os_focus
+}
+
+/// Windows 虚拟键码 → winit KeyCode (仅覆盖字母与数字键; 其他键不吞, 返回 None)。
+///
+/// 字母键的 vk 即 ASCII 大写码 (0x41..=0x5A), 主键盘数字键同理 (0x30..=0x39)。
+fn vk_to_key_code(vk: u32) -> Option<KeyCode> {
+    let code = match vk {
+        0x41 => KeyCode::KeyA,
+        0x42 => KeyCode::KeyB,
+        0x43 => KeyCode::KeyC,
+        0x44 => KeyCode::KeyD,
+        0x45 => KeyCode::KeyE,
+        0x46 => KeyCode::KeyF,
+        0x47 => KeyCode::KeyG,
+        0x48 => KeyCode::KeyH,
+        0x49 => KeyCode::KeyI,
+        0x4A => KeyCode::KeyJ,
+        0x4B => KeyCode::KeyK,
+        0x4C => KeyCode::KeyL,
+        0x4D => KeyCode::KeyM,
+        0x4E => KeyCode::KeyN,
+        0x4F => KeyCode::KeyO,
+        0x50 => KeyCode::KeyP,
+        0x51 => KeyCode::KeyQ,
+        0x52 => KeyCode::KeyR,
+        0x53 => KeyCode::KeyS,
+        0x54 => KeyCode::KeyT,
+        0x55 => KeyCode::KeyU,
+        0x56 => KeyCode::KeyV,
+        0x57 => KeyCode::KeyW,
+        0x58 => KeyCode::KeyX,
+        0x59 => KeyCode::KeyY,
+        0x5A => KeyCode::KeyZ,
+        0x30 => KeyCode::Digit0,
+        0x31 => KeyCode::Digit1,
+        0x32 => KeyCode::Digit2,
+        0x33 => KeyCode::Digit3,
+        0x34 => KeyCode::Digit4,
+        0x35 => KeyCode::Digit5,
+        0x36 => KeyCode::Digit6,
+        0x37 => KeyCode::Digit7,
+        0x38 => KeyCode::Digit8,
+        0x39 => KeyCode::Digit9,
+        _ => return None,
+    };
+    Some(code)
+}
+
+/// 热键主键此刻是否仍被物理按住 (武装吞键守卫的前置检查)。
+///
+/// 热键经线程消息队列 + 100ms 心跳轮询到达主循环, 天然滞后于物理按键;
+/// 快速点按时主键在武装前早已抬起。焦点合成只覆盖「按住中的键」,
+/// 已抬起就意味着不会有漏键, 无需守卫 —— 此时若强行武装, 守卫将因永远
+/// 收不到主键抬起而卡死, 误吞用户本次会话里后续的主动输入。
+#[cfg(target_os = "windows")]
+fn vk_still_held(vk: u32) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    // 返回值的最高位 = 当前按住 (最低位是"自上次调用以来按过", 不看)。
+    unsafe { (GetAsyncKeyState(vk as i32) as u16) & 0x8000 != 0 }
+}
+
+/// 非 Windows 平台无全局热键线程, 守卫永不武装。
+#[cfg(not(target_os = "windows"))]
+fn vk_still_held(_vk: u32) -> bool {
+    false
+}
+
+/// 热键主键吞键判定 (2026-08-16 定位「剪贴板唤起列表不全」真根因)。
+///
+/// 热键触发后，主键的按下事件仍可能漏进刚唤起并抢到焦点的窗口，有两条路径
+/// (实测均发生):
+/// 1. winit 在 WM_SETFOCUS 时给所有物理按住中的键合成 Pressed 事件
+///    (合成事件 `repeat=false`, 顺序: 字母键在前修饰键在后 —— 日志实锤);
+/// 2. 主键按住不放时 Windows 键盘自动重复继续投递 (`repeat=true`,
+///    RegisterHotKey 的 MOD_NOREPEAT 只挡 WM_HOTKEY 重发, 不挡按键本身)。
+///
+/// 漏进的 "v" 落进检索框, 历史列表被静默过滤 (表现: 行数变少、缺最新条目,
+/// 清空检索框即恢复)。
+///
+/// `swallow` 为热键触发时记下的主键; 返回 true 表示该键盘事件应被丢弃。
+/// 武装前置条件 (vk_still_held): 主键此刻仍被物理按住 —— 快速点按 (抬起
+/// 早于武装) 不会武装, 也就不会形成「等不到抬起事件」的卡死守卫。
+///
+/// 已知残余 (可接受): 若主键恰在武装检查与焦点窃取之间的毫秒级空窗抬起,
+/// 守卫仍会卡死至下次失焦 (Focused(false) 兜底解除); 期间用户第一次主动
+/// 按下主键会被吞一次 (含 Ctrl+V 粘贴按键流), 该次的 Released 到达即自愈。
+/// 相比被修掉的静默过滤 (无感知、须清检索框才恢复), 这是数量级改善。
+fn hotkey_swallow_filter(
+    swallow: &mut Option<KeyCode>,
+    physical: PhysicalKey,
+    state: ElementState,
+) -> bool {
+    let Some(code) = *swallow else {
+        return false;
+    };
+    if physical != PhysicalKey::Code(code) {
+        return false;
+    }
+    match state {
+        // 主键仍按住期间的按下 (焦点合成 / 自动重复): 吞, 守卫保持。
+        ElementState::Pressed => true,
+        // 主键抬起: 解除守卫, 事件放行 (对文本输入无副作用)。
+        ElementState::Released => {
+            *swallow = None;
+            false
+        }
+    }
 }
 
 impl<A: App> Handler<'_, A> {
@@ -418,9 +544,13 @@ impl<A: App> Handler<'_, A> {
         let mut rects = RectBatch::new();
         self.texts.clear();
         self.images = ImageBatch::new();
-        let screen = self.window.as_ref().map(|w| {
-            let size = w.inner_size();
-            Size::new(size.width as f32, size.height as f32)
+        let screen = self.window.as_ref().map(|_| {
+            // 尺寸取自 last_real_size 而非 winit inner_size: 后者在 Windows 上
+            // 被隐藏态的幻影 WM_SIZE 污染后不再自愈 (见 last_real_size 字段注释)。
+            Size::new(
+                self.last_real_size.width as f32,
+                self.last_real_size.height as f32,
+            )
         });
         if let Some(screen) = screen {
             let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
@@ -554,7 +684,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 return;
             }
         }
-        // 先持有窗口引用: 预渲染首帧需要查询 inner_size。
+        // 先持有窗口引用并记下真实客户区尺寸: 预渲染首帧需要布局基准;
+        // 此后每帧布局以 last_real_size 为准 (隐藏后 winit inner_size 会卡幻影值)。
+        self.last_real_size = window.inner_size();
         self.window = Some(Arc::clone(&window));
         // 预渲染首帧: 隐藏时渲染 + present, 显示时直接见内容 — 避免首帧就绪前白屏。
         // 平台注: 已在 Windows/DX12 验证。Wayland 上隐藏表面未映射, get_current_texture
@@ -583,11 +715,31 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         }
         if let WindowEvent::Focused(gained) = event {
             self.has_os_focus = gained;
+            if !gained {
+                // 失焦即解除吞键守卫 (主键抬起事件可能随焦点易手而错过)。
+                self.swallow_hotkey_key = None;
+            }
             // 窗口焦点变化时通知应用层 (用于失焦自动隐藏等行为)。
             if gained {
                 self.app.focus_gained();
             } else {
                 self.app.focus_lost();
+            }
+        }
+
+        // 热键主键吞键: 唤起抢到焦点后, 主键仍按住期间的按下事件 (焦点合成 /
+        // 自动重复) 会漏进本窗口 (见 hotkey_swallow_filter), 必须吞掉。
+        if let WindowEvent::KeyboardInput {
+            event: key_event, ..
+        } = &event
+        {
+            if hotkey_swallow_filter(
+                &mut self.swallow_hotkey_key,
+                key_event.physical_key,
+                key_event.state,
+            ) {
+                log::debug!("吞掉热键主键按下：{:?}", key_event.physical_key);
+                return;
             }
         }
 
@@ -646,6 +798,13 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             }
             WindowEvent::Resized(size) => {
                 log::info!("窗口尺寸变化：{}x{}", size.width, size.height);
+                // 隐藏态的 Resized 不可信 (Windows 幻影 160x28, 见 last_real_size
+                // 字段注释): 不接受、不重建 surface, 待显示时以 last_real_size 为准。
+                if !self.is_visible {
+                    log::info!("隐藏态忽略尺寸变化：{}x{}", size.width, size.height);
+                    return;
+                }
+                self.last_real_size = size;
                 if let Some(context) = &mut self.context {
                     context.resize(size.width, size.height);
                 }
@@ -669,6 +828,16 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 全局热键通道轮询
         if let Some(rx) = &self.hotkey_rx {
             while let Ok(id) = rx.try_recv() {
+                // 记下热键主键: 按住热键时主键的按下事件会漏进刚唤起的窗口
+                // (见 hotkey_swallow_filter), 抬起前这些按下必须吞掉。
+                // 仅当主键此刻仍被物理按住才武装守卫 (见 vk_still_held)。
+                self.swallow_hotkey_key = self
+                    .config
+                    .hotkeys
+                    .iter()
+                    .find(|h| h.id == id)
+                    .filter(|h| vk_still_held(h.vk))
+                    .and_then(|h| vk_to_key_code(h.vk));
                 if let Some(msg) = self.app.hotkey(id) {
                     self.app.update(msg);
                 }
@@ -744,10 +913,14 @@ impl<A: App> Handler<'_, A> {
     /// 隐藏窗口：应用层 `is_visible` 与 OS 状态同步翻转。
     /// 状态切换的"动作"统一收口在此，减少 toggle / close / min 等路径的复制。
     fn hide_window(&mut self) {
+        // is_visible 必须先于 set_visible 置位: Windows 隐藏后补发的幻影
+        // WM_SIZE (160x28, 见 last_real_size 注释) 若以同步 SendMessage 语义
+        // 派发, 会在 set_visible 调用内重入窗口过程 —— 此时 is_visible 必须
+        // 已为 false, 隐藏态守卫才能拦住它 (CloseBehavior::Hide 路径依赖此序)。
+        self.is_visible = false;
         if let Some(window) = &self.window {
             window.set_visible(false);
         }
-        self.is_visible = false;
     }
 
     /// 最大化窗口并同步应用层最大化状态 (标题栏图标据此切换 □/□□)。
@@ -764,6 +937,15 @@ impl<A: App> Handler<'_, A> {
     fn show_window(&self) {
         if let Some(window) = &self.window {
             window.set_visible(true);
+            // 自愈 winit 尺寸缓存: 隐藏期间若被幻影尺寸污染, 显示时强制回到
+            // 最后可信尺寸, 触发真实 WM_SIZE 让 winit 内部状态恢复健康。
+            // 最大化窗口不可经 SetWindowPos 改尺寸 (request_inner_size 会清
+            // 最大化标志), 跳过 —— 其恢复依赖 SW_SHOW 还原最大化时系统补发
+            // 真实 WM_SIZE (彼时 is_visible=true, 会被正常接受)。
+            // 尺寸本就一致时 Windows 不会补发 WM_SIZE, 无副作用。
+            if !window.is_maximized() && window.inner_size() != self.last_real_size {
+                let _ = window.request_inner_size(self.last_real_size);
+            }
             window.request_redraw();
             // Windows: winit 的 focus_window() 走合成 Alt + SetForegroundWindow,
             // 对后台常驻进程受前台锁限制而静默失败 —— 窗口"已显示但被遮"。
@@ -826,7 +1008,66 @@ impl<A: App> Handler<'_, A> {
 #[cfg(test)]
 mod tests {
     use super::super::WindowMode;
-    use super::tab_traverse_allowed;
+    use super::{hotkey_swallow_filter, tab_traverse_allowed, vk_to_key_code};
+    use winit::event::ElementState;
+    use winit::keyboard::{KeyCode, PhysicalKey};
+
+    /// 热键主键在守卫期间的按下被吞, 且守卫保持 (继续吞后续按下)。
+    /// 焦点合成 (repeat=false) 与自动重复 (repeat=true) 两种来源在
+    /// 过滤器入口处不作区分 —— 守卫期间的按下都不可能是主动输入。
+    /// 回归: 「唤起后 v 漏进检索框, 列表被静默过滤」(2026-08-16 定位)。
+    #[test]
+    fn hotkey_key_press_is_swallowed_while_held() {
+        let mut swallow = Some(KeyCode::KeyV);
+        let v = PhysicalKey::Code(KeyCode::KeyV);
+        assert!(hotkey_swallow_filter(
+            &mut swallow,
+            v,
+            ElementState::Pressed
+        ));
+        assert!(swallow.is_some());
+    }
+
+    /// 主键抬起解除守卫, 之后的主动输入正常放行。
+    #[test]
+    fn hotkey_key_release_lifts_swallow() {
+        let mut swallow = Some(KeyCode::KeyV);
+        let v = PhysicalKey::Code(KeyCode::KeyV);
+        assert!(!hotkey_swallow_filter(
+            &mut swallow,
+            v,
+            ElementState::Released
+        ));
+        assert!(swallow.is_none());
+        assert!(!hotkey_swallow_filter(
+            &mut swallow,
+            v,
+            ElementState::Pressed
+        ));
+    }
+
+    /// 非热键主键的按下/重复 (如长按 Backspace 连删) 不受影响。
+    #[test]
+    fn other_key_press_is_not_swallowed() {
+        let mut swallow = Some(KeyCode::KeyV);
+        let backspace = PhysicalKey::Code(KeyCode::Backspace);
+        assert!(!hotkey_swallow_filter(
+            &mut swallow,
+            backspace,
+            ElementState::Pressed
+        ));
+        assert!(swallow.is_some());
+    }
+
+    /// 字母/数字 vk 映射; 未覆盖的 vk 不吞。
+    #[test]
+    fn vk_maps_letters_and_digits() {
+        assert_eq!(vk_to_key_code(0x56), Some(KeyCode::KeyV));
+        assert_eq!(vk_to_key_code(0x41), Some(KeyCode::KeyA));
+        assert_eq!(vk_to_key_code(0x30), Some(KeyCode::Digit0));
+        assert_eq!(vk_to_key_code(0x39), Some(KeyCode::Digit9));
+        assert_eq!(vk_to_key_code(0x01), None);
+    }
 
     #[test]
     fn tab_without_os_focus_is_suppressed() {

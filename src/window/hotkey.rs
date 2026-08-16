@@ -24,6 +24,10 @@ pub mod hotkey_ids {
 ///
 /// `vk` 为 Windows 虚拟键码 (如 V 键 = 0x56); 非 Windows 平台忽略整份声明。
 /// MOD_NOREPEAT 恒带 (长按不连发)。
+///
+/// 注意: 引擎的「热键主键吞键守卫」(防唤起时主键漏进刚抢到焦点的窗口)
+/// 仅覆盖字母与数字主键 (见 handler.rs `vk_to_key_code`); 配置 F 键 /
+/// 方向键等其他主键时该守卫不武装, 漏键风险复现。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GlobalHotkey {
     /// 热键 ID: WM_HOTKEY 的 wParam, 经 `App::hotkey` 路由为应用消息。
