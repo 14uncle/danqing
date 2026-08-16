@@ -43,6 +43,8 @@ pub struct TextInput {
     focus_border_color: Color,
     /// 边框粗细。
     border_width: f32,
+    /// 关闭自绘背景与边框: 由外层容器绘制外壳, 组件只管文本/光标/选区/IME。
+    chromeless: bool,
     /// 显式宽度 (未指定则按约束上限)。
     width: Option<f32>,
     /// layout/paint 缓存：自身绝对矩形。
@@ -80,6 +82,7 @@ impl TextInput {
             border_color: theme.border(),
             focus_border_color: theme.accent(),
             border_width: 1.0,
+            chromeless: false,
             width: None,
             area: Cell::new(Rect::default()),
             char_offsets: Vec::new(),
@@ -124,6 +127,38 @@ impl TextInput {
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
         self
+    }
+
+    /// 设置内边距 (文本起点与外框边缘的间距)。
+    ///
+    /// chromeless 场景下外层容器自绘占位文字/外壳时,
+    /// 用同一份 padding 对齐两侧的文字起点, 避免光标与占位文字错位。
+    pub fn padding(mut self, padding: Edges) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    /// 关闭自绘背景与边框: 外壳 (底色/边框/焦点态描边) 交由外层容器绘制,
+    /// 组件只负责文本、光标、选区与 IME preedit。
+    ///
+    /// 焦点态描边由外层经 [`Self::is_focused`] 查询后画在自己的外壳矩形上,
+    /// 避免组件在内缩的文字区里再画一圈小边框 (双框)。
+    pub fn chromeless(mut self) -> Self {
+        self.chromeless = true;
+        self
+    }
+
+    /// 是否持有键盘焦点 (供外层容器绘制焦点态外壳)。
+    pub fn is_focused(&self) -> bool {
+        self.focused
+    }
+
+    /// 是否有进行中的 IME 合成 (preedit 未上屏)。
+    ///
+    /// 合成期间 `value()` 仍为空 —— 外层容器画占位文字时须连同此状态判断,
+    /// 否则占位文字与拼音字母重叠, 直到候选词上屏才消失。
+    pub fn is_composing(&self) -> bool {
+        self.preedit.is_some()
     }
 
     /// 设置文本变化回调 (每次编辑后触发)。
@@ -294,16 +329,19 @@ impl Widget for TextInput {
 
         // 背景与边框共用同一份像素对齐几何：轮廓精确重合 (贴合),
         // 且 1px 描边落在完整像素行上满强度渲染 (底边发虚的根因对策)。
-        let surface = area.snap_to_pixels();
-        rects.push_rect(surface, self.background, self.radius);
+        // chromeless 模式下外壳由外层容器绘制, 这里跳过。
+        if !self.chromeless {
+            let surface = area.snap_to_pixels();
+            rects.push_rect(surface, self.background, self.radius);
 
-        // 边框：聚焦时使用 accent，否则使用默认边框色。
-        let border_color = if self.focused {
-            self.focus_border_color
-        } else {
-            self.border_color
-        };
-        rects.push_rounded_border(surface, border_color, self.radius, self.border_width);
+            // 边框：聚焦时使用 accent，否则使用默认边框色。
+            let border_color = if self.focused {
+                self.focus_border_color
+            } else {
+                self.border_color
+            };
+            rects.push_rounded_border(surface, border_color, self.radius, self.border_width);
+        }
 
         // 文本起点
         let text_x = area.origin.x + self.padding.left;
@@ -580,6 +618,47 @@ mod tests {
 
     fn input() -> TextInput {
         TextInput::new().text("Hello")
+    }
+
+    #[test]
+    fn chromeless_skips_background_and_border() {
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 36.0);
+        let mut texts = TextBatch::new();
+
+        let normal = TextInput::new();
+        let mut rects = RectBatch::new();
+        normal.paint(area, &mut rects, &mut texts);
+        assert!(!rects.is_empty(), "默认模式应自绘背景 + 边框");
+
+        let chromeless = TextInput::new().chromeless();
+        let mut rects = RectBatch::new();
+        chromeless.paint(area, &mut rects, &mut texts);
+        assert!(rects.is_empty(), "chromeless 不应自绘外壳 (背景/边框)");
+    }
+
+    #[test]
+    fn composing_state_tracks_preedit_lifecycle() {
+        let mut t = TextInput::new();
+        let mut msgs = Vec::new();
+        assert!(!t.is_composing());
+        t.event(
+            &Event::Ime(ImeEvent::Preedit {
+                value: "ni".into(),
+                cursor: None,
+            }),
+            Rect::default(),
+            &mut msgs,
+        );
+        assert!(t.is_composing(), "preedit 期间应处于合成态");
+        t.event(
+            &Event::Ime(ImeEvent::Commit {
+                value: "你".into()
+            }),
+            Rect::default(),
+            &mut msgs,
+        );
+        assert!(!t.is_composing(), "上屏后合成态应结束");
+        assert_eq!(t.value(), "你");
     }
 
     #[test]
