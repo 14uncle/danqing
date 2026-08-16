@@ -463,38 +463,49 @@ impl ImagePipeline {
         self.write_screen_uniform(queue, target.width, target.height);
         self.ensure_capacity(device, batch.len());
 
-        // 按纹理分批绘制
+        // 全量实例一次写入。write_buffer 在 submit 前统一生效:
+        // 若逐条「写一条开一个 pass」, 同一 encoder 的所有 pass 都会在
+        // submit 时才执行, 读到的全是最后写入的那条实例 —— 同帧多张图
+        // 会全部画在最后一张的位置上 (2026-08-16 剪贴板缩略图隐形根因)。
+        let mut instances: Vec<ImageInstance> = Vec::with_capacity(batch.entries.len());
         for entry in &batch.entries {
-            // 确保纹理已缓存
+            if self.cache.contains_key(&entry.texture_key) {
+                instances.push(entry.instance);
+            }
+        }
+        if instances.is_empty() {
+            return;
+        }
+        queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&instances));
+
+        // 单 pass 逐纹理绑定绘制: 各条目经顶点缓冲偏移读自己的实例
+        let stride = size_of::<ImageInstance>() as u64;
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("image pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+        let mut draw_idx = 0u64;
+        for entry in &batch.entries {
             if let Some(cached) = self.cache.get(&entry.texture_key) {
-                queue.write_buffer(
-                    &self.instance_buf,
-                    0,
-                    bytemuck::cast_slice(&[entry.instance]),
-                );
-
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("image pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: target.view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 pass.set_bind_group(1, &cached.bind_group, &[]);
-                pass.set_vertex_buffer(0, self.instance_buf.slice(..));
+                pass.set_vertex_buffer(0, self.instance_buf.slice(draw_idx * stride..));
                 pass.draw(0..6, 0..1);
+                draw_idx += 1;
             }
         }
     }
