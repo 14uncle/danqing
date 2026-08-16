@@ -557,14 +557,14 @@ impl TitleBar {
         match role {
             // 关闭:× 形两条对角线，用小圆点队列近似。
             ButtonRole::Close => {
-                self.push_axis_aligned_diagonal(
+                super::push_diagonal(
                     rects,
                     Point::new(cx - extent, cy - extent),
                     Point::new(cx + extent, cy + extent),
                     thickness,
                     color,
                 );
-                self.push_axis_aligned_diagonal(
+                super::push_diagonal(
                     rects,
                     Point::new(cx - extent, cy + extent),
                     Point::new(cx + extent, cy - extent),
@@ -677,43 +677,6 @@ impl TitleBar {
             half_thick,
         );
     }
-
-    /// 用轴对齐小圆点队列近似一条对角线。
-    ///
-    /// 每个步进放置一个 `thickness × thickness` 的圆角矩形，
-    /// 圆角半径为 `thickness/2` 使其呈圆形，彼此重叠形成平滑线段。
-    fn push_axis_aligned_diagonal(
-        &self,
-        rects: &mut RectBatch,
-        p1: Point,
-        p2: Point,
-        thickness: f32,
-        color: Color,
-    ) {
-        if thickness <= 0.0 {
-            return;
-        }
-        let dx = p2.x - p1.x;
-        let dy = p2.y - p1.y;
-        let length = (dx * dx + dy * dy).sqrt();
-        if length < 1e-6 {
-            return;
-        }
-        let half = thickness * 0.5;
-        // 步长取 thickness 的一半，让小圆点高度重叠，对角线看起来更实心。
-        let step = thickness * 0.5;
-        let count = (length / step).ceil().max(1.0) as usize;
-        for i in 0..=count {
-            let t = i as f32 / count as f32;
-            let x = p1.x + dx * t;
-            let y = p1.y + dy * t;
-            rects.push_rect(
-                Rect::from_xywh(x - half, y - half, thickness, thickness),
-                color,
-                half,
-            );
-        }
-    }
 }
 
 impl Widget for TitleBar {
@@ -815,7 +778,7 @@ impl Widget for TitleBar {
                 // 分针 (长细，3 点钟 = 15 分): 水平向右。
                 let min_len = logo_size * 0.234; // 60/256, 与 SVG 对齐
                 let min_thick = logo_size * 0.055; // dot-queue 最小可见粗度; 仍与环有间隙
-                self.push_axis_aligned_diagonal(
+                super::push_diagonal(
                     rects,
                     Point::new(cx, py),
                     Point::new(cx + min_len, py),
@@ -827,7 +790,7 @@ impl Widget for TitleBar {
                 // 更容易锯齿，粗度需略大于 SVG 的 stroke-width=10 以保证可辨。
                 let hour_len = logo_size * 0.195; // 50/256
                 let hour_thick = logo_size * 0.07; // dot-queue 对角线最小可辨粗度
-                self.push_axis_aligned_diagonal(
+                super::push_diagonal(
                     rects,
                     Point::new(cx, py),
                     Point::new(cx - 0.383 * hour_len, py - 0.924 * hour_len),

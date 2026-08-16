@@ -14,8 +14,8 @@
 )]
 
 use danqing::widget::{
-    self, Box as UiBox, Button, Column, EventResult, MsgQueue, Node, Padding, Row, Scrollable,
-    Switcher, Text, TextArea, TextInput, TitleBar, Widget,
+    self, Box as UiBox, Button, CloseButton, Column, EventResult, MsgQueue, Node, Padding, Row,
+    Scrollable, Switcher, Text, TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
     App, BackgroundConfig, Color, Event, Key, LightTheme, NamedKey, Point, Rect, ScaleMode, Size,
@@ -53,6 +53,8 @@ struct Showcase {
 enum Msg {
     /// 计数器 +1。
     Increment,
+    /// 计数器清零 (CloseButton 演示)。
+    ResetCount,
     /// 移动键盘方块。
     MoveSquare { dx: f32, dy: f32 },
     /// 字符键输入。
@@ -73,6 +75,7 @@ impl App for Showcase {
     fn update(&mut self, msg: Msg) {
         match msg {
             Msg::Increment => self.count += 1,
+            Msg::ResetCount => self.count = 0,
             Msg::MoveSquare { dx, dy } => {
                 self.square_pos.x =
                     (self.square_pos.x + dx).clamp(0.0, KEYBOARD_AREA.width - SQUARE_SIZE);
@@ -211,6 +214,8 @@ fn palette_and_rounded_card(t: &LightTheme) -> impl Widget + 'static {
 
 /// 交互区：按钮 + 计数文本。
 fn counter_row(t: &LightTheme) -> impl Widget + 'static {
+    let symbol_color = t.text_secondary();
+    let hover_color = t.surface_variant();
     Row::new()
         .gap(t.spacing_lg())
         .child(
@@ -226,6 +231,13 @@ fn counter_row(t: &LightTheme) -> impl Widget + 'static {
             Text::bind(|s: &Showcase| format!("已点击 {} 次", s.count))
                 .font_size(t.font_size_body())
                 .color(t.text_primary()),
+        )
+        // CloseButton: 矢量 × 按钮 (点击清零计数, hover 出底色)。
+        .child(
+            CloseButton::new()
+                .on_click(|| Msg::ResetCount)
+                .bind_color(move |_: &Showcase| symbol_color)
+                .bind_hover_color(move |_: &Showcase| hover_color),
         )
 }
 

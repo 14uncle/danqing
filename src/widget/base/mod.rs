@@ -4,9 +4,11 @@
 //! 基础组件: 按钮与文本。
 
 mod button;
+mod close_button;
 mod image;
 mod text;
 
 pub use button::Button;
+pub use close_button::CloseButton;
 pub use image::Image;
 pub use text::Text;
