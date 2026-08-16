@@ -936,6 +936,11 @@ impl<A: App> Handler<'_, A> {
     /// 显式抢前台防止"已显示但被遮" (尤其在另一 app 后台时)。
     fn show_window(&self) {
         if let Some(window) = &self.window {
+            // 显示落位: Cursor 策略下先把窗口挪到鼠标光标处 (热键唤起的面板
+            // 贴手边, 不再恒居中)。最大化窗口不挪 (位置由系统管理)。
+            if self.config.placement == super::ShowPlacement::Cursor && !window.is_maximized() {
+                super::placement::move_to_cursor(window, self.last_real_size);
+            }
             window.set_visible(true);
             // 自愈 winit 尺寸缓存: 隐藏期间若被幻影尺寸污染, 显示时强制回到
             // 最后可信尺寸, 触发真实 WM_SIZE 让 winit 内部状态恢复健康。

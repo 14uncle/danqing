@@ -11,6 +11,7 @@
 //! - `foreground` 窗口抢前台 / 顶层 (Windows AttachThreadInput)
 //! - `icon`       窗口 / 托盘图标加载 + Windows 无边框样式
 //! - `hotkey`     全局热键 ID 常量 + Windows 注册线程
+//! - `placement`  窗口显示落位 (跟随鼠标光标) + 钳制数学
 //! - `tray`       托盘菜单项 ID + 快捷键 label 单一来源 + 跨平台托盘
 //! - `handler`    ApplicationHandler 实现 (本模块最大，单独拆出)
 
@@ -20,6 +21,7 @@ pub mod foreground;
 mod handler;
 mod hotkey;
 mod icon;
+mod placement;
 pub mod tray;
 
 use std::sync::mpsc::channel;
@@ -34,6 +36,7 @@ use crate::{Color, Size};
 
 pub use event::{WindowAppEvent, WindowEventSender};
 pub use hotkey::{GlobalHotkey, hotkey_ids};
+pub use placement::ShowPlacement;
 pub use tray::tray_action_ids;
 #[allow(unused_imports)]
 pub use tray::{TrayHandle, shortcut_for_id};
@@ -118,6 +121,9 @@ pub struct WindowConfig {
     /// 窗口渲染模式：默认 [`WindowMode::OnDemand`] (按需渲染，省电)。
     /// 番茄钟等需要持续动画的应用应设为 [`WindowMode::Continuous`]。
     pub mode: WindowMode,
+    /// 重新显示时的落位策略：默认 [`ShowPlacement::Center`] (原位显示)。
+    /// 热键唤起的工具面板 (剪贴板管理器等) 应设为 [`ShowPlacement::Cursor`]。
+    pub placement: ShowPlacement,
     /// 全局热键声明集合：空 = 不注册不启动热键线程。
     /// 默认沿袭首个消费者 (番茄钟) 的 Ctrl+Shift+P/S/Q;
     /// 新产品必须显式声明自己的热键，否则与番茄钟冲突 (后注册者失败)。
@@ -140,6 +146,7 @@ impl Default for WindowConfig {
             logo_name: "logo".into(),
             maximized: false,
             mode: WindowMode::OnDemand,
+            placement: ShowPlacement::Center,
             hotkeys: vec![
                 GlobalHotkey::ctrl_shift(hotkey_ids::TOGGLE_VISIBLE, 0x50), // P
                 GlobalHotkey::ctrl_shift(hotkey_ids::START_PAUSE, 0x53),    // S
