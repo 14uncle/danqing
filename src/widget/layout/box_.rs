@@ -230,10 +230,11 @@ impl Widget for Box {
     }
 
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
-        // 先分发给子组件: 移动类全发, 其他类命中才发
+        // 先分发给子组件: 移动/键盘类全发, 鼠标类命中才发
         if let Some(child) = &mut self.child {
             let forward = match event {
                 Event::CursorMoved(_) | Event::CursorLeft => true,
+                Event::Key { .. } => true,
                 e => e.position().is_some_and(|p| area.contains(p)),
             };
             if forward && child.event(event, area, msgs) == EventResult::Consumed {
