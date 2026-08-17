@@ -26,9 +26,9 @@
 **Description:** 修改 `Text::paint`，当内容含 "..." 时拆分为两段渲染：前段按原 baseline，省略号按底边对齐。
 
 **Acceptance criteria:**
-- [ ] 含 "..." 的文本，省略号 glyph 底边与行底对齐
-- [ ] 前段文字 baseline 不变
-- [ ] 不含 "..." 的文本行为完全不变
+- [x] 含 "..." 的文本，省略号 glyph 底边与行底对齐
+- [x] 前段文字 baseline 不变
+- [x] 不含 "..." 的文本行为完全不变
 
 **Verification:**
 - [ ] cargo clippy --all-targets -- -D warnings 零警告
