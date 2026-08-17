@@ -160,6 +160,7 @@ fn event_at_path_reaches_active_child_through_visible_slice() {
             pressed: true,
             shift: false,
             ctrl: false,
+            alt: false,
         },
         Rect::new(Point::ZERO, Size::new(500.0, 500.0)),
         &mut msgs,

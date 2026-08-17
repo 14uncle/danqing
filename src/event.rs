@@ -128,6 +128,8 @@ pub enum Event {
         shift: bool,
         /// Ctrl 是否按下。
         ctrl: bool,
+        /// Alt 是否按下。
+        alt: bool,
     },
     /// IME 合成事件。
     Ime(ImeEvent),

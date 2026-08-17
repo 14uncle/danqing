@@ -307,6 +307,7 @@ mod tests {
                 pressed: true,
                 shift: false,
                 ctrl: false,
+                alt: false,
             },
             btn_area(),
             &mut msgs,

@@ -145,6 +145,7 @@ pub(super) fn convert_event(
                 pressed: event.state == ElementState::Pressed,
                 shift: modifiers.shift_key(),
                 ctrl: modifiers.control_key(),
+                alt: modifiers.alt_key(),
             })
         }
         WindowEvent::Ime(ime) => match ime {
