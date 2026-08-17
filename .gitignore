@@ -26,9 +26,8 @@ desktop.ini
 # Logs
 *.log
 
-# Local Claude Code settings
- /.claude/settings.local.json
- 
+# Local Claude Code settings (生效文件/后端变体/备份一律不入库, 含 API token)
+/.claude/settings.local*.json*
 # Coverage / profiling
 *.profraw
 /coverage
@@ -36,4 +35,3 @@ desktop.ini
 
 # 工具脚本下载缓存 (原始星表等第三方数据不入库, 仅产物入库)
 /tools/.cache/
-.claude/settings.local.mimo.json
