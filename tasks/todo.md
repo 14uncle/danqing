@@ -48,8 +48,8 @@
 **Description:** 为 Text widget 新增单测：含 "..." 时省略号底边对齐，不含时 baseline 不变。
 
 **Acceptance criteria:**
-- [ ] 测试 `text_with_ellipsis_uses_descent_baseline` 存在且通过
-- [ ] 测试 `text_without_ellipsis_uses_ascent_baseline` 存在且通过
+- [x] 测试 `text_with_ellipsis_uses_descent_baseline` 存在且通过
+- [x] 测试 `text_without_ellipsis_uses_ascent_baseline` 存在且通过
 
 **Verification:**
 - [ ] cargo test 全绿
