@@ -5,6 +5,8 @@
 
 mod scrollable;
 mod switcher;
+mod tabs;
 
 pub use scrollable::{ScrollAxis, Scrollable};
 pub use switcher::Switcher;
+pub use tabs::Tabs;

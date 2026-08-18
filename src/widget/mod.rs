@@ -23,7 +23,7 @@ pub use focus::FocusManager;
 pub use form::{TextArea, TextInput};
 pub use layout::{Box, Center, Column, Padding, Row, Stack};
 pub use title_bar::{LogoKind, TitleBar, TitleBarStyle};
-pub use view::{ScrollAxis, Scrollable, Switcher};
+pub use view::{ScrollAxis, Scrollable, Switcher, Tabs};
 
 use std::any::Any;
 
