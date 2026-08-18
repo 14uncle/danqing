@@ -39,6 +39,7 @@
 - [AI 场景底图不加暗纱](ai-scene-no-veil.md) — AI 生成的场景底图禁用 veil,保留自然亮度;contrast guard 失败可接受
 - [AI 场景升级工作流](ai-scene-upgrade-workflow.md) — 严格8步:prompt→生图→复制→去水印→更新ai_base→export-scenes.py→shader适配→测试;export-scenes.py会覆盖图片须指向独立源文件;pomodoro禁用noise叠加层
 - [Rust 文件头注释规则](danqing-rs-header.md) — 新建 .rs 文件须加 @author 十四叔 与 @date yyyy/MM/dd
+- [省略号 ASCII 三点约定](ellipsis-ascii-dots-convention.md) — 结尾省略号用 "..." (Text 组件拆分渲染底边对齐), U+2026 居中只用于中间截断; 占位文字勿加 offset 错位, 字体指标须实测勿估算
 - [文档目录约定](danqing-document-locations.md) — spec 放 docs/specs，plan/todo 放 tasks
 - [提交前重新验证](verify-immediately-before-commit.md) — IDE 自动保存可能在验证与提交之间改脏文件,门槛要紧贴 commit
 - [提交前必评审](review-before-commit.md) — git commit 前必须执行一遍 /agent-skills:code-review-and-quality 五轴评审
