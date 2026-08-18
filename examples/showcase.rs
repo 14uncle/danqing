@@ -15,7 +15,7 @@
 
 use danqing::widget::{
     self, Box as UiBox, Button, CloseButton, Column, EventResult, MsgQueue, Node, Padding, Row,
-    Scrollable, Switcher, Text, TextArea, TextInput, TitleBar, Widget,
+    Scrollable, Switcher, Tabs, Text, TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
     App, BackgroundConfig, Color, Event, Key, LightTheme, NamedKey, Point, Rect, ScaleMode, Size,
@@ -47,6 +47,8 @@ struct Showcase {
     is_maximized: bool,
     /// 当前显示的图像 (RGBA 数据，宽，高)。
     image_data: Option<(Vec<u8>, u32, u32)>,
+    /// Tabs 演示：当前选中的 tab 索引。
+    selected_tab: usize,
 }
 
 /// 应用消息。
@@ -65,6 +67,8 @@ enum Msg {
     TextareaChanged(String),
     /// 切换分类面板。
     Select(usize),
+    /// Tabs 演示：切换 tab。
+    TabChanged(usize),
     /// 打开本地图片。
     OpenImage,
 }
@@ -86,6 +90,7 @@ impl App for Showcase {
             Msg::InputChanged(s) => self.input_value = s,
             Msg::TextareaChanged(s) => self.textarea_value = s,
             Msg::Select(i) => self.selected = i,
+            Msg::TabChanged(i) => self.selected_tab = i,
             Msg::OpenImage => {
                 // 打开文件对话框选择图片
                 if let Some(path) = rfd::FileDialog::new()
@@ -595,8 +600,63 @@ fn page_view(t: &LightTheme) -> impl Widget + 'static {
     page(
         t,
         "视图 view — 每个面板都是 Scrollable, 分类切换由 Switcher 驱动",
-        card(t, "键盘响应 (自定义 Positioned 组件)", keyboard_card(t)),
+        Column::new()
+            .gap(t.spacing_lg())
+            .cross_stretch()
+            .child(card(t, "Tabs 组件 (多面板切换)", tabs_card(t)))
+            .child(card(t, "键盘响应 (自定义 Positioned 组件)", keyboard_card(t))),
     )
+}
+
+/// Tabs 演示：三个 tab 切换不同内容。
+fn tabs_card(t: &LightTheme) -> impl Widget + 'static {
+    Tabs::new(t)
+        .tab("概览")
+        .tab("设置")
+        .tab("关于")
+        .child(
+            Column::new()
+                .gap(t.spacing_md())
+                .child(
+                    Text::new("这是概览面板")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Text::new("Tabs 组件演示：点击上方 tab 切换面板内容")
+                        .font_size(t.font_size_small())
+                        .color(t.text_secondary()),
+                ),
+        )
+        .child(
+            Column::new()
+                .gap(t.spacing_md())
+                .child(
+                    Text::new("设置面板")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Text::new("每个面板独立持有组件状态")
+                        .font_size(t.font_size_small())
+                        .color(t.text_secondary()),
+                ),
+        )
+        .child(
+            Column::new()
+                .gap(t.spacing_md())
+                .child(
+                    Text::new("关于")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Text::new("danqing 丹青 UI 框架")
+                        .font_size(t.font_size_small())
+                        .color(t.text_secondary()),
+                ),
+        )
+        .on_change(Msg::TabChanged)
 }
 
 /// 侧边栏导航项：选中时实心 accent (Button::bind_color 等状态绑定) 并在左缘绘制竖条。
@@ -778,6 +838,7 @@ fn main() -> anyhow::Result<()> {
         selected: 0,
         is_maximized: false,
         image_data: None,
+        selected_tab: 0,
     };
 
     let t = theme();

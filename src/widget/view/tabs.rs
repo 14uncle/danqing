@@ -19,6 +19,9 @@ use crate::{Constraints, LightTheme, Point, Rect, Size};
 /// active 索引绑定闭包：每帧从应用状态读取。
 type ActiveBinding = Box<dyn Fn(&dyn Any) -> usize>;
 
+/// tab 切换回调：产出应用消息。
+type TabChangeCallback = Box<dyn Fn(usize) -> Box<dyn Any>>;
+
 /// Tabs 组件：带 tab 栏的多面板切换容器。
 ///
 /// tab 栏为自绘叶子（不使用 Button 子组件），直接在 paint 中绘制
@@ -47,6 +50,8 @@ pub struct Tabs {
     active: usize,
     /// active 索引绑定闭包。
     binding: Option<ActiveBinding>,
+    /// tab 切换回调：产出应用消息。
+    on_change: Option<TabChangeCallback>,
     /// tab 栏高度（layout 时计算）。
     tab_bar_height: f32,
     /// active 子组件尺寸（layout 缓存）。
@@ -63,6 +68,7 @@ impl Tabs {
             children: Vec::new(),
             active: 0,
             binding: None,
+            on_change: None,
             tab_bar_height: 0.0,
             active_size: Size::ZERO,
             hover: None,
@@ -99,6 +105,20 @@ impl Tabs {
     /// 设置初始 active tab 索引（越界时在 layout / sync 时钳制）。
     pub fn active(mut self, active: usize) -> Self {
         self.active = active;
+        self
+    }
+
+    /// 设置 tab 切换回调：点击 tab 时产出应用消息。
+    ///
+    /// 回接收 tab 索引，返回应用消息。消息经 `msgs` 队列送达 [`App::update`]。
+    pub fn on_change<M: 'static>(
+        mut self,
+        f: impl Fn(usize) -> M + 'static,
+    ) -> Self {
+        self.on_change = Some(Box::new(move |idx| {
+            let msg = f(idx);
+            Box::new(msg) as Box<dyn std::any::Any>
+        }));
         self
     }
 
@@ -314,6 +334,9 @@ impl Widget for Tabs {
                         );
                         if tab_rect.contains(*position) {
                             self.active = hover;
+                            if let Some(callback) = &self.on_change {
+                                msgs.push(callback(hover));
+                            }
                         }
                     }
                 }
