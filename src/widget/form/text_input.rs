@@ -59,6 +59,13 @@ pub struct TextInput {
     preedit: Option<String>,
     /// 鼠标拖拽选区状态。
     dragging: bool,
+    /// 占位文字 (空态显示, 居中, 可经 offset 微调垂直位置)。
+    placeholder: Option<String>,
+    /// 占位文字颜色。
+    placeholder_color: Color,
+    /// 占位文字相对正常 baseline 的垂直偏移 (正=下, 负=上)。
+    /// 产品层可据此微调占位文字位置, 不影响光标/输入文字。
+    placeholder_offset: f32,
 }
 
 impl TextInput {
@@ -90,6 +97,9 @@ impl TextInput {
             caret_visible: true,
             preedit: None,
             dragging: false,
+            placeholder: None,
+            placeholder_color: Color::from_srgb8(160, 160, 160),
+            placeholder_offset: 0.0,
         }
     }
 
@@ -135,6 +145,25 @@ impl TextInput {
     /// 用同一份 padding 对齐两侧的文字起点, 避免光标与占位文字错位。
     pub fn padding(mut self, padding: Edges) -> Self {
         self.padding = padding;
+        self
+    }
+
+    /// 设置占位文字与颜色 (文本为空且无 IME 合成时显示)。
+    ///
+    /// 占位文字默认与正常文字同 baseline (居中);
+    /// 可经 [`Self::placeholder_offset`] 微调垂直位置, 不影响光标/输入文字。
+    pub fn placeholder(mut self, text: impl Into<String>, color: Color) -> Self {
+        self.placeholder = Some(text.into());
+        self.placeholder_color = color;
+        self
+    }
+
+    /// 占位文字垂直偏移 (逻辑像素, 正=下, 负=上)。
+    ///
+    /// 相对正常 baseline 偏移, 仅影响占位文字, 不影响光标与输入文字。
+    /// 典型用法: 产品层需要占位文字靠下对齐时传正值。
+    pub fn placeholder_offset(mut self, offset: f32) -> Self {
+        self.placeholder_offset = offset;
         self
     }
 
@@ -372,6 +401,19 @@ impl Widget for TextInput {
             self.font_size,
             self.color,
         );
+
+        // 占位文字: 空态 + 无 IME 合成时显示, 可经 offset 微调垂直位置
+        if self.editor.text().is_empty() && self.preedit.is_none() {
+            if let Some(placeholder) = &self.placeholder {
+                texts.push_text(
+                    placeholder,
+                    text_x,
+                    baseline + self.placeholder_offset,
+                    self.font_size,
+                    self.placeholder_color,
+                );
+            }
+        }
 
         // preedit 文本与下划线
         if let Some(preedit) = &self.preedit {
@@ -1018,5 +1060,53 @@ mod tests {
         assert!((area.origin.y - expected_y).abs() < f32::EPSILON);
         assert_eq!(area.size.width, 0.0);
         assert_eq!(area.size.height, t.line_height);
+    }
+
+    #[test]
+    fn placeholder_shown_when_empty_and_not_composing() {
+        let color = Color::from_srgb8(160, 160, 160);
+        let t = TextInput::new().placeholder("搜索历史...", color);
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 36.0);
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        t.paint(area, &mut rects, &mut texts);
+        // 无文本内容时应有占位文字字形
+        assert!(!texts.is_empty(), "空输入应渲染占位文字");
+    }
+
+    #[test]
+    fn placeholder_hidden_when_text_present() {
+        let color = Color::from_srgb8(160, 160, 160);
+        let t = TextInput::new()
+            .text("Hello")
+            .placeholder("搜索历史...", color);
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 36.0);
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        t.paint(area, &mut rects, &mut texts);
+        // 有文本内容时不应有占位文字字形 (只有 "Hello" 5 个)
+        assert_eq!(texts.len(), 5, "有输入时不应渲染占位文字");
+    }
+
+    #[test]
+    fn placeholder_hidden_during_composition() {
+        let color = Color::from_srgb8(160, 160, 160);
+        let mut t = TextInput::new().placeholder("搜索历史...", color);
+        // 触发 IME 合成
+        let mut msgs = Vec::new();
+        t.event(
+            &Event::Ime(ImeEvent::Preedit {
+                value: "ni".into(),
+                cursor: None,
+            }),
+            Rect::from_xywh(0.0, 0.0, 200.0, 36.0),
+            &mut msgs,
+        );
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 36.0);
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        t.paint(area, &mut rects, &mut texts);
+        // 合成中: 只有 preedit 字母, 没有占位文字
+        assert_eq!(texts.len(), 2, "合成中不应渲染占位文字, 只有 preedit 字母");
     }
 }
