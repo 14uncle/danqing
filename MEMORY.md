@@ -44,6 +44,7 @@
 - [提交前重新验证](verify-immediately-before-commit.md) — IDE 自动保存可能在验证与提交之间改脏文件,门槛要紧贴 commit
 - [提交前必评审](review-before-commit.md) — git commit 前必须执行一遍 /agent-skills:code-review-and-quality 五轴评审
 - [截图流程与路径](screenshot-rules.md) — 先问用户要截图;自行截图放 target/tmp,不放根目录
+- [新 widget 必须加 showcase demo](widget-showcase-demo-rule.md) — 新增 widget 组件必须在 showcase.rs 添加演示卡片，人工验证视觉和交互
 
 ## 项目状态/战略
 
