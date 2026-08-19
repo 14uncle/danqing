@@ -32,7 +32,13 @@ const SQUARE_SIZE: f32 = 40.0;
 const MOVE_STEP: f32 = 20.0;
 
 /// 分类导航：与 src/widget/ 子目录一一对应。
-const CATEGORIES: [&str; 4] = ["基础 base", "布局 layout", "表单 form", "视图 view"];
+const CATEGORIES: [&str; 5] = [
+    "基础 base",
+    "布局 layout",
+    "表单 form",
+    "导航 nav",
+    "视图 view",
+];
 
 /// showcase 应用 (状态容器 + 消息更新 + 视图树)。
 struct Showcase {
@@ -595,16 +601,31 @@ fn page_form(t: &LightTheme) -> impl Widget + 'static {
     )
 }
 
+/// 导航页：Tabs 多面板切换。
+fn page_nav(t: &LightTheme) -> impl Widget + 'static {
+    page(
+        t,
+        "导航 nav — Tabs 多面板切换",
+        Column::new()
+            .gap(t.spacing_lg())
+            .cross_stretch()
+            .child(card(t, "Tabs 组件 (多面板切换)", tabs_card(t))),
+    )
+}
+
 /// 视图页：视口与可见性; 自定义组件演示。
 fn page_view(t: &LightTheme) -> impl Widget + 'static {
     page(
         t,
-        "视图 view — 每个面板都是 Scrollable, 分类切换由 Switcher 驱动",
+        "视图 view — 自定义组件演示",
         Column::new()
             .gap(t.spacing_lg())
             .cross_stretch()
-            .child(card(t, "Tabs 组件 (多面板切换)", tabs_card(t)))
-            .child(card(t, "键盘响应 (自定义 Positioned 组件)", keyboard_card(t))),
+            .child(card(
+                t,
+                "键盘响应 (自定义 Positioned 组件)",
+                keyboard_card(t),
+            )),
     )
 }
 
@@ -817,6 +838,7 @@ fn build_tree() -> Node {
                             .child(page_base(&t))
                             .child(page_layout(&t))
                             .child(page_form(&t))
+                            .child(page_nav(&t))
                             .child(page_view(&t))
                             .bind(|s: &Showcase| s.selected),
                         1,
