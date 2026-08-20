@@ -213,6 +213,11 @@ impl TextInput {
         self.preedit = None;
     }
 
+    /// 替换占位文字, 保留焦点与输入状态。
+    pub fn set_placeholder(&mut self, text: impl Into<String>) {
+        self.placeholder = Some(text.into());
+    }
+
     /// 光标位置 (测试用)。
     #[cfg(test)]
     pub(crate) fn cursor(&self) -> usize {

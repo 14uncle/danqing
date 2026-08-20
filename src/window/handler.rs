@@ -361,6 +361,14 @@ impl<A: App> Handler<'_, A> {
             return;
         };
 
+        // 键盘前置过滤: 应用层在焦点分发前拦截 (如无修饰字母键触发收藏)
+        if let Event::Key { pressed: true, .. } = event {
+            if let Some(msg) = self.app.app_key_filter(event) {
+                self.msgs.push(Box::new(msg));
+                return;
+            }
+        }
+
         match event {
             Event::Key { key, pressed, .. } if *pressed => {
                 match key {
