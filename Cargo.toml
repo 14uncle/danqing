@@ -18,6 +18,9 @@ bytemuck = "1"
 pollster = "1"
 thiserror = "2"
 log = "0.4"
+env_logger = "0.11"
+# 日志时间戳 + panic hook 时间格式。
+chrono = "0.4"
 arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 tray-icon = "0.19"
@@ -26,9 +29,6 @@ windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse",
 [dev-dependencies]
 resvg = "0.44"
 anyhow = "1"
-env_logger = "0.11"
-# examples/common/log.rs 的日志时间戳。
-chrono = "0.4"
 # showcase 示例：打开本地图片文件对话框。
 rfd = "0.15"
 

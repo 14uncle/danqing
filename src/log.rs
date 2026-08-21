@@ -1,12 +1,20 @@
 //! @author 十四叔
 //! @date 2026/07/24
 
-//! 丹青示例共享的初始化辅助。
+//! 丹青框架日志初始化。
 //!
-//! 当前提供 `init_log`：本地时间戳 + level + target + message 格式，
+//! 提供 `init_log`：本地时间戳 + level + target + message 格式，
 //! 默认过滤级别 `info`（受 `RUST_LOG` 环境变量覆盖）。
 //!
-//! 各 example 通过 `#[path = ...]` 引入本模块，避免相互依赖。
+//! 日志同时写入 stderr 与可执行文件同级的 `logs/` 目录，
+//! 自动轮转（保留最近 10 个文件），并安装 panic hook 将 panic 信息写入日志文件。
+//!
+//! # 用法
+//!
+//! ```rust,no_run
+//! danqing::log::init_log();
+//! log::info!("日志系统已就绪");
+//! ```
 
 use std::backtrace::Backtrace;
 use std::env;
@@ -147,27 +155,21 @@ impl Write for TeeWriter {
     }
 }
 
-fn create_log_file(executable: &Path, timestamp: &str, pid: u32) -> io::Result<PreparedLog> {
-    let directory = logs_dir_for(executable).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "可执行文件路径没有可用的父目录",
-        )
-    })?;
-    let stem = executable
-        .file_stem()
-        .filter(|stem| !stem.is_empty())
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "可执行文件名无效"))?;
-    fs::create_dir_all(&directory)?;
+fn create_log_file_in(
+    directory: &Path,
+    stem: &str,
+    timestamp: &str,
+    pid: u32,
+) -> io::Result<PreparedLog> {
+    fs::create_dir_all(directory)?;
 
     for collision in 0..MAX_LOG_FILE_COLLISIONS {
-        let path = directory.join(log_file_name(&stem, timestamp, pid, collision));
+        let path = directory.join(log_file_name(stem, timestamp, pid, collision));
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(file) => {
                 return Ok(PreparedLog {
                     path,
-                    stem,
+                    stem: stem.to_owned(),
                     file: Arc::new(Mutex::new(file)),
                 });
             }
@@ -232,14 +234,34 @@ fn install_panic_hook(file: Arc<Mutex<File>>) {
     }));
 }
 
+fn try_create_log(timestamp: &str, pid: u32) -> Result<PreparedLog, String> {
+    // 优先 exe 同级 logs/ 目录。
+    if let Ok(executable) = env::current_exe() {
+        if let Some(directory) = logs_dir_for(&executable) {
+            if let Some(stem) = executable
+                .file_stem()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string_lossy().into_owned())
+            {
+                if let Ok(log) = create_log_file_in(&directory, &stem, timestamp, pid) {
+                    return Ok(log);
+                }
+            }
+        }
+    }
+    // 兜底：当前工作目录的 logs/ 子目录。
+    let cwd = env::current_dir().map_err(|err| format!("无法确定当前目录：{err}"))?;
+    let directory = cwd.join("logs");
+    let stem = String::from("app");
+    create_log_file_in(&directory, &stem, timestamp, pid)
+        .map_err(|err| format!("CWD 日志创建失败：{err}"))
+}
+
 fn init_log_once() {
-    let prepared = env::current_exe()
-        .map_err(|err| format!("无法确定可执行文件位置：{err}"))
-        .and_then(|executable| {
-            let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S%.3f").to_string();
-            create_log_file(&executable, &timestamp, std::process::id())
-                .map_err(|err| format!("无法创建本地日志：{err}"))
-        });
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S%.3f").to_string();
+    let pid = std::process::id();
+
+    let prepared = try_create_log(&timestamp, pid);
     let (prepared, setup_error) = match prepared {
         Ok(prepared) => (Some(prepared), None),
         Err(err) => (None, Some(err)),
@@ -281,7 +303,8 @@ fn init_log_once() {
 
 /// 初始化 `env_logger`，同时写入 stderr 与可执行文件同级的 `logs/`。
 ///
-/// 仅需在每个 example 的 `main` 开头调用；初始化失败时自动降级到 stderr。
+/// 仅需在应用 `main` 开头调用一次；幂等，重复调用无效。
+/// 初始化失败时自动降级到 stderr。
 pub fn init_log() {
     LOG_INIT.call_once(init_log_once);
 }

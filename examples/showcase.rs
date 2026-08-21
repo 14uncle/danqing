@@ -21,9 +21,6 @@ use danqing::{
     App, BackgroundConfig, Color, Event, Key, LightTheme, NamedKey, Point, Rect, ScaleMode, Size,
     Theme, WindowAction,
 };
-#[path = "common/log.rs"]
-mod example_log;
-
 /// 键盘移动方块的区域尺寸。
 const KEYBOARD_AREA: Size = Size::new(300.0, 180.0);
 /// 方块尺寸。
@@ -849,7 +846,7 @@ fn build_tree() -> Node {
 }
 
 fn main() -> anyhow::Result<()> {
-    example_log::init_log();
+    danqing::log::init_log();
 
     let mut app = Showcase {
         count: 0,

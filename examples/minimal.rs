@@ -29,7 +29,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 fn main() {
-    env_logger::init();
+    danqing::log::init_log();
     // 后台线程周期性打印 Rust 堆存活字节, 与任务管理器的进程级数字对照。
     std::thread::spawn(|| {
         loop {
