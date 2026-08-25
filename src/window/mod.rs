@@ -22,6 +22,7 @@ mod handler;
 mod hotkey;
 mod icon;
 mod placement;
+pub mod startup;
 pub mod tray;
 
 use std::sync::mpsc::channel;
