@@ -62,6 +62,10 @@ pub trait App: Any {
     /// 默认空实现;需要逐帧推进状态的应用 (如番茄钟) 覆盖之。
     fn tick(&mut self, _ctx: &AnimationCtx) {}
 
+    /// 窗口可见性变化回调: 由框架在 show/hide 后调用。
+    /// 应用层据此同步自身状态 (如热键 toggle 方向判断)。
+    fn visibility_changed(&mut self, _visible: bool) {}
+
     /// 每帧背景状态：场景选择 / 淡化进度 / 清屏色。
     ///
     /// 默认 `None` —— 保持 `BackgroundConfig` 初始化时的静态背景

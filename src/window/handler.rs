@@ -866,6 +866,17 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         while let Ok(event) = self.window_event_rx.try_recv() {
             self.apply_window_event(event, event_loop);
         }
+        // 焦点事件流对账 (Windows): AttachThreadInput 抢前台后, Windows 的
+        // 焦点消息投递可能整体失真 (WM_SETFOCUS / WM_NCACTIVATE / WM_KILLFOCUS
+        // 任一缺席 —— 2026-08-25 日志实锤两种形态), winit 的 Focused 事件流
+        // 随之卡死。此处每帧拿 OS 前台真相对照 winit 报到状态, 缺什么补什么
+        // (详见 foreground::reconcile_focus_state); 一两帧内收敛, 幂等自限。
+        #[cfg(target_os = "windows")]
+        if self.is_visible {
+            if let Some(window) = &self.window {
+                super::foreground::reconcile_focus_state(window, self.has_os_focus);
+            }
+        }
         // 控制流策略：根据窗口模式决定 ControlFlow。
         //   OnDemand (默认): 隐藏态 → Wait (零唤醒, 省电); 可见态 → WaitUntil(16ms)。
         //   Continuous (番茄钟等): 无论可见与否都用 WaitUntil(16ms), 保持 tick 推进。
@@ -926,6 +937,18 @@ impl<A: App> Handler<'_, A> {
         // 派发, 会在 set_visible 调用内重入窗口过程 —— 此时 is_visible 必须
         // 已为 false, 隐藏态守卫才能拦住它 (CloseBehavior::Hide 路径依赖此序)。
         self.is_visible = false;
+        // 隐藏即非前台: SW_HIDE 后 OS 焦点必然易手, 不等 winit 的 Focused(false)
+        // 报到 —— 焦点消息失真的环境下 (AttachThreadInput 抢前台后遗症) 它可能
+        // 永远不到, has_os_focus 残留 true 会让下次唤起时的对账补发被跳过
+        // (2026-08-25 日志实锤: toggle 隐藏 → 残留 → 唤起无 Focused(true))。
+        // 同步补发 WM_KILLFOCUS: 把 winit 的 is_focused 一并洗回 false,
+        // 否则它残留 true 时下次对账补获得无法构成跳变 (同日志, 连按轮死锁)。
+        // 若真实 Focused(false) 随后补到, 重复置 false 无副作用。
+        self.has_os_focus = false;
+        #[cfg(target_os = "windows")]
+        if let Some(window) = &self.window {
+            super::foreground::inject_focus_loss(window);
+        }
         if let Some(window) = &self.window {
             window.set_visible(false);
         }
@@ -964,6 +987,8 @@ impl<A: App> Handler<'_, A> {
             // 对后台常驻进程受前台锁限制而静默失败 —— 窗口"已显示但被遮"。
             // 用 foreground 模块的 AttachThreadInput 方案硬抢 (先直调, 失败再挂接);
             // 其它平台保留 winit 原生 focus_window。
+            // 抢前台造成的 winit 焦点事件流失真由 about_to_wait 的每帧对账
+            // (reconcile_focus_state) 统一修复, 此处不做即时补发。
             #[cfg(target_os = "windows")]
             super::foreground::bring_to_foreground(window);
             #[cfg(not(target_os = "windows"))]
@@ -982,12 +1007,14 @@ impl<A: App> Handler<'_, A> {
                 } else {
                     self.hide_window();
                 }
+                self.app.visibility_changed(self.is_visible);
             }
             WindowAppEvent::ShowWindow => {
                 // 仅显示窗口 (不切换)。用于 focus_lost 等场景。
                 if !self.is_visible {
                     self.is_visible = true;
                     self.show_window();
+                    self.app.visibility_changed(true);
                 }
             }
             WindowAppEvent::HideWindow => {
@@ -995,6 +1022,7 @@ impl<A: App> Handler<'_, A> {
                 if self.is_visible {
                     self.is_visible = false;
                     self.hide_window();
+                    self.app.visibility_changed(false);
                 }
             }
             WindowAppEvent::Quit => event_loop.exit(),

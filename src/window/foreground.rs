@@ -19,7 +19,8 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows_sys::Win32::Foundation::{FALSE, HWND, TRUE};
 use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
+    BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SendMessageW,
+    SetForegroundWindow, WM_KILLFOCUS, WM_NCACTIVATE, WM_SETFOCUS,
 };
 
 use winit::window::Window;
@@ -148,6 +149,82 @@ pub(super) fn bring_to_foreground(window: &Window) {
         return;
     };
     bring_hwnd_to_foreground(hwnd);
+}
+
+/// 对账决策: OS 前台状态 × winit 事件流状态 → 该补哪条消息 (纯逻辑, 便于测试)。
+///
+/// 背景与机制见 [`reconcile_focus_state`] 的文档注释。
+#[derive(Debug, PartialEq, Eq)]
+enum FocusReconcile {
+    /// 补获得: WM_NCACTIVATE(true) + WM_SETFOCUS。
+    InjectGain,
+    /// 补丢失: WM_KILLFOCUS。
+    InjectLoss,
+    /// 状态一致, 不补。
+    Noop,
+}
+
+/// 纯逻辑判定: 四个象限一一对应 (见 reconcile_focus_state 的注释)。
+fn focus_reconcile_action(is_foreground: bool, has_os_focus: bool) -> FocusReconcile {
+    match (is_foreground, has_os_focus) {
+        (true, false) => FocusReconcile::InjectGain,
+        (false, true) => FocusReconcile::InjectLoss,
+        _ => FocusReconcile::Noop,
+    }
+}
+
+/// 每帧对账: 用 OS 前台真相修复 winit 0.30 失真的焦点事件流 (仅 Windows)。
+///
+/// 「隐藏 → 显示 → AttachThreadInput 抢前台」后, Windows 的焦点消息投递
+/// 可能整体失真 (2026-08-25 日志实锤, 两种形态同根):
+/// - `WM_SETFOCUS` 到达但 `WM_NCACTIVATE(true)` 永久缺席;
+/// - 更狠的一档: 键盘焦点留在被挂接线程的输入队列 —— 前台窗口是我们、
+///   按键消息照流, 但 `WM_SETFOCUS` 从未到达 (GetFocus 返 NULL)。
+///
+/// winit 的 `has_active_focus = is_active && is_focused` 跳变去重逻辑
+/// 随后**双向吞掉 Focused(true/false)**, 失焦自动隐藏就此失效。
+///
+/// 本函数以 `GetForegroundWindow` 为唯一事实源, 缺什么补什么:
+/// - OS 说焦点在我、winit 未报到 → 补 `WM_NCACTIVATE(true)` + `WM_SETFOCUS`
+/// - OS 说焦点已走、winit 未报到 (killfocus 丢失) → 补 `WM_KILLFOCUS`
+///
+/// 三条消息都由 winit 自己的 wndproc 处理 (SETFOCUS/KILLFOCUS 不触
+/// DefWindowProc, 零 OS 副作用), 借它重建一致的内部状态。
+/// 补发幂等 (状态无跳变则 winit 不产生事件), 事件到齐即自然停止。
+pub(super) fn reconcile_focus_state(window: &Window, has_os_focus: bool) {
+    let Some(hwnd) = hwnd_of(window) else {
+        return;
+    };
+    unsafe {
+        match focus_reconcile_action(GetForegroundWindow() == hwnd, has_os_focus) {
+            FocusReconcile::InjectGain => {
+                SendMessageW(hwnd, WM_NCACTIVATE, TRUE as usize, 0);
+                SendMessageW(hwnd, WM_SETFOCUS, 0, 0);
+            }
+            FocusReconcile::InjectLoss => {
+                SendMessageW(hwnd, WM_KILLFOCUS, 0, 0);
+            }
+            FocusReconcile::Noop => {}
+        }
+    }
+}
+
+/// 主动隐藏窗口时同步补发 WM_KILLFOCUS (仅 Windows)。
+///
+/// 隐藏即失焦: 健康世界里隐藏聚焦窗口, OS 必投 WM_KILLFOCUS; 焦点消息
+/// 失真的环境下它可能永远不到, winit 的 `is_focused` 残留 true —— 下次
+/// 显示时对账补获得 (NCACTIVATE+SETFOCUS) 将无法构成跳变, Focused(true)
+/// 永远补不出 (2026-08-25 日志实锤: 连按唤起后补发连刷数百帧空转)。
+/// 隐藏时同步补一发, 让 winit 的内部状态始终贴着 OS 真相走。
+/// 已失焦时补发幂等 (无跳变则无事件); 由 winit 自己的 wndproc 处理,
+/// 不触 DefWindowProc, 零 OS 副作用。
+pub(super) fn inject_focus_loss(window: &Window) {
+    let Some(hwnd) = hwnd_of(window) else {
+        return;
+    };
+    unsafe {
+        SendMessageW(hwnd, WM_KILLFOCUS, 0, 0);
+    }
 }
 
 /// 核心抢前台逻辑 (接受原生 HWND，拆出便于单元测试)。
@@ -280,6 +357,32 @@ mod tests {
 
             DestroyWindow(hwnd);
         }
+    }
+
+    /// 焦点对账决策四象限: 只在「OS 真相」与「winit 报到」不一致时补发。
+    #[test]
+    fn focus_reconcile_action_four_quadrants() {
+        use super::{FocusReconcile, focus_reconcile_action};
+        assert_eq!(
+            focus_reconcile_action(true, false),
+            FocusReconcile::InjectGain,
+            "OS 说焦点在我, winit 未报到 → 补获得"
+        );
+        assert_eq!(
+            focus_reconcile_action(false, true),
+            FocusReconcile::InjectLoss,
+            "OS 说焦点已走, winit 未报到 → 补丢失"
+        );
+        assert_eq!(
+            focus_reconcile_action(true, true),
+            FocusReconcile::Noop,
+            "两边都说有焦点 → 一致, 不补"
+        );
+        assert_eq!(
+            focus_reconcile_action(false, false),
+            FocusReconcile::Noop,
+            "两边都说没焦点 → 一致, 不补"
+        );
     }
 
     /// 粘贴注入: 模拟 Ctrl+V 按键到前台窗口。
