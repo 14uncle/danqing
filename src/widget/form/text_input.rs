@@ -66,6 +66,8 @@ pub struct TextInput {
     /// 占位文字相对正常 baseline 的垂直偏移 (正=下, 负=上)。
     /// 产品层可据此微调占位文字位置, 不影响光标/输入文字。
     placeholder_offset: f32,
+    /// 标准控件高度 (来自 Theme token)。
+    control_height: f32,
 }
 
 impl TextInput {
@@ -100,6 +102,7 @@ impl TextInput {
             placeholder: None,
             placeholder_color: Color::from_srgb8(160, 160, 160),
             placeholder_offset: 0.0,
+            control_height: theme.control_height(),
         }
     }
 
@@ -260,6 +263,12 @@ impl TextInput {
         self.radius
     }
 
+    /// 当前标准控件高度 (测试用)。
+    #[cfg(test)]
+    pub(crate) fn control_height_value(&self) -> f32 {
+        self.control_height
+    }
+
     /// 在光标处插入文本。
     fn insert(&mut self, text: &str) {
         self.editor.insert(text);
@@ -338,7 +347,7 @@ impl Widget for TextInput {
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
         let content_width = texts.measure(self.editor.text(), self.font_size);
         let line_height = texts.line_height(f32::from(self.font_size));
-        let height = line_height + self.padding.vertical();
+        let height = (line_height + self.padding.vertical()).max(self.control_height);
         let width = self
             .width
             .unwrap_or(constraints.max_width)
@@ -647,6 +656,20 @@ mod tests {
         assert_eq!(input.text_color_value(), LightTheme.text_primary());
         assert_eq!(input.background_color(), LightTheme.surface_input());
         assert_eq!(input.radius_value(), LightTheme.radius_sm());
+        assert_eq!(input.control_height_value(), LightTheme.control_height());
+    }
+
+    #[test]
+    fn text_input_layout_height_is_at_least_control_height() {
+        let mut input = TextInput::new();
+        let mut texts = TextBatch::new();
+        let size = input.layout(Constraints::loose(Size::new(200.0, 100.0)), &mut texts);
+        assert!(
+            size.height >= LightTheme.control_height(),
+            "输入框高度应 >= control_height {}, 实际 {}",
+            LightTheme.control_height(),
+            size.height
+        );
     }
 
     #[test]
