@@ -63,7 +63,7 @@ impl Button {
             hover_binding: None,
             focus_color: Color::WHITE,
             focus_binding: None,
-            radius: theme.radius_md(),
+            radius: theme.radius_sm(),
             padding: Edges::symmetric(theme.spacing_lg(), theme.spacing_md()),
             hovered: false,
             pressed: false,
@@ -374,7 +374,7 @@ mod tests {
         let button = Button::new(Text::new("OK"));
         assert_eq!(button.color_value(), LightTheme.accent());
         assert_eq!(button.focus_color_value(), Color::WHITE);
-        assert_eq!(button.radius_value(), LightTheme.radius_md());
+        assert_eq!(button.radius_value(), LightTheme.radius_sm());
         assert_eq!(
             button.padding_value(),
             Edges::symmetric(LightTheme.spacing_lg(), LightTheme.spacing_md())
@@ -399,7 +399,7 @@ mod tests {
     fn button_themed_uses_provided_theme() {
         let button = Button::themed(&LightTheme, Text::new("OK"));
         assert_eq!(button.color_value(), LightTheme.accent());
-        assert_eq!(button.radius_value(), LightTheme.radius_md());
+        assert_eq!(button.radius_value(), LightTheme.radius_sm());
     }
 
     #[test]
