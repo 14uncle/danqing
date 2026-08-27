@@ -139,7 +139,7 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     ///
     /// 保证同类控件并排时默认对齐; 产品层可按需覆盖。
     fn control_height(&self) -> f32 {
-        32.0
+        36.0
     }
 
     /// 超小间距。
@@ -272,7 +272,7 @@ impl Theme for LightTheme {
     }
 
     fn control_height(&self) -> f32 {
-        32.0
+        36.0
     }
 
     fn spacing_xs(&self) -> f32 {
@@ -638,8 +638,8 @@ mod tests {
     }
 
     #[test]
-    fn light_theme_control_height_is_32() {
-        assert_eq!(LightTheme.control_height(), 32.0);
+    fn light_theme_control_height_is_36() {
+        assert_eq!(LightTheme.control_height(), 36.0);
     }
 
     #[test]

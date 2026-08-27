@@ -6,7 +6,7 @@
 
 ## Objective
 
-在 `Theme` trait 中新增 `control_height()` token，让所有单行表单控件（Button、TextInput、IconInput）默认高度统一为 **32px**，消除并排时的视觉错位。
+在 `Theme` trait 中新增 `control_height()` token，让所有单行表单控件（Button、TextInput、IconInput）默认高度统一为 **36px**，消除并排时的视觉错位。
 
 **用户场景：** 效率工具表单页——搜索框旁边放按钮、设置页输入框与确认按钮同行——默认就对齐，不需要产品层手动调 padding。
 
@@ -46,7 +46,7 @@ cargo run --example showcase   # 视觉验证
 
 | 文件 | 改动 |
 |------|------|
-| `src/theme.rs` | `Theme` trait 新增 `fn control_height(&self) -> f32` 带默认实现 `32.0`；`LightTheme` 显式实现 |
+| `src/theme.rs` | `Theme` trait 新增 `fn control_height(&self) -> f32` 带默认实现 `36.0`；`LightTheme` 显式实现 |
 | `src/widget/base/button.rs` | 新增 `control_height` 字段；`layout` 中 `natural_height.max(control_height)` |
 | `src/widget/form/text_input.rs` | 同上 |
 | `src/widget/form/icon_input.rs` | 复用内部 TextInput 的 control_height，不新增字段；`layout` 确保总高对齐 |
@@ -58,7 +58,7 @@ cargo run --example showcase   # 视觉验证
 // Theme trait 新增（带默认实现，SceneTheme 自动继承）
 /// 标准控件高度 (按钮、输入框等单行表单控件)。
 fn control_height(&self) -> f32 {
-    32.0
+    36.0
 }
 
 // Button / TextInput layout 中使用
@@ -72,7 +72,7 @@ let height = natural_height.max(self.control_height);
 
 | 测试类型 | 内容 |
 |----------|------|
-| 单元测试 | `theme` 模块：`control_height` 返回 32.0，区间断言 32~44 |
+| 单元测试 | `theme` 模块：`control_height` 返回 36.0，区间断言 32~44 |
 | 单元测试 | `button` / `text_input`：layout 后高度 == 32（空内容场景） |
 | 现有测试 | 更新因高度变化而失败的断言 |
 | 视觉验证 | `showcase` 示例中按钮与输入框并排对齐 |
@@ -80,17 +80,17 @@ let height = natural_height.max(self.control_height);
 ## Boundaries
 
 - **Always:** `cargo fmt` + `cargo clippy -- -D warnings` + `cargo test --lib --tests` 全绿
-- **Ask first:** 改变默认值（32px）；扩展到其他组件（Switcher、Tabs 等）
+- **Ask first:** 改变默认值（36px）；扩展到其他组件（Switcher、Tabs 等）
 - **Never:** 不动 TextArea（多行组件）；不改现有 padding 语义
 
 ## Success Criteria
 
-1. `LightTheme.control_height()` 返回 `32.0`
-2. `Button::new(Text::new("OK")).layout(...)` 输出高度 == 32.0
-3. `TextInput::new().layout(...)` 输出高度 == 32.0
+1. `LightTheme.control_height()` 返回 `36.0`
+2. `Button::new(Text::new("OK")).layout(...)` 输出高度 == 36.0
+3. `TextInput::new().layout(...)` 输出高度 == 36.0
 4. `showcase` 中按钮与输入框并排时顶部/底部精确对齐
 5. 全量测试通过，clippy 零警告
 
 ## Open Questions
 
-无。值已确认 32px，范围已确认 3 个组件。
+无。值已确认 36px，范围已确认 3 个组件。
