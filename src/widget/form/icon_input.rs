@@ -449,13 +449,13 @@ mod tests {
     }
 
     #[test]
-    fn layout_height_is_at_least_control_height() {
+    fn layout_height_equals_control_height() {
         let mut icon_input = IconInput::new().width(200.0);
         let mut texts = TextBatch::new();
         let size = icon_input.layout(Constraints::loose(Size::new(400.0, 400.0)), &mut texts);
         assert!(
-            size.height >= LightTheme.control_height(),
-            "IconInput 高度应 >= control_height {}, 实际 {}",
+            (size.height - LightTheme.control_height()).abs() < 0.01,
+            "IconInput 高度应精确等于 control_height {}, 实际 {}",
             LightTheme.control_height(),
             size.height
         );

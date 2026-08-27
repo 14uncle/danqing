@@ -42,6 +42,8 @@ pub struct Button {
     area: Rect,
     /// 标准控件高度 (来自 Theme token)。
     control_height: f32,
+    /// 垂直内边距 (由 control_height 和子组件高度动态计算，保证精确对齐)。
+    vertical_pad: f32,
 }
 
 impl Button {
@@ -70,6 +72,7 @@ impl Button {
             child_size: Size::ZERO,
             area: Rect::default(),
             control_height: theme.control_height(),
+            vertical_pad: 0.0,
         }
     }
 
@@ -194,14 +197,17 @@ impl Widget for Button {
     }
 
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
-        self.child_size = self.child.layout(constraints.deflate(self.padding), texts);
-        let natural_height = self.child_size.height + self.padding.vertical();
-        let height = natural_height.max(self.control_height);
+        let height = self.control_height;
+        // 先用 padding 估算约束，再用实际子组件高度精确居中。
+        let child_constraints = constraints.deflate(self.padding);
+        self.child_size = self.child.layout(child_constraints, texts);
+        let vertical_pad = ((height - self.child_size.height) / 2.0).max(0.0);
         let size = constraints.constrain(Size::new(
             self.child_size.width + self.padding.horizontal(),
             height,
         ));
         self.area = Rect::new(Point::ZERO, size);
+        self.vertical_pad = vertical_pad;
         size
     }
 
@@ -223,7 +229,7 @@ impl Widget for Button {
         let inner = Rect::new(
             Point::new(
                 area.origin.x + self.padding.left,
-                area.origin.y + self.padding.top,
+                area.origin.y + self.vertical_pad,
             ),
             self.child_size,
         );
@@ -377,13 +383,13 @@ mod tests {
     }
 
     #[test]
-    fn button_layout_height_is_at_least_control_height() {
+    fn button_layout_height_equals_control_height() {
         let mut button = Button::new(Text::new("OK"));
         let mut texts = TextBatch::new();
         let size = button.layout(Constraints::loose(Size::new(200.0, 100.0)), &mut texts);
         assert!(
-            size.height >= LightTheme.control_height(),
-            "按钮高度应 >= control_height {}, 实际 {}",
+            (size.height - LightTheme.control_height()).abs() < 0.01,
+            "按钮高度应精确等于 control_height {}, 实际 {}",
             LightTheme.control_height(),
             size.height
         );

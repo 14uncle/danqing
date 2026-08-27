@@ -53,6 +53,8 @@ pub struct TextInput {
     char_offsets: Vec<f32>,
     /// 行高 (用于 IME 区域与光标高度)。
     line_height: f32,
+    /// 垂直内边距 (由 control_height 和行高动态计算，保证精确对齐)。
+    vertical_pad: f32,
     /// 光标可见性 (由动画控制闪烁)。
     caret_visible: bool,
     /// IME 合成文本 (显示在光标处，带下划线)。
@@ -96,6 +98,7 @@ impl TextInput {
             area: Cell::new(Rect::default()),
             char_offsets: Vec::new(),
             line_height: 0.0,
+            vertical_pad: 0.0,
             caret_visible: true,
             preedit: None,
             dragging: false,
@@ -269,6 +272,12 @@ impl TextInput {
         self.control_height
     }
 
+    /// 当前垂直内边距 (测试用)。
+    #[cfg(test)]
+    pub(crate) fn vertical_pad_value(&self) -> f32 {
+        self.vertical_pad
+    }
+
     /// 在光标处插入文本。
     fn insert(&mut self, text: &str) {
         self.editor.insert(text);
@@ -347,7 +356,8 @@ impl Widget for TextInput {
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
         let content_width = texts.measure(self.editor.text(), self.font_size);
         let line_height = texts.line_height(f32::from(self.font_size));
-        let height = (line_height + self.padding.vertical()).max(self.control_height);
+        let height = self.control_height;
+        let vertical_pad = ((height - line_height) / 2.0).max(0.0);
         let width = self
             .width
             .unwrap_or(constraints.max_width)
@@ -355,6 +365,7 @@ impl Widget for TextInput {
         let size = constraints.constrain(Size::new(width, height));
         self.area.set(Rect::new(crate::Point::ZERO, size));
         self.line_height = line_height;
+        self.vertical_pad = vertical_pad;
 
         // 缓存每个字符右侧的 x 偏移，用于鼠标点击定位光标。
         self.char_offsets.clear();
@@ -388,7 +399,7 @@ impl Widget for TextInput {
 
         // 文本起点
         let text_x = area.origin.x + self.padding.left;
-        let baseline = area.origin.y + self.padding.top + texts.ascent(f32::from(self.font_size));
+        let baseline = area.origin.y + self.vertical_pad + texts.ascent(f32::from(self.font_size));
 
         // 选区高亮
         let (sel_start, sel_end) = self.selection_range();
@@ -398,9 +409,9 @@ impl Widget for TextInput {
             rects.push_rect(
                 Rect::from_xywh(
                     x0,
-                    area.origin.y + self.padding.top,
+                    area.origin.y + self.vertical_pad,
                     x1 - x0,
-                    area.size.height - self.padding.vertical(),
+                    self.line_height,
                 ),
                 self.selection_color,
                 0.0,
@@ -446,7 +457,7 @@ impl Widget for TextInput {
         if self.focused && self.caret_visible {
             let caret_x = text_x + self.measure_to(texts, self.editor.cursor());
             let caret_height = texts.line_height(f32::from(self.font_size));
-            let caret_y = area.origin.y + self.padding.top;
+            let caret_y = area.origin.y + self.vertical_pad;
             rects.push_rect(
                 Rect::from_xywh(caret_x, caret_y, 2.0, caret_height),
                 self.caret_color,
@@ -636,7 +647,7 @@ impl Widget for TextInput {
             self.char_offsets.get(cursor - 1).copied().unwrap_or(0.0)
         };
         let x = area.origin.x + self.padding.left + cursor_x;
-        let y = area.origin.y + self.padding.top;
+        let y = area.origin.y + self.vertical_pad;
         Some(Rect::from_xywh(x, y, 0.0, self.line_height))
     }
 
@@ -660,13 +671,13 @@ mod tests {
     }
 
     #[test]
-    fn text_input_layout_height_is_at_least_control_height() {
+    fn text_input_layout_height_equals_control_height() {
         let mut input = TextInput::new();
         let mut texts = TextBatch::new();
         let size = input.layout(Constraints::loose(Size::new(200.0, 100.0)), &mut texts);
         assert!(
-            size.height >= LightTheme.control_height(),
-            "输入框高度应 >= control_height {}, 实际 {}",
+            (size.height - LightTheme.control_height()).abs() < 0.01,
+            "输入框高度应精确等于 control_height {}, 实际 {}",
             LightTheme.control_height(),
             size.height
         );
@@ -1071,10 +1082,10 @@ mod tests {
         let mut texts = TextBatch::new();
         t.layout(Constraints::loose(Size::new(500.0, 100.0)), &mut texts);
 
-        // paint 前 area 为本地原点，IME 区域应位于 (padding.left, padding.top)。
+        // paint 前 area 为本地原点，IME 区域应位于 (padding.left, vertical_pad)。
         let local = t.ime_area().unwrap();
         assert!((local.origin.x - t.padding.left).abs() < f32::EPSILON);
-        assert!((local.origin.y - t.padding.top).abs() < f32::EPSILON);
+        assert!((local.origin.y - t.vertical_pad_value()).abs() < f32::EPSILON);
 
         // paint 后缓存绝对矩形，IME 区域应跟随光标平移。
         let abs = Rect::from_xywh(20.0, 30.0, 500.0, 100.0);
@@ -1083,7 +1094,7 @@ mod tests {
 
         let area = t.ime_area().unwrap();
         let expected_x = abs.origin.x + t.padding.left;
-        let expected_y = abs.origin.y + t.padding.top;
+        let expected_y = abs.origin.y + t.vertical_pad_value();
         assert!((area.origin.x - expected_x).abs() < f32::EPSILON);
         assert!((area.origin.y - expected_y).abs() < f32::EPSILON);
         assert_eq!(area.size.width, 0.0);
