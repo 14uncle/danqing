@@ -4,7 +4,7 @@
 //! Tabs 组件：带可视化 tab 栏的多面板切换容器。
 //!
 //! 水平顶部 tab 栏 + 面板切换。tab 栏自绘 (文字 + 选中指示线)，
-//! 面板切换逻辑与 [`Switcher`] 一致：sync 传播全部子组件，
+//! 面板切换逻辑与 [`MultiPanel`] 一致：sync 传播全部子组件，
 //! layout/paint/event 只作用于 active 面板。
 
 use std::any::Any;
@@ -24,7 +24,7 @@ type IconData = (Vec<u8>, u32, u32);
 
 /// 带 tab 栏的多面板切换容器。
 ///
-/// 与 [`Switcher`](crate::widget::Switcher) 类似，保留全部子组件实例，
+/// 与 [`MultiPanel`](crate::widget::MultiPanel) 类似，保留全部子组件实例，
 /// 只让 active 子组件参与布局 / 绘制 / 事件。额外在顶部渲染可点击的 tab 栏。
 ///
 /// 用法：
