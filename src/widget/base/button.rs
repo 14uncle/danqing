@@ -205,7 +205,11 @@ impl Widget for Button {
             bottom: 0.0,
             left: self.padding.left,
         };
-        let child_constraints = constraints.deflate(h_pad);
+        let mut child_constraints = constraints.deflate(h_pad);
+        // 垂直轴松开下限：cross_stretch 会传入 tight 约束 (min==max==36)，
+        // 若透传给 Text 会导致 layout 返回 36 而非自然行高，vertical_pad 归零，
+        // 文字贴顶、省略号贴底。松开后 Text 返回自然行高，居中正确。
+        child_constraints.min_height = 0.0;
         self.child_size = self.child.layout(child_constraints, texts);
         let vertical_pad = ((height - self.child_size.height) / 2.0).max(0.0);
         let size = constraints.constrain(Size::new(
