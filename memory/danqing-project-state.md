@@ -18,7 +18,7 @@ metadata:
 
 ## Next Step
 
-**番茄钟打磨三件套已于 2026-07-28 全检关闭并归档**(tasks/archive/{plan,todo}-pomodoro-polish.md):场景环境音(rodio 0.22 懒初始化+双槽+静默降级,5 场景 CC0 OGG 响度统一 -28 LUFS)、长休息+轮次(4 轮 Focus→15min LongBreak,skip 不计)、今日完成计数(跨日归零持久化)。benchmark 双门槛 PASS(693.8ms / 177.5MB),人工终审用户确认全过。踩坑: rodio 0.22 repeat_infinite 对 symphonia 解码器秒空无声,自实现 LoopingDecoder,见 [[rodio-022-repeat-infinite-bug]]。
+**番茄钟打磨三件套已于 2026-07-28 全检关闭并归档**(tasks/archive/{plan,todo}-pomodoro-polish.md):场景环境音(rodio 0.22 懒初始化+双槽+静默降级,5 场景 CC0 OGG 响度统一 -28 LUFS)、长休息+轮次(4 轮 Focus→15min LongBreak,skip 不计)、今日完成计数(跨日归零持久化)。benchmark 双门槛 PASS(693.8ms / 177.5MB),人工终审用户确认全过。踩坑: rodio 0.22 repeat_infinite 对 symphonia 解码器秒空无声,自实现 LoopingDecoder,见 [[rodio-022-repeat-infinite-bug]](2026-08-27 已迁至 danqing-pomodoro/memory/)。
 
 **2026-07-28 雨场景动效试点已关闭并归档**(tasks/archive/{plan,todo}-pomodoro-scene-motion.md,spec docs/specs/pomodoro-scene-motion.md 验收 8/8):雨场景程序化雨丝(background.wgsl 三层 hash 叠加,uniform 复用 16B pad 位,零新资产),计时运行下落、暂停 500ms 沉降(motion.rs MotionEnvelope,视觉独立时长不复用音频 300ms)。终审调参三轮:方向对齐静态图(雨落朝右下,\ 形)、去流星感(尾羽 x2.5/亮度降/速度减半,公共周期 8s)、线宽 2-3px(列密度 480/360/320)。benchmark PASS(891.4ms/180.6MB)。
 

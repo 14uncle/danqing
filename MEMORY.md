@@ -6,7 +6,6 @@
 
 - [场景动效 UV 位移机制](scene-motion-uv-displacement.md) — 亮度调制读作"光在车上跑路没动",世界本身动须 UV 位移采样坐标;但对沿轴均匀元素(雨丝)不成立,须去烘焙+程序化;亮场景 additive 被近白底吃掉走乘性
 - [场景纹理 2 槽 LRU](scene-lru-pattern.md) — 多场景池按 from/to 懒加载的 wgpu 纹理模式,danqing 2026-07-24 落地
-- [rodio 0.22 repeat_infinite bug](rodio-022-repeat-infinite-bug.md) — symphonia 解码器循环秒空无声,须自实现 LoopingDecoder (ambient.rs)
 - [shader step 门禁约定](shader-step-on-probability.md) — step(threshold,hash) 的 on 概率=1-threshold;比例须写 step(1-ratio,h);星野曾误写致实际 ~1280 颗、减量方向算反
 - [AI 场景 UV 位移选择偏好](ai-scene-uv-displacement-preference.md) — UV 位移适合大幅运动(海浪/火焰),additive 适合小幅氛围(雾气);与静态元素重叠时走 additive
 - [shader 常量重复定义检查](shader-duplicate-constant-check.md) — 修改 WGSL 时必须先 grep 同名常量,旧定义被替代须删除;shader 编译错误只在运行时暴露
@@ -29,7 +28,6 @@
 
 - [winit 0.30 抢前台受前台锁](winit-030-focus-window-foreground-lock.md) — focus_window 合成 Alt 对后台进程静默失败,须 AttachThreadInput 绕锁 (foreground.rs)
 - [winit 0.30 窗口图标两档](winit-030-window-icon-two-tier.md) — with_window_icon 只设 ICON_SMALL,任务栏须 with_taskbar_icon 补 ICON_BIG,否则偶发缺省图标
-- [Poll 空转致环境音呲啦](poll-control-flow-audio-crackling.md) — 隐藏态用 ControlFlow::Poll 致 tick 数千 fps,hammer rodio player → buffer underrun;统一 WaitUntil(16ms)
 
 ## 流程/规范
 
