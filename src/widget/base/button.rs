@@ -198,8 +198,9 @@ impl Widget for Button {
 
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
         let height = self.control_height;
-        // 先用 padding 估算约束，再用实际子组件高度精确居中。
-        let child_constraints = constraints.deflate(self.padding);
+        // 水平方向用 padding 约束，垂直方向不限制子组件（由 vertical_pad 居中）。
+        let h_pad = Edges::symmetric(self.padding.left + self.padding.right, 0.0);
+        let child_constraints = constraints.deflate(h_pad);
         self.child_size = self.child.layout(child_constraints, texts);
         let vertical_pad = ((height - self.child_size.height) / 2.0).max(0.0);
         let size = constraints.constrain(Size::new(
