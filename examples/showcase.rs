@@ -14,8 +14,8 @@
 )]
 
 use danqing::widget::{
-    self, Box as UiBox, Button, CloseButton, Column, EventResult, MsgQueue, Node, Padding, Row,
-    Scrollable, Switcher, Tabs, Text, TextArea, TextInput, TitleBar, Widget,
+    self, Box as UiBox, Button, CloseButton, Column, EventResult, IconInput, MsgQueue, Node,
+    Padding, Row, Scrollable, Switcher, Tabs, Text, TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
     App, BackgroundConfig, Color, Event, Key, LightTheme, NamedKey, Point, Rect, ScaleMode, Size,
@@ -43,6 +43,7 @@ struct Showcase {
     square_pos: Point,
     last_key: String,
     input_value: String,
+    icon_input_value: String,
     textarea_value: String,
     /// 当前选中的分类索引 (驱动 Switcher)。
     selected: usize,
@@ -66,6 +67,10 @@ enum Msg {
     KeyChar(String),
     /// 文本输入框内容变化。
     InputChanged(String),
+    /// 图标输入框内容变化。
+    IconInputChanged(String),
+    /// 图标输入框图标点击。
+    IconInputSearch,
     /// 多行文本域内容变化。
     TextareaChanged(String),
     /// 切换分类面板。
@@ -91,6 +96,10 @@ impl App for Showcase {
             }
             Msg::KeyChar(c) => self.last_key = c,
             Msg::InputChanged(s) => self.input_value = s,
+            Msg::IconInputChanged(s) => self.icon_input_value = s,
+            Msg::IconInputSearch => {
+                log::info!("搜索: {}", self.icon_input_value);
+            }
             Msg::TextareaChanged(s) => self.textarea_value = s,
             Msg::Select(i) => self.selected = i,
             Msg::TabChanged(i) => self.selected_tab = i,
@@ -253,6 +262,7 @@ fn counter_row(t: &LightTheme) -> impl Widget + 'static {
 fn input_row(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
         .gap(t.spacing_lg())
+        .cross_center()
         .child(
             Text::new("输入：")
                 .font_size(t.font_size_body())
@@ -270,14 +280,52 @@ fn input_row(t: &LightTheme) -> impl Widget + 'static {
         )
 }
 
-/// 多行输入区:Scrollable + TextArea + 实时回显字数 / 行数。
-fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
+/// 图标输入区:IconInput + 实时回显 + 图标点击搜索。
+fn icon_input_row(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
         .gap(t.spacing_lg())
+        .cross_center()
         .child(
-            Text::new("多行：")
+            Text::new("搜索：")
                 .font_size(t.font_size_body())
                 .color(t.text_primary()),
+        )
+        .child(
+            IconInput::themed(t)
+                .width(280.0)
+                .placeholder("输入关键词...", t.text_secondary())
+                .on_change(|s: &str| Msg::IconInputChanged(s.to_string()))
+                .on_icon_click(|| Msg::IconInputSearch),
+        )
+        .child(
+            Text::bind(|s: &Showcase| {
+                if s.icon_input_value.is_empty() {
+                    "点击右侧图标搜索".to_string()
+                } else {
+                    format!("搜索: {}", s.icon_input_value)
+                }
+            })
+            .font_size(t.font_size_body())
+            .color(t.text_primary()),
+        )
+}
+
+/// 多行输入区:Scrollable + TextArea + 实时回显字数 / 行数。
+fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
+    // 与单行输入框等高
+    let label_height = t.control_height();
+    Row::new()
+        .gap(t.spacing_lg())
+        .cross_center()
+        .child(
+            // label 固定为单行输入框高度，Center 使文本垂直居中
+            UiBox::new(Color::TRANSPARENT)
+                .height(label_height)
+                .child(widget::Center::new(
+                    Text::new("多行：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )),
         )
         .child(
             // 透明尺寸壳：只为 Scrollable 提供 400×160 视口，背景职责归 TextArea,
@@ -451,14 +499,8 @@ impl ImageDemo {
 
     /// 获取按钮实际尺寸 (包含 padding)。
     fn open_button_size(&self) -> Size {
-        // Button 的 padding: Edges::symmetric(spacing_lg, spacing_md)
-        // 竖直方向 padding = spacing_md * 2
-        // 文字高度 ≈ font_size * 1.2
-        // 总高度 = font_size * 1.2 + spacing_md * 2
         let t = theme();
-        let text_height = t.font_size_body() as f32 * 1.2;
-        let height = text_height + t.spacing_md() * 2.0;
-        Size::new(100.0, height)
+        Size::new(100.0, t.control_height())
     }
 }
 
@@ -547,7 +589,7 @@ impl Widget for ImageDemo {
     }
 
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
-        let button_height = 36.0;
+        let button_height = theme().control_height();
         let button_area =
             Rect::from_xywh(area.origin.x, area.origin.y, area.size.width, button_height);
         self.open_button.event(event, button_area, msgs)
@@ -594,6 +636,7 @@ fn page_form(t: &LightTheme) -> impl Widget + 'static {
             .gap(t.spacing_lg())
             .cross_stretch()
             .child(card(t, "单行输入", input_row(t)))
+            .child(card(t, "图标输入", icon_input_row(t)))
             .child(card(t, "多行输入", textarea_card(t))),
     )
 }
@@ -853,6 +896,7 @@ fn main() -> anyhow::Result<()> {
         square_pos: Point::ZERO,
         last_key: String::from("-"),
         input_value: String::new(),
+        icon_input_value: String::new(),
         textarea_value: String::new(),
         selected: 0,
         is_maximized: false,
