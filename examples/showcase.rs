@@ -264,14 +264,19 @@ fn input_row(t: &LightTheme) -> impl Widget + 'static {
         .gap(t.spacing_lg())
         .cross_center()
         .child(
-            Text::new("输入：")
-                .font_size(t.font_size_body())
-                .color(t.text_primary()),
-        )
-        .child(
-            TextInput::themed(t)
-                .width(240.0)
-                .on_change(|s: &str| Msg::InputChanged(s.to_string())),
+            Row::new()
+                .gap(3.0)
+                .cross_center()
+                .child(
+                    Text::new("输入：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    TextInput::themed(t)
+                        .width(240.0)
+                        .on_change(|s: &str| Msg::InputChanged(s.to_string())),
+                ),
         )
         .child(
             Text::bind(|s: &Showcase| format!("已输入：{}", s.input_value))
@@ -286,16 +291,21 @@ fn icon_input_row(t: &LightTheme) -> impl Widget + 'static {
         .gap(t.spacing_lg())
         .cross_center()
         .child(
-            Text::new("搜索：")
-                .font_size(t.font_size_body())
-                .color(t.text_primary()),
-        )
-        .child(
-            IconInput::themed(t)
-                .width(280.0)
-                .placeholder("输入关键词...", t.text_secondary())
-                .on_change(|s: &str| Msg::IconInputChanged(s.to_string()))
-                .on_icon_click(|| Msg::IconInputSearch),
+            Row::new()
+                .gap(3.0)
+                .cross_center()
+                .child(
+                    Text::new("搜索：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    IconInput::themed(t)
+                        .width(280.0)
+                        .placeholder("输入关键词...", t.text_secondary())
+                        .on_change(|s: &str| Msg::IconInputChanged(s.to_string()))
+                        .on_icon_click(|| Msg::IconInputSearch),
+                ),
         )
         .child(
             Text::bind(|s: &Showcase| {
@@ -316,38 +326,48 @@ fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
     let label_height = t.control_height();
     Row::new()
         .gap(t.spacing_lg())
-        .cross_center()
         .child(
-            // label 固定为单行输入框高度，Center 使文本垂直居中
+            // label + TextArea 紧凑排列 (3px 间距)
+            Row::new()
+                .gap(3.0)
+                .child(
+                    // label 固定为单行输入框高度，内部 Center 使文本在其自身高度内垂直居中;
+                    // 不用 cross_center —— 那会把 label 居中到多行 TextArea 的完整高度。
+                    UiBox::new(Color::TRANSPARENT)
+                        .height(label_height)
+                        .child(widget::Center::new(
+                            Text::new("多行：")
+                                .font_size(t.font_size_body())
+                                .color(t.text_primary()),
+                        )),
+                )
+                .child(
+                    // 透明尺寸壳：只为 Scrollable 提供 400×160 视口，背景职责归 TextArea,
+                    // 避免外层 UiBox 与 TextArea 双层 surface 叠出接缝。
+                    UiBox::new(Color::TRANSPARENT)
+                        .size(400.0, 160.0)
+                        .child(Scrollable::themed(
+                            t,
+                            TextArea::themed(t)
+                                .width(400.0)
+                                .height(160.0)
+                                .on_change(|s: &str| Msg::TextareaChanged(s.to_string())),
+                        )),
+                ),
+        )
+        .child(
+            // 与 label 等高，文本在 control_height 内垂直居中
             UiBox::new(Color::TRANSPARENT)
                 .height(label_height)
                 .child(widget::Center::new(
-                    Text::new("多行：")
-                        .font_size(t.font_size_body())
-                        .color(t.text_primary()),
+                    Text::bind(|s: &Showcase| {
+                        let chars = s.textarea_value.chars().count();
+                        let lines = s.textarea_value.lines().count();
+                        format!("字数：{} 行数：{}", chars, lines)
+                    })
+                    .font_size(t.font_size_body())
+                    .color(t.text_primary()),
                 )),
-        )
-        .child(
-            // 透明尺寸壳：只为 Scrollable 提供 400×160 视口，背景职责归 TextArea,
-            // 避免外层 UiBox 与 TextArea 双层 surface 叠出接缝。
-            UiBox::new(Color::TRANSPARENT)
-                .size(400.0, 160.0)
-                .child(Scrollable::themed(
-                    t,
-                    TextArea::themed(t)
-                        .width(400.0)
-                        .height(160.0)
-                        .on_change(|s: &str| Msg::TextareaChanged(s.to_string())),
-                )),
-        )
-        .child(
-            Text::bind(|s: &Showcase| {
-                let chars = s.textarea_value.chars().count();
-                let lines = s.textarea_value.lines().count();
-                format!("字数：{} 行数：{}", chars, lines)
-            })
-            .font_size(t.font_size_body())
-            .color(t.text_primary()),
         )
 }
 
@@ -470,21 +490,25 @@ fn page_base(t: &LightTheme) -> impl Widget + 'static {
 }
 
 /// Image 组件演示：显示 LOGO 图片，支持打开本地图片。
+///
+/// 按钮 + 信息文本由 Row 框架管理; Image 因动态替换仍手动布局。
 struct ImageDemo {
+    /// 第一行：按钮 + 图片尺寸信息 (框架管理 sync/animate/layout/paint/event)。
+    header: Node,
+    /// 图片组件 (动态数据，手动管理)。
     image: widget::Image,
-    open_button: Node,
-    /// 当前加载的图片尺寸 (用于显示文字信息)。
-    image_info: Option<(u32, u32)>,
+    /// header 布局尺寸缓存。
+    header_size: Size,
 }
 
 impl ImageDemo {
     fn new() -> Self {
         let t = theme();
-        // 默认显示 LOGO 图片
         let (data, width, height) = load_logo();
-        Self {
-            image: widget::Image::new(data, width, height),
-            open_button: Box::new(
+        let header = Row::new()
+            .gap(t.spacing_sm())
+            .cross_center()
+            .child(
                 Button::themed(
                     &t,
                     Text::new("打开图片")
@@ -492,29 +516,36 @@ impl ImageDemo {
                         .color(Color::WHITE),
                 )
                 .on_click(|| Msg::OpenImage),
-            ),
-            image_info: Some((width, height)),
+            )
+            .child(
+                Text::bind(|s: &Showcase| match &s.image_data {
+                    Some((_, w, h)) => format!("{w}×{h} px"),
+                    None => String::new(),
+                })
+                .font_size(t.font_size_small())
+                .color(Color::rgba(0.6, 0.6, 0.6, 1.0)),
+            );
+        Self {
+            header: Box::new(header),
+            image: widget::Image::new(data, width, height),
+            header_size: Size::ZERO,
         }
-    }
-
-    /// 获取按钮实际尺寸 (包含 padding)。
-    fn open_button_size(&self) -> Size {
-        let t = theme();
-        Size::new(100.0, t.control_height())
     }
 }
 
 impl Widget for ImageDemo {
     fn sync(&mut self, state: &dyn std::any::Any) {
+        self.header.sync(state);
         let state = state
             .downcast_ref::<Showcase>()
             .expect("ImageDemo 绑定状态类型不匹配");
-        self.open_button.sync(state);
-        // 如果有加载的图片，更新 image
         if let Some((data, w, h)) = &state.image_data {
             self.image = widget::Image::new(data.clone(), *w, *h);
-            self.image_info = Some((*w, *h));
         }
+    }
+
+    fn animate(&mut self, ctx: &danqing::AnimationCtx) {
+        self.header.animate(ctx);
     }
 
     fn layout(
@@ -522,77 +553,54 @@ impl Widget for ImageDemo {
         constraints: danqing::Constraints,
         texts: &mut danqing::TextBatch,
     ) -> Size {
-        // 第一行：按钮 + 图片信息 (横向排列)
-        let button_size = self.open_button_size();
-        // 让按钮进行 layout 以缓存其内部状态
-        self.open_button
-            .layout(danqing::Constraints::tight(button_size), texts);
-        let row_height = button_size.height.max(20.0);
-
-        // 图片区域
+        self.header_size = self.header.layout(constraints, texts);
+        let gap = 8.0;
         let image_size = self.image.layout(
             danqing::Constraints::loose(Size::new(
                 constraints.max_width,
-                constraints.max_height - row_height - 8.0,
+                constraints.max_height - self.header_size.height - gap,
             )),
             texts,
         );
-        Size::new(image_size.width, image_size.height + row_height + 8.0)
+        Size::new(
+            image_size.width.max(self.header_size.width),
+            self.header_size.height + gap + image_size.height,
+        )
     }
 
     fn paint(&self, area: Rect, rects: &mut danqing::RectBatch, texts: &mut danqing::TextBatch) {
-        // 第一行：按钮在左，图片信息在右
-        // 按钮使用其自身计算的尺寸
-        let button_size = self.open_button_size();
-        let button_area = Rect::from_xywh(
-            area.origin.x,
-            area.origin.y,
-            button_size.width,
-            button_size.height,
-        );
-        self.open_button.paint(button_area, rects, texts);
-
-        // 图片信息在按钮后面
-        if let Some((w, h)) = &self.image_info {
-            let info = format!("{}×{} px", w, h);
-            let baseline =
-                button_area.origin.y + button_area.size.height * 0.5 + texts.ascent(12.0) * 0.3;
-            texts.push_text(
-                &info,
-                button_area.origin.x + button_area.size.width + 8.0,
-                baseline,
-                12,
-                crate::Color::rgba(0.6, 0.6, 0.6, 1.0),
-            );
-        }
-
-        // 图片在下方
+        self.header.paint(area, rects, texts);
+        let gap = 8.0;
         let image_area = Rect::from_xywh(
             area.origin.x,
-            button_area.origin.y + button_size.height + 8.0,
+            area.origin.y + self.header_size.height + gap,
             area.size.width,
-            area.size.height - button_size.height - 8.0,
+            area.size.height - self.header_size.height - gap,
         );
         self.image.paint(image_area, rects, texts);
     }
 
     fn paint_image(&self, area: Rect, images: &mut danqing::ImageBatch) {
-        // 图片在下方
-        let button_size = self.open_button_size();
+        let gap = 8.0;
         let image_area = Rect::from_xywh(
             area.origin.x,
-            area.origin.y + button_size.height + 8.0,
+            area.origin.y + self.header_size.height + gap,
             area.size.width,
-            area.size.height - button_size.height - 8.0,
+            area.size.height - self.header_size.height - gap,
         );
         self.image.paint_image(image_area, images);
     }
 
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
-        let button_height = theme().control_height();
-        let button_area =
-            Rect::from_xywh(area.origin.x, area.origin.y, area.size.width, button_height);
-        self.open_button.event(event, button_area, msgs)
+        self.header.event(event, area, msgs)
+    }
+
+    fn children(&self) -> &[Node] {
+        self.header.children()
+    }
+
+    fn children_mut(&mut self) -> &mut [Node] {
+        self.header.children_mut()
     }
 }
 
