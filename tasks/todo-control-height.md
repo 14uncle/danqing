@@ -27,7 +27,7 @@
 
 ## Phase 3: 复合适适配
 
-- [ ] T4: IconInput 适配 control_height
+- [x] T4: IconInput 适配 control_height
   - Acceptance: `IconInput` layout 输出高度与 TextInput 对齐（32.0）；图标区域高度同步
   - Verify: `cargo test widget::form::icon_input` 通过
   - Files: `src/widget/form/icon_input.rs`
