@@ -235,6 +235,7 @@ fn counter_row(t: &LightTheme) -> impl Widget + 'static {
     let hover_color = t.surface_variant();
     Row::new()
         .gap(t.spacing_lg())
+        .cross_center()
         .child(
             Button::themed(
                 t,
@@ -265,7 +266,7 @@ fn input_row(t: &LightTheme) -> impl Widget + 'static {
         .cross_center()
         .child(
             Row::new()
-                .gap(3.0)
+                .gap(2.0)
                 .cross_center()
                 .child(
                     Text::new("输入：")
@@ -292,7 +293,7 @@ fn icon_input_row(t: &LightTheme) -> impl Widget + 'static {
         .cross_center()
         .child(
             Row::new()
-                .gap(3.0)
+                .gap(2.0)
                 .cross_center()
                 .child(
                     Text::new("搜索：")
@@ -329,7 +330,7 @@ fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
         .child(
             // label + TextArea 紧凑排列 (3px 间距)
             Row::new()
-                .gap(3.0)
+                .gap(2.0)
                 .child(
                     // label 固定为单行输入框高度，内部 Center 使文本在其自身高度内垂直居中;
                     // 不用 cross_center —— 那会把 label 居中到多行 TextArea 的完整高度。

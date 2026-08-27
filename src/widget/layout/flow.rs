@@ -16,6 +16,17 @@ pub enum Axis {
     Vertical,
 }
 
+/// 交叉轴对齐方式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrossAlign {
+    /// 起始对齐 (Row: 顶部, Column: 左侧)。
+    Start,
+    /// 居中对齐。
+    Center,
+    /// 末尾对齐 (Row: 底部, Column: 右侧)。
+    End,
+}
+
 impl Axis {
     fn main(self, size: Size) -> f32 {
         match self {
@@ -103,6 +114,8 @@ pub struct Flow {
     gap: f32,
     /// 是否把 Fit 子项拉伸到容器交叉尺寸 (默认 false，保持自然尺寸)。
     cross_stretch: bool,
+    /// 交叉轴对齐方式 (默认 Start)。
+    cross_align: CrossAlign,
     /// layout 阶段缓存：各子组件相对容器原点的摆放矩形。
     areas: Vec<Rect>,
 }
@@ -114,6 +127,7 @@ impl Flow {
             weights: Vec::new(),
             gap,
             cross_stretch: false,
+            cross_align: CrossAlign::Start,
             areas: Vec::new(),
         }
     }
@@ -126,6 +140,11 @@ impl Flow {
     /// 开关 Fit 子项的交叉轴拉伸。
     pub fn set_cross_stretch(&mut self, cross_stretch: bool) {
         self.cross_stretch = cross_stretch;
+    }
+
+    /// 设置交叉轴对齐方式。
+    pub fn set_cross_align(&mut self, align: CrossAlign) {
+        self.cross_align = align;
     }
 
     pub fn push(&mut self, child: Node, weight: u32) {
@@ -204,7 +223,19 @@ impl Flow {
                 child.layout(axis.fill_constraints(main_size, cross_max), texts)
             };
             used_main = used_main.max(offset + axis.main(child_size));
-            self.areas.push(axis.make_rect(offset, child_size));
+            // 计算交叉轴偏移：根据 cross_align 对齐。
+            let cross_offset = match self.cross_align {
+                CrossAlign::Start => 0.0,
+                CrossAlign::Center => (cross_max - axis.cross(child_size)) / 2.0,
+                CrossAlign::End => cross_max - axis.cross(child_size),
+            };
+            let mut rect = axis.make_rect(offset, child_size);
+            // 应用交叉轴偏移。
+            match axis {
+                Axis::Horizontal => rect.origin.y = cross_offset,
+                Axis::Vertical => rect.origin.x = cross_offset,
+            }
+            self.areas.push(rect);
         }
 
         // 有 Fill 子项时容器占满主轴;否则按内容自然尺寸
@@ -445,5 +476,47 @@ mod tests {
             size.height <= 30.0,
             "Row 高度应接近 Fit 子项，而非父约束的 800;实际 {size:?}"
         );
+    }
+
+    #[test]
+    fn row_cross_center_aligns_children_vertically() {
+        let mut texts = TextBatch::new();
+        let mut flow = Flow::new(0.0);
+        flow.set_cross_align(CrossAlign::Center);
+        // 矮子项 20px, 高子项 40px
+        flow.push(node(UiBox::new(Color::BLACK).size(50.0, 20.0)), 0);
+        flow.push(node(UiBox::new(Color::BLACK).size(80.0, 40.0)), 0);
+        let size = flow.layout(
+            Axis::Horizontal,
+            Constraints::loose(Size::new(300.0, 100.0)),
+            &mut texts,
+        );
+        // 容器高度取最高子项 40px
+        assert_eq!(size.height, 40.0);
+        // 矮子项应垂直居中: (40-20)/2 = 10
+        assert_eq!(flow.areas[0].origin.y, 10.0, "矮子项应垂直居中");
+        // 高子项顶部对齐自身
+        assert_eq!(flow.areas[1].origin.y, 0.0, "高子项应在顶部");
+    }
+
+    #[test]
+    fn column_cross_center_aligns_children_horizontally() {
+        let mut texts = TextBatch::new();
+        let mut flow = Flow::new(0.0);
+        flow.set_cross_align(CrossAlign::Center);
+        // 窄子项 50px, 宽子项 80px
+        flow.push(node(UiBox::new(Color::BLACK).size(50.0, 30.0)), 0);
+        flow.push(node(UiBox::new(Color::BLACK).size(80.0, 20.0)), 0);
+        let size = flow.layout(
+            Axis::Vertical,
+            Constraints::loose(Size::new(200.0, 400.0)),
+            &mut texts,
+        );
+        // 容器宽度取最宽子项 80px
+        assert_eq!(size.width, 80.0);
+        // 窄子项应水平居中: (80-50)/2 = 15
+        assert_eq!(flow.areas[0].origin.x, 15.0, "窄子项应水平居中");
+        // 宽子项左侧对齐自身
+        assert_eq!(flow.areas[1].origin.x, 0.0, "宽子项应在左侧");
     }
 }
