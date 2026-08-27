@@ -40,6 +40,8 @@ pub struct Button {
     child_size: Size,
     /// layout 缓存：自身绝对矩形 (用于焦点命中与 IME 区域)。
     area: Rect,
+    /// 标准控件高度 (来自 Theme token)。
+    control_height: f32,
 }
 
 impl Button {
@@ -67,6 +69,7 @@ impl Button {
             id: None,
             child_size: Size::ZERO,
             area: Rect::default(),
+            control_height: theme.control_height(),
         }
     }
 
@@ -192,9 +195,11 @@ impl Widget for Button {
 
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
         self.child_size = self.child.layout(constraints.deflate(self.padding), texts);
+        let natural_height = self.child_size.height + self.padding.vertical();
+        let height = natural_height.max(self.control_height);
         let size = constraints.constrain(Size::new(
             self.child_size.width + self.padding.horizontal(),
-            self.child_size.height + self.padding.vertical(),
+            height,
         ));
         self.area = Rect::new(Point::ZERO, size);
         size
@@ -346,6 +351,11 @@ impl Button {
     pub(crate) fn padding_value(&self) -> Edges {
         self.padding
     }
+
+    /// 当前标准控件高度 (测试用)。
+    pub(crate) fn control_height_value(&self) -> f32 {
+        self.control_height
+    }
 }
 
 #[cfg(test)]
@@ -362,6 +372,20 @@ mod tests {
         assert_eq!(
             button.padding_value(),
             Edges::symmetric(LightTheme.spacing_lg(), LightTheme.spacing_md())
+        );
+        assert_eq!(button.control_height_value(), LightTheme.control_height());
+    }
+
+    #[test]
+    fn button_layout_height_is_at_least_control_height() {
+        let mut button = Button::new(Text::new("OK"));
+        let mut texts = TextBatch::new();
+        let size = button.layout(Constraints::loose(Size::new(200.0, 100.0)), &mut texts);
+        assert!(
+            size.height >= LightTheme.control_height(),
+            "按钮高度应 >= control_height {}, 实际 {}",
+            LightTheme.control_height(),
+            size.height
         );
     }
 

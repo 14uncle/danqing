@@ -5,7 +5,7 @@
 
 ## Phase 1: Token 定义
 
-- [ ] T1: Theme trait 新增 control_height
+- [x] T1: Theme trait 新增 control_height
   - Acceptance: `Theme` trait 有 `fn control_height(&self) -> f32 { 32.0 }`；`LightTheme` 显式实现返回 32.0
   - Verify: `cargo test theme::tests` 通过，新增测试断言 `control_height() == 32.0`
   - Files: `src/theme.rs`
@@ -13,7 +13,7 @@
 
 ## Phase 2: 组件改造
 
-- [ ] T2: TextInput 使用 control_height
+- [x] T2: TextInput 使用 control_height
   - Acceptance: `TextInput` 新增 `control_height` 字段；`layout()` 中 `natural_height.max(control_height)`；空内容 layout 输出高度 == 32.0
   - Verify: `cargo test widget::form::text_input` 通过
   - Files: `src/widget/form/text_input.rs`
