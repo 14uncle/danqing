@@ -20,6 +20,8 @@ use crate::{Color, Constraints, Edges, LightTheme, Point, Rect, Size, Theme};
 type MsgFactory = Box<dyn Fn() -> Box<dyn Any>>;
 /// 颜色绑定闭包: 从类型擦除的应用状态产出颜色。
 type ColorBinding = Box<dyn Fn(&dyn Any) -> Color>;
+/// 文本绑定闭包: 从类型擦除的应用状态产出文本。
+type TextBinding = Box<dyn Fn(&dyn Any) -> String>;
 
 /// 图标按钮区域宽度 (逻辑像素)。
 const ICON_AREA_WIDTH: f32 = 32.0;
@@ -61,6 +63,8 @@ pub struct IconInput {
     icon_hover_binding: Option<ColorBinding>,
     /// 最近一帧同步的图标悬停背景色。
     icon_hover_bg: Color,
+    /// 文本绑定: 从应用状态读取文本, 与内部 TextInput 同步。
+    text_binding: Option<TextBinding>,
     /// 显式宽度 (未指定则按约束上限)。
     width: Option<f32>,
     /// layout 缓存: 自身绝对矩形。
@@ -92,6 +96,7 @@ impl IconInput {
             icon_color: Color::rgb(0.5, 0.5, 0.5),
             icon_hover_binding: None,
             icon_hover_bg: Color::TRANSPARENT,
+            text_binding: None,
             width: None,
             area: Cell::new(Rect::default()),
             icon_area: Cell::new(Rect::default()),
@@ -183,6 +188,24 @@ impl IconInput {
         self.input.clear();
     }
 
+    /// 设置文本内容。
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.input.set_text(text);
+    }
+
+    /// 绑定文本: 每帧从应用状态读取文本, 与内部 TextInput 同步。
+    ///
+    /// 用于外部设置文本 (如文件对话框选中路径后回写)。
+    /// 仅在应用状态文本与内部文本不同时更新, 避免覆盖用户输入。
+    pub fn bind_text<S: 'static>(mut self, f: impl Fn(&S) -> String + 'static) -> Self {
+        self.text_binding = Some(Box::new(move |state: &dyn Any| {
+            f(state
+                .downcast_ref::<S>()
+                .expect("IconInput 文本绑定的状态类型不匹配"))
+        }));
+        self
+    }
+
     /// 当前文本值。
     pub fn value(&self) -> &str {
         self.input.value()
@@ -222,6 +245,13 @@ impl Widget for IconInput {
         }
         if let Some(bind) = &self.icon_hover_binding {
             self.icon_hover_bg = bind(state);
+        }
+        // 文本绑定: 应用状态文本与内部 TextInput 同步
+        if let Some(bind) = &self.text_binding {
+            let external = bind(state);
+            if self.input.value() != external {
+                self.input.set_text(external);
+            }
         }
     }
 

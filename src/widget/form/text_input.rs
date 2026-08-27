@@ -219,6 +219,15 @@ impl TextInput {
         self.preedit = None;
     }
 
+    /// 设置文本内容 (可撤销)。
+    ///
+    /// 替换全部文本并把光标移到末尾。不产生 `on_change` 消息:
+    /// 应用状态侧须自行同步 (下帧 bind 也会纠回)。
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.editor.set_text(text);
+        self.preedit = None;
+    }
+
     /// 替换占位文字, 保留焦点与输入状态。
     pub fn set_placeholder(&mut self, text: impl Into<String>) {
         self.placeholder = Some(text.into());
