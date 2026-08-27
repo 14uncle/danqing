@@ -707,6 +707,11 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             window.set_maximized(true);
         }
         log::info!("窗口已显示");
+        // 初始可见性同步: visibility_changed 的契约是「可见性变化后必回调」,
+        // 启动首次显示也是一次变化 —— 漏掉则应用层的可见性镜像 (热键/Esc 的
+        // toggle 方向判断) 与真相相反 (2026-08-27 剪贴板首轮启动 Esc 与
+        // 点走双双失效的根因: 首轮 ToggleVisible 误判方向走了显示路径)。
+        self.app.visibility_changed(self.is_visible);
         // 机器可读启动基准 (ASCII, 供 tools/benchmark.ps1 解析)。
         log::info!("perf startup_to_visible {:?}", self.boot.elapsed());
         // 持续渲染模式: render_frame 末尾已请求首帧, 之后每帧结束再请求下一帧。

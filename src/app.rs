@@ -63,7 +63,8 @@ pub trait App: Any {
     fn tick(&mut self, _ctx: &AnimationCtx) {}
 
     /// 窗口可见性变化回调: 由框架在 show/hide 后调用。
-    /// 应用层据此同步自身状态 (如热键 toggle 方向判断)。
+    /// 启动首次显示后也会回调一次 (初始状态同步) —— 应用层的可见性镜像
+    /// (如热键 toggle 方向判断) 以此为准, 无需自行假设初始值。
     fn visibility_changed(&mut self, _visible: bool) {}
 
     /// 每帧背景状态：场景选择 / 淡化进度 / 清屏色。
