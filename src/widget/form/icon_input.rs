@@ -392,12 +392,8 @@ impl Widget for IconInput {
                 self.input.event(event, input_rect, msgs);
                 EventResult::Ignored
             }
-            Event::FocusIn => {
-                self.input.event(event, area, msgs)
-            }
-            Event::FocusOut => {
-                self.input.event(event, area, msgs)
-            }
+            Event::FocusIn => self.input.event(event, area, msgs),
+            Event::FocusOut => self.input.event(event, area, msgs),
             _ => self.input.event(event, area, msgs),
         }
     }
@@ -453,10 +449,26 @@ mod tests {
     }
 
     #[test]
+    fn layout_height_is_at_least_control_height() {
+        let mut icon_input = IconInput::new().width(200.0);
+        let mut texts = TextBatch::new();
+        let size = icon_input.layout(Constraints::loose(Size::new(400.0, 400.0)), &mut texts);
+        assert!(
+            size.height >= LightTheme.control_height(),
+            "IconInput 高度应 >= control_height {}, 实际 {}",
+            LightTheme.control_height(),
+            size.height
+        );
+    }
+
+    #[test]
     fn icon_click_emits_message() {
         let mut icon_input = IconInput::new().width(200.0).on_icon_click(|| 42u8);
         let mut msgs = MsgQueue::new();
-        icon_input.layout(Constraints::loose(Size::new(400.0, 400.0)), &mut TextBatch::new());
+        icon_input.layout(
+            Constraints::loose(Size::new(400.0, 400.0)),
+            &mut TextBatch::new(),
+        );
         let area = icon_input_area();
         // 点击图标区域 (右侧 32px)
         let icon_point = Point::new(184.0, 16.0);
@@ -488,7 +500,10 @@ mod tests {
             .width(200.0)
             .on_change(|t: &str| t.to_string());
         let mut msgs = MsgQueue::new();
-        icon_input.layout(Constraints::loose(Size::new(400.0, 400.0)), &mut TextBatch::new());
+        icon_input.layout(
+            Constraints::loose(Size::new(400.0, 400.0)),
+            &mut TextBatch::new(),
+        );
         let area = icon_input_area();
         // 点击输入框区域
         let input_point = Point::new(50.0, 16.0);

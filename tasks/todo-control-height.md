@@ -19,7 +19,7 @@
   - Files: `src/widget/form/text_input.rs`
   - 检查点: **CP2**
 
-- [ ] T3: Button 使用 control_height
+- [x] T3: Button 使用 control_height
   - Acceptance: `Button` 新增 `control_height` 字段；`layout()` 中 `natural_height.max(control_height)`；空标签 layout 输出高度 == 32.0
   - Verify: `cargo test widget::base::button` 通过
   - Files: `src/widget/base/button.rs`
