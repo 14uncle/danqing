@@ -342,7 +342,12 @@ impl Widget for IconInput {
         Self::paint_magnifier(icon_rect, rects, color);
 
         // 内部文本输入 (chromeless, 只画文本/光标/选区)
+        // 裁剪到输入区域, 防止长文本溢出到图标区域
+        rects.push_clip(input_rect);
+        texts.push_clip(input_rect);
         self.input.paint(input_rect, rects, texts);
+        texts.pop_clip();
+        rects.pop_clip();
     }
 
     fn event(&mut self, event: &Event, _area: Rect, msgs: &mut MsgQueue) -> EventResult {
