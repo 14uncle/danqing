@@ -6,9 +6,11 @@
 //! `text_editor` 为内部编辑状态机, 经 [`TextInput`] / [`TextArea`] 复用,
 //! 不进入公开 API。
 
+mod icon_input;
 mod text_area;
 mod text_editor;
 mod text_input;
 
+pub use icon_input::IconInput;
 pub use text_area::TextArea;
 pub use text_input::TextInput;
