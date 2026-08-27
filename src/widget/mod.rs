@@ -23,7 +23,7 @@ pub use focus::FocusManager;
 pub use form::{IconInput, Switch, TextArea, TextInput};
 pub use layout::{Box, Center, Column, CrossAlign, Padding, Row, Stack};
 pub use title_bar::{LogoKind, TitleBar, TitleBarStyle};
-pub use view::{ScrollAxis, Scrollable, Switcher, Tabs};
+pub use view::{MultiPanel, ScrollAxis, Scrollable, Tabs};
 
 use std::any::Any;
 
@@ -134,7 +134,7 @@ pub trait Widget {
     /// 重置焦点视觉状态 (焦点环 / 按压态 / 光标), 不派发事件。
     ///
     /// 供容器在隐藏子面板时清除旧面板内残留的焦点高亮：面板切换后，
-    /// FocusOut 经 Switcher 的可见切片无法送达隐藏面板内的旧焦点组件，
+    /// FocusOut 经 MultiPanel 的可见切片无法送达隐藏面板内的旧焦点组件，
     /// 若不主动清除，重开面板会残留上一个会话的焦点环。
     /// 默认递归所有子组件; 可聚焦叶子组件覆盖本方法清除自身状态。
     fn reset_focus(&mut self) {

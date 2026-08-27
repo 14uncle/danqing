@@ -5,7 +5,7 @@
 //!
 //! 本示例是唯一且持续生长的演示程序：框架每落地一项能力，
 //! 就在这里展示一项 (以用代测)。左侧按 widget/ 目录分类导航
-//! (基础 / 布局 / 表单 / 视图), 右侧经 Switcher 切换分类面板;
+//! (基础 / 布局 / 表单 / 视图), 右侧经 MultiPanel 切换分类面板;
 //! 所有面板常驻实例化，切换不重建组件树。
 
 #![cfg_attr(
@@ -14,8 +14,8 @@
 )]
 
 use danqing::widget::{
-    self, Box as UiBox, Button, CloseButton, Column, EventResult, IconInput, MsgQueue, Node,
-    Padding, Row, Scrollable, Switcher, Tabs, Text, TextArea, TextInput, TitleBar, Widget,
+    self, Box as UiBox, Button, CloseButton, Column, EventResult, IconInput, MsgQueue, MultiPanel,
+    Node, Padding, Row, Scrollable, Switch, Tabs, Text, TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
     App, BackgroundConfig, Color, Event, Key, LightTheme, NamedKey, Point, Rect, ScaleMode, Size,
@@ -45,7 +45,7 @@ struct Showcase {
     input_value: String,
     icon_input_value: String,
     textarea_value: String,
-    /// 当前选中的分类索引 (驱动 Switcher)。
+    /// 当前选中的分类索引 (驱动 MultiPanel)。
     selected: usize,
     /// 窗口是否已最大化 (决定标题栏按钮图标 □/□□)。
     is_maximized: bool,
@@ -53,6 +53,8 @@ struct Showcase {
     image_data: Option<(Vec<u8>, u32, u32)>,
     /// Tabs 演示：当前选中的 tab 索引。
     selected_tab: usize,
+    /// Switch 演示：是否启用通知。
+    switch_enabled: bool,
 }
 
 /// 应用消息。
@@ -79,6 +81,8 @@ enum Msg {
     TabChanged(usize),
     /// 打开本地图片。
     OpenImage,
+    /// Switch 演示：切换开关状态。
+    SwitchToggle,
 }
 
 impl App for Showcase {
@@ -119,6 +123,7 @@ impl App for Showcase {
                     }
                 }
             }
+            Msg::SwitchToggle => self.switch_enabled = !self.switch_enabled,
         }
     }
 
@@ -369,6 +374,39 @@ fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
                     .font_size(t.font_size_body())
                     .color(t.text_primary()),
                 )),
+        )
+}
+
+/// 滑动开关区：Switch 组件演示。
+fn switch_card(t: &LightTheme) -> impl Widget + 'static {
+    Row::new()
+        .gap(t.spacing_lg())
+        .cross_center()
+        .child(
+            Row::new()
+                .gap(2.0)
+                .cross_center()
+                .child(
+                    Text::new("通知：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Switch::new()
+                        .bind(|s: &Showcase| s.switch_enabled)
+                        .on_toggle(|| Msg::SwitchToggle),
+                ),
+        )
+        .child(
+            Text::bind(|s: &Showcase| {
+                if s.switch_enabled {
+                    "已开启".to_string()
+                } else {
+                    "已关闭".to_string()
+                }
+            })
+            .font_size(t.font_size_body())
+            .color(t.text_primary()),
         )
 }
 
@@ -646,7 +684,8 @@ fn page_form(t: &LightTheme) -> impl Widget + 'static {
             .cross_stretch()
             .child(card(t, "单行输入", input_row(t)))
             .child(card(t, "图标输入", icon_input_row(t)))
-            .child(card(t, "多行输入", textarea_card(t))),
+            .child(card(t, "多行输入", textarea_card(t)))
+            .child(card(t, "滑动开关", switch_card(t))),
     )
 }
 
@@ -881,9 +920,9 @@ fn build_tree() -> Node {
             .fill(
                 Row::new()
                     .child(Padding::all(t.spacing_lg(), sidebar(&t)))
-                    // 分类面板：四个页面常驻实例化，Switcher 只切换可见性。
+                    // 分类面板：四个页面常驻实例化，MultiPanel 只切换可见性。
                     .fill(
-                        Switcher::new()
+                        MultiPanel::new()
                             .child(page_base(&t))
                             .child(page_layout(&t))
                             .child(page_form(&t))
@@ -911,6 +950,7 @@ fn main() -> anyhow::Result<()> {
         is_maximized: false,
         image_data: None,
         selected_tab: 0,
+        switch_enabled: false,
     };
 
     let t = theme();

@@ -20,4 +20,4 @@ metadata:
 
 **Reference:**
 - Tabs demo: `examples/showcase.rs` 的 `tabs_card` 函数
-- showcase 结构: 左侧导航 + 右侧 Switcher 切换分类面板
+- showcase 结构: 左侧导航 + 右侧 MultiPanel 切换分类面板

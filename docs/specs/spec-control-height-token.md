@@ -80,7 +80,7 @@ let height = natural_height.max(self.control_height);
 ## Boundaries
 
 - **Always:** `cargo fmt` + `cargo clippy -- -D warnings` + `cargo test --lib --tests` 全绿
-- **Ask first:** 改变默认值（36px）；扩展到其他组件（Switcher、Tabs 等）
+- **Ask first:** 改变默认值（36px）；扩展到其他组件（MultiPanel、Tabs 等）
 - **Never:** 不动 TextArea（多行组件）；不改现有 padding 语义
 
 ## Success Criteria

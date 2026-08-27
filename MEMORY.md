@@ -49,3 +49,4 @@
 - [丹青项目状态](danqing-project-state.md) — M1~M3 + 阶段 1/2 + 打磨三件套 + 五场景动效 全检关闭;2026-08-01 战略升级著作型旗舰, 里程碑 0 完成 + 里程碑 1 Task E 年度报告完成(07657e6)+ Box 布局 bug 修复(548322c), 剪贴板顺延
 - [丹青战略定位](danqing-strategic-positioning-efficiency-tools.md) — 专注陪伴工具+效率工具两族、潮汐式场景沉浸美学、首个 POC 番茄钟已关闭
 - [丹青旗舰十年战略](danqing-flagship-strategy.md) — 2026-08-01 确认著作型旗舰(专注陪伴系统×十年建造史);2026-08-10 pomodoro 全部免费发布(练手),付费部分废弃;变现留给下一个产品
+- [第三件产品方向: 桌景](third-product-desk-scene.md) — 2026-08-27 推演确认: 桌面常驻沉浸陪伴小世界,岗位=变现,本体低价+场景DLC+Steam;工具付费≠世界付费;未启动,intent 在 docs/intent/third-product-desk-scene.md

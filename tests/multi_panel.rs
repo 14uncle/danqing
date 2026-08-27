@@ -1,13 +1,13 @@
 //! @author 十四叔
 //! @date 2026/07/21
 
-//! Switcher 集成测试: 焦点链、事件路径与点击命中的可见性语义。
+//! MultiPanel 集成测试: 焦点链、事件路径与点击命中的可见性语义。
 //!
 //! 不依赖 winit/wgpu,直接操作组件树与 FocusManager。
 
 use danqing::event::Event;
 use danqing::widget::{
-    Box as UiBox, Button, Column, FocusManager, Switcher, Text, TextInput, event_at_path, node,
+    Box as UiBox, Button, Column, FocusManager, MultiPanel, Text, TextInput, event_at_path, node,
 };
 use danqing::{Color, Constraints, Point, Rect, Size};
 
@@ -15,7 +15,7 @@ use danqing::{Color, Constraints, Point, Rect, Size};
 fn build_tree(active: usize) -> danqing::widget::Node {
     node(
         Column::new().child(
-            Switcher::new()
+            MultiPanel::new()
                 .child(Button::new(Text::new("A")).on_click(|| "clicked-a"))
                 .child(
                     TextInput::new()
@@ -35,7 +35,7 @@ fn focus_chain_contains_only_active_panel() {
 
     let mut focus = FocusManager::new();
     focus.rebuild(&tree);
-    // 面板 0 激活: 焦点链只有按钮, 路径经 Switcher 可见切片 (索引恒 0)。
+    // 面板 0 激活: 焦点链只有按钮, 路径经 MultiPanel 可见切片 (索引恒 0)。
     assert_eq!(focus.current(), Some(&vec![0, 0]));
     focus.next();
     // 只有一个可聚焦组件, Tab 循环回自身, 不进入隐藏面板的 TextInput。
@@ -56,7 +56,7 @@ fn switching_panels_swaps_focus_chain() {
     assert_eq!(focus.current(), Some(&vec![0, 0]));
 }
 
-/// 分类切换状态: 驱动 Switcher::bind。
+/// 分类切换状态: 驱动 MultiPanel::bind。
 struct Nav {
     active: usize,
 }
@@ -67,7 +67,7 @@ fn focus_in_hidden_panel_is_cleared_after_switch() {
     // (新面板同路径不可聚焦时); 切回不自动恢复。
     let mut tree = node(
         Column::new().child(
-            Switcher::new()
+            MultiPanel::new()
                 .child(
                     TextInput::new()
                         .text("a")
@@ -110,12 +110,12 @@ fn ring_count(
 
 #[test]
 fn switching_panel_clears_previous_focus_ring() {
-    // 回归: 面板切换后旧面板按钮的焦点环必须清除。FocusOut 经 Switcher 的
-    // 可见切片无法送达隐藏面板, 故 active 变化时 Switcher 主动 reset_focus;
+    // 回归: 面板切换后旧面板按钮的焦点环必须清除。FocusOut 经 MultiPanel 的
+    // 可见切片无法送达隐藏面板, 故 active 变化时 MultiPanel 主动 reset_focus;
     // 否则重开面板会残留上一会话的焦点环 (渲染矩形数不回归基线)。
     let mut tree = node(
         Column::new().child(
-            Switcher::new()
+            MultiPanel::new()
                 .child(Button::new(Text::new("A")).on_click(|| "a"))
                 .child(Button::new(Text::new("B")).on_click(|| "b"))
                 .bind(|s: &Nav| s.active),
@@ -150,7 +150,7 @@ fn event_at_path_reaches_active_child_through_visible_slice() {
     let mut texts = danqing::TextBatch::new();
     tree.layout(Constraints::loose(Size::new(500.0, 500.0)), &mut texts);
 
-    // Switcher 层路径索引恒为 0 (可见切片), 事件到达 active 面板的按钮。
+    // MultiPanel 层路径索引恒为 0 (可见切片), 事件到达 active 面板的按钮。
     let mut msgs = Vec::new();
     let result = event_at_path(
         &mut tree,

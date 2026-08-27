@@ -1,7 +1,7 @@
 //! @author 十四叔
 //! @date 2026/07/21
 
-//! Switcher 组件：多面板切换容器。
+//! MultiPanel 组件：多面板切换容器。
 
 use std::any::Any;
 
@@ -16,10 +16,10 @@ type ActiveBinding = Box<dyn Fn(&dyn Any) -> usize>;
 
 /// 切换容器：保留全部子组件实例，只让 active 子组件参与布局 / 绘制 / 事件。
 ///
-/// 与"销毁 - 重建"的切换不同，Switcher 始终持有所有子组件：
+/// 与"销毁 - 重建"的切换不同，MultiPanel 始终持有所有子组件：
 /// `sync` / `animate` 传播给全部子组件 (状态保鲜、动画存活),
 /// `layout` / `paint` / `event` 只作用于 active 子组件，
-/// [`Switcher::children`] 只暴露 active 子组件。
+/// [`MultiPanel::children`] 只暴露 active 子组件。
 ///
 /// 焦点语义：隐藏面板内的组件不进焦点链; 若焦点恰在隐藏面板内，
 /// 下一帧焦点重建会将其清除，切回后不自动恢复。活跃面板切换时
@@ -29,7 +29,7 @@ type ActiveBinding = Box<dyn Fn(&dyn Any) -> usize>;
 /// (不派发 FocusIn), 应用若介意可在切换消息里一并处理。
 ///
 /// `active` 越界时钳制到末尾索引，不 panic。
-pub struct Switcher {
+pub struct MultiPanel {
     children: Vec<Node>,
     active: usize,
     binding: Option<ActiveBinding>,
@@ -37,7 +37,7 @@ pub struct Switcher {
     active_size: Size,
 }
 
-impl Switcher {
+impl MultiPanel {
     /// 创建空切换容器。
     pub fn new() -> Self {
         Self {
@@ -67,7 +67,7 @@ impl Switcher {
         self.binding = Some(Box::new(move |state: &dyn Any| {
             let state = state
                 .downcast_ref::<S>()
-                .expect("Switcher 绑定的状态类型不匹配");
+                .expect("MultiPanel 绑定的状态类型不匹配");
             f(state)
         }));
         self
@@ -90,13 +90,13 @@ impl Switcher {
     }
 }
 
-impl Default for Switcher {
+impl Default for MultiPanel {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Widget for Switcher {
+impl Widget for MultiPanel {
     fn sync(&mut self, state: &dyn Any) {
         let prev_active = self.active;
         for child in &mut self.children {
@@ -218,67 +218,67 @@ mod tests {
     }
 
     #[test]
-    fn empty_switcher_lays_out_to_zero_and_has_no_children() {
-        let mut switcher = Switcher::new();
+    fn empty_multi_panel_lays_out_to_zero_and_has_no_children() {
+        let mut panel = MultiPanel::new();
         let mut texts = TextBatch::default();
-        let size = switcher.layout(loose(), &mut texts);
+        let size = panel.layout(loose(), &mut texts);
         assert_eq!(size, Size::ZERO);
-        assert!(switcher.children().is_empty());
-        assert!(switcher.children_mut().is_empty());
+        assert!(panel.children().is_empty());
+        assert!(panel.children_mut().is_empty());
     }
 
     #[test]
     fn out_of_range_active_clamps_to_last() {
         let log = Rc::new(RefCell::new(Vec::new()));
-        let mut switcher = Switcher::new()
+        let mut panel = MultiPanel::new()
             .child(Stub::new("a", 10.0, 10.0, &log))
             .child(Stub::new("b", 20.0, 20.0, &log))
             .active(9);
         let mut texts = TextBatch::default();
-        let size = switcher.layout(loose(), &mut texts);
+        let size = panel.layout(loose(), &mut texts);
         assert_eq!(size, Size::new(20.0, 20.0));
-        assert_eq!(switcher.children().len(), 1);
+        assert_eq!(panel.children().len(), 1);
     }
 
     #[test]
     fn layout_size_matches_active_child() {
         let log = Rc::new(RefCell::new(Vec::new()));
-        let mut switcher = Switcher::new()
+        let mut panel = MultiPanel::new()
             .child(Stub::new("a", 10.0, 10.0, &log))
             .child(Stub::new("b", 20.0, 15.0, &log));
         let mut texts = TextBatch::default();
-        assert_eq!(switcher.layout(loose(), &mut texts), Size::new(10.0, 10.0));
+        assert_eq!(panel.layout(loose(), &mut texts), Size::new(10.0, 10.0));
 
-        switcher = switcher.active(1);
-        assert_eq!(switcher.layout(loose(), &mut texts), Size::new(20.0, 15.0));
+        panel = panel.active(1);
+        assert_eq!(panel.layout(loose(), &mut texts), Size::new(20.0, 15.0));
     }
 
     #[test]
     fn paint_collects_only_active_child() {
         let log = Rc::new(RefCell::new(Vec::new()));
-        let mut switcher = Switcher::new()
+        let mut panel = MultiPanel::new()
             .child(Stub::new("hidden", 10.0, 10.0, &log))
             .child(Stub::new("shown", 10.0, 10.0, &log))
             .active(1);
         let mut texts = TextBatch::default();
-        let size = switcher.layout(loose(), &mut texts);
+        let size = panel.layout(loose(), &mut texts);
         let mut rects = RectBatch::default();
-        switcher.paint(Rect::new(Point::ZERO, size), &mut rects, &mut texts);
+        panel.paint(Rect::new(Point::ZERO, size), &mut rects, &mut texts);
         assert_eq!(log.take(), vec!["shown"]);
     }
 
     #[test]
     fn event_reaches_only_active_child() {
         let log = Rc::new(RefCell::new(Vec::new()));
-        let mut switcher = Switcher::new()
+        let mut panel = MultiPanel::new()
             .child(Stub::new("hidden", 10.0, 10.0, &log))
             .child(Stub::new("shown", 10.0, 10.0, &log))
             .active(1);
         let mut texts = TextBatch::default();
-        let size = switcher.layout(loose(), &mut texts);
+        let size = panel.layout(loose(), &mut texts);
         let mut msgs = MsgQueue::new();
         let event = Event::CursorMoved(Point::ZERO);
-        let result = switcher.event(&event, Rect::new(Point::ZERO, size), &mut msgs);
+        let result = panel.event(&event, Rect::new(Point::ZERO, size), &mut msgs);
         assert_eq!(result, EventResult::Consumed);
         assert_eq!(msgs.len(), 1);
         assert!(
@@ -294,22 +294,22 @@ mod tests {
             active: usize,
         }
         let log = Rc::new(RefCell::new(Vec::new()));
-        let mut switcher = Switcher::new()
+        let mut panel = MultiPanel::new()
             .child(Stub::new("a", 10.0, 10.0, &log))
             .child(Stub::new("b", 10.0, 10.0, &log))
             .bind(|s: &State| s.active);
 
-        switcher.sync(&State { active: 1 });
+        panel.sync(&State { active: 1 });
         // sync 传播给全部子组件。
         assert_eq!(log.take(), vec!["a", "b"]);
 
         // binding 驱动 active 切换，children() 只暴露 active。
         let mut texts = TextBatch::default();
-        switcher.layout(loose(), &mut texts);
-        assert_eq!(switcher.children().len(), 1);
+        panel.layout(loose(), &mut texts);
+        assert_eq!(panel.children().len(), 1);
 
         // binding 越界同样钳制。
-        switcher.sync(&State { active: 42 });
-        assert_eq!(switcher.children().len(), 1);
+        panel.sync(&State { active: 42 });
+        assert_eq!(panel.children().len(), 1);
     }
 }

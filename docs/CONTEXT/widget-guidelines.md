@@ -10,7 +10,7 @@
 |------|------|------|------|
 | **Base (叶子)** | `widget/base/` | 无子组件或单子组件；直接产出绘制命令 | `Text`, `Button`, `Image` |
 | **Layout (容器)** | `widget/layout/` | 管理子组件排列；委托 `Flow` 或自行计算 | `Row`, `Column`, `Box`, `Stack`, `Padding`, `Center` |
-| **View (视图)** | `widget/view/` | 滚动、切换等视口行为 | `Scrollable`, `Switcher` |
+| **View (视图)** | `widget/view/` | 滚动、切换等视口行为 | `Scrollable`, `MultiPanel` |
 | **Form (表单)** | `widget/form/` | 文本输入/编辑 | `TextInput`, `TextArea` |
 
 新增组件时，先判断属于哪一类，放入对应子目录。
@@ -307,7 +307,7 @@ fn ime_area(&self) -> Option<Rect> { Some(self.area) }
 - `focusable()` — 叶子组件返回 `true`；容器返回 `false`（默认值）
 - `focus_id()` — 按名聚焦标识，用于面板关闭后焦点恢复
 - `hit_area()` — 点击聚焦的命中区域；返回 `Some(self.area)` 表示整个组件可点击聚焦
-- `reset_focus()` — 清除焦点视觉状态，被 `Switcher` 等容器在面板隐藏时调用
+- `reset_focus()` — 清除焦点视觉状态，被 `MultiPanel` 等容器在面板隐藏时调用
 
 ---
 

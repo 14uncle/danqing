@@ -27,7 +27,7 @@
 ## S2: 报告视图 + 切换(main.rs)
 
 - `report_open: bool` + `Msg::ToggleReport` + 三面板互斥(update 双向关)。
-- Switcher 加第 4 子项, bind 优先 `report_open → 3`。
+- MultiPanel 加第 4 子项, bind 优先 `report_open → 3`。
 - `report_panel(t)`: 遮罩 + 玻璃卡片(宽 ~360); 标题 +「旗舰版」角标 + CloseButton; 本年汇总行 / 场景分布行 / 近 12 月趋势行。
 - 控制条「报告」按钮; Esc 关闭。
 - 测试: toggle/互斥/escape/面板数据一致。

@@ -2,7 +2,7 @@
 
 ## Overview
 
-在 danqing 框架 `src/widget/view/tabs.rs` 新增 `Tabs` 容器组件。核心是 Switcher 的面板切换逻辑 + 自绘 tab 栏头部。完成后产品侧用 `danqing::widget::Tabs` 替换手写 TabBar。
+在 danqing 框架 `src/widget/view/tabs.rs` 新增 `Tabs` 容器组件。核心是 MultiPanel 的面板切换逻辑 + 自绘 tab 栏头部。完成后产品侧用 `danqing::widget::Tabs` 替换手写 TabBar。
 
 ## Dependency Graph
 
@@ -13,7 +13,7 @@ Tabs struct + builder API
     │       │
     │       ├── tab_bar 绘制 (paint 中自绘文字+指示线)
     │       │
-    │       └── 面板切换 (复用 Switcher 的 sync/显隐逻辑)
+    │       └── 面板切换 (复用 MultiPanel 的 sync/显隐逻辑)
     │
     ├── mod.rs 注册 + re-export
     │
@@ -65,4 +65,4 @@ Tabs struct + builder API
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | Tabs 的 tab 栏高度与产品现有布局不协调 | Low | Theme token 驱动, 可微调 |
-| 面板切换焦点语义与 Switcher 不一致 | Low | 直接复用 Switcher 的 reset_focus 逻辑 |
+| 面板切换焦点语义与 MultiPanel 不一致 | Low | 直接复用 MultiPanel 的 reset_focus 逻辑 |

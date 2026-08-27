@@ -6,8 +6,8 @@
 
 ## 设计决策
 
-- **自包含**：tab 栏渲染 + 面板切换在一个组件内完成，不需要产品侧手动组合 Row + Switcher
-- **面板切换逻辑复用 Switcher 的 sync/显示机制**：sync 传播给全部子面板（状态保鲜），只有 active 面板参与 layout/paint/event
+- **自包含**：tab 栏渲染 + 面板切换在一个组件内完成，不需要产品侧手动组合 Row + MultiPanel
+- **面板切换逻辑复用 MultiPanel 的 sync/显示机制**：sync 传播给全部子面板（状态保鲜），只有 active 面板参与 layout/paint/event
 - **Tab 栏为自绘叶子**：不用 Button 子组件拼接，直接在 paint 中绘制文字 + 指示线，保持视觉紧凑
 - **Theme 驱动**：构造函数接受 `&impl Theme`，颜色/间距/字号走 theme token
 
@@ -60,7 +60,7 @@ Tabs::new(&theme)
 ```
 Tabs
   ├── tab_bar (自绘: 文字 + 指示线)
-  └── children[active] (面板, 复用 Switcher 的显隐逻辑)
+  └── children[active] (面板, 复用 MultiPanel 的显隐逻辑)
 ```
 
 ## 文件位置
@@ -83,7 +83,7 @@ Tabs
 ## 测试策略
 
 - 单元测试: tab/child 数量一致性检查、active 钳制、bind 驱动切换
-- 视觉测试: 与 Switcher 测试模式一致 (Stub 子组件验证 sync/layout/paint/event 传播)
+- 视觉测试: 与 MultiPanel 测试模式一致 (Stub 子组件验证 sync/layout/paint/event 传播)
 
 ## Success Criteria
 

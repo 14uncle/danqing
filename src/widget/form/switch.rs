@@ -205,12 +205,8 @@ impl Widget for Switch {
         let scale = if self.pressed { 0.85 } else { 1.0 };
         let scaled_size = KNOB_DIAMETER * scale;
         let offset = (KNOB_DIAMETER - scaled_size) / 2.0;
-        let scaled_rect = Rect::from_xywh(
-            knob_x + offset,
-            knob_y + offset,
-            scaled_size,
-            scaled_size,
-        );
+        let scaled_rect =
+            Rect::from_xywh(knob_x + offset, knob_y + offset, scaled_size, scaled_size);
 
         rects.push_rect(scaled_rect, self.knob_color, scaled_size / 2.0);
     }

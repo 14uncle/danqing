@@ -68,7 +68,7 @@ app.rs
 - `src/widget/base/` — Button、Text
 - `src/widget/layout/` — Box、Column、Row、Padding、Center、Stack(共享 `flow.rs`)
 - `src/widget/form/` — TextInput、TextArea(共享 `text_editor.rs`)
-- `src/widget/view/` — Scrollable、Switcher
+- `src/widget/view/` — Scrollable、MultiPanel
 - `src/widget/focus.rs` — FocusManager 焦点链与 Tab 遍历
 - `src/widget/title_bar.rs` — 框架层标题栏
 
@@ -91,7 +91,7 @@ app.rs
 ### 测试
 
 - 单元测试:各模块 `#[cfg(test)]` 内
-- 集成测试: `tests/event_dispatch.rs` / `focus_input.rs` / `widget_tree.rs` / `switcher.rs` / `title_bar_window.rs` / `assets.rs` / `design_system.rs` / `hover_debug.rs`
+- 集成测试: `tests/event_dispatch.rs` / `focus_input.rs` / `widget_tree.rs` / `multi_panel.rs` / `title_bar_window.rs` / `assets.rs` / `design_system.rs` / `hover_debug.rs`
 
 ### 工具
 

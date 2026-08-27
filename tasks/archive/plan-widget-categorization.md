@@ -1,4 +1,4 @@
-# Implementation Plan: widget/ 分类目录化 + Switcher 组件 + showcase 分类导航
+# Implementation Plan: widget/ 分类目录化 + MultiPanel 组件 + showcase 分类导航
 
 > 依据已确认的目录划分意图（base/layout/form/view)+ "树不重建、选中分类才显示" 的 showcase 改造需求细化而来（interview-me 产出，2026-07-21 确认）。
 > 本文档将工作拆分为 **9 个可验证任务**，按依赖顺序组织，全程保持 `danqing::widget::{...}` 平铺公开 API 零变化。
@@ -6,8 +6,8 @@
 ## Overview
 
 1. 将 `src/widget/` 下 11 个组件文件按类型迁入 `base/`、`layout/`、`form/`、`view/` 四个子目录，`focus.rs`、`title_bar.rs` 留在根部；`widget/mod.rs` 继续平铺 re-export,tests/ 与 examples/ 零改动。
-2. 新增 `src/widget/view/switcher.rs`:`Switcher` 容器保留全部子组件实例（sync/animate 全员传播），但 layout/paint/event/children 只作用 active 子组件，以"保留树 + 选择可见性"支撑分类导航。
-3. showcase 改为 `Column[TitleBar, Row[侧边栏, Switcher[4 个分类面板]]]`，侧边栏选中态用 showcase 本地视觉方案，不改框架。
+2. 新增 `src/widget/view/multi_panel.rs`:`MultiPanel` 容器保留全部子组件实例（sync/animate 全员传播），但 layout/paint/event/children 只作用 active 子组件，以"保留树 + 选择可见性"支撑分类导航。
+3. showcase 改为 `Column[TitleBar, Row[侧边栏, MultiPanel[4 个分类面板]]]`，侧边栏选中态用 showcase 本地视觉方案，不改框架。
 
 ## Architecture Decisions
 
@@ -28,7 +28,7 @@
   pub use form::{TextArea, TextInput};
   pub use layout::{Box, Center, Column, Padding, Row};
   pub use title_bar::TitleBar;
-  pub use view::{ScrollAxis, Scrollable, Switcher};
+  pub use view::{ScrollAxis, Scrollable, MultiPanel};
   ```
   子模块声明为**私有 mod + pub use 平铺**，与现状一致；`flow`、`text_editor` 保持各自子目录内的**私有 mod 声明**（不 re-export)，等效于当前可见性。
 - **4 处深层 import 改为绝对路径**（项目生产代码惯例）:
@@ -42,21 +42,21 @@
   - tests/ 7 个集成测试、examples/ 全部只走平铺路径，零改动（已逐条 grep 确认）。
   - 单元测试都在各文件内 `use super::*`，迁移后随文件移动继续有效。
 
-### Switcher 设计验证结论
+### MultiPanel 设计验证结论
 
 1. **children() 只返回 active 对焦点/事件/IME 的影响 —— 安全**:`FocusManager::rebuild` 与 `hit_focusable` 都只经 `children()` 遍历 → 隐藏面板内组件不进焦点链、不可点击聚焦。被隐藏面板中正焦点的 `TextInput`：切换后下一帧 rebuild 发现路径失效 → 焦点清除；旧路径发 `FocusOut` 时 `event_at_path` 索引越界返回 `Ignored`，该组件 `focused` 标志残留 true，但不被 paint 无视觉残留，切回不自动恢复焦点。**可接受**，用集成测试锁定并写入文档注释。
-2. **隐藏子组件的陈旧几何无读者**:`ime_area_at_path`/`selected_text_at_path`/`wants_ime_at_path` 只以 rebuild 校验过的焦点路径为参数；鼠标命中经 Switcher.event 只转发 active。
-3. **layout 语义**:active 子组件拿全约束,`Switcher 尺寸 = active 尺寸`；空 children 返回 `constraints.constrain(Size::ZERO)`。
+2. **隐藏子组件的陈旧几何无读者**:`ime_area_at_path`/`selected_text_at_path`/`wants_ime_at_path` 只以 rebuild 校验过的焦点路径为参数；鼠标命中经 MultiPanel.event 只转发 active。
+3. **layout 语义**:active 子组件拿全约束,`MultiPanel 尺寸 = active 尺寸`；空 children 返回 `constraints.constrain(Size::ZERO)`。
 4. **配套公开类型：不需要**;active 就是 `usize`，越界 **clamp** 不 panic（与 event_at_path 容错风格一致）。
 5. **切片返回技巧**:`children()` 返回 `&self.children[self.active..self.active + 1]`，空时 `&[]`。
 
-### Switcher API 形态
+### MultiPanel API 形态
 
 ```rust
-pub struct Switcher { children: Vec<Node>, active: usize, binding: Option<Box<dyn Fn(&dyn Any) -> usize>>, active_size: Size }
+pub struct MultiPanel { children: Vec<Node>, active: usize, binding: Option<Box<dyn Fn(&dyn Any) -> usize>>, active_size: Size }
 
-Switcher::new().child(node).child(node).active(1)
-Switcher::bind<S: 'static>(f: impl Fn(&S) -> usize + 'static)  // 复刻 Text::bind
+MultiPanel::new().child(node).child(node).active(1)
+MultiPanel::bind<S: 'static>(f: impl Fn(&S) -> usize + 'static)  // 复刻 Text::bind
 ```
 
 - `sync`：先对**所有**子组件递归 sync（状态保鲜），再求值 binding 并 clamp。
@@ -74,14 +74,14 @@ Task 3 layout/ ─┤
 Task 4 form/   ─┘
    └─ Checkpoint A: fmt + clippy -D warnings + 全测试绿 + showcase 冒烟
 
-Phase 2 Switcher
-Task 5 switcher.rs + 单元测试      (依赖 Task 4 的 view/ 目录)
-Task 6 tests/switcher.rs 集成测试  (依赖 Task 5)
+Phase 2 MultiPanel
+Task 5 multi_panel.rs + 单元测试      (依赖 Task 4 的 view/ 目录)
+Task 6 tests/multi_panel.rs 集成测试  (依赖 Task 5)
    └─ Checkpoint B: 全测试绿 + clippy
 
 Phase 3 showcase 改造
 Task 7 Showcase 状态/Msg + 四页归位  (依赖 Task 5)
-Task 8 侧边栏 + Switcher 接线        (依赖 Task 7)
+Task 8 侧边栏 + MultiPanel 接线        (依赖 Task 7)
 Task 9 文档同步 + 最终验收           (依赖 Task 8)
 ```
 
@@ -132,10 +132,10 @@ Task 9 文档同步 + 最终验收           (依赖 Task 8)
 - [ ] **Checkpoint A: 迁移收尾验收**
   - `cargo fmt --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test` 全绿；`cargo run --example showcase` 人工冒烟；`git log --follow` 抽查一个迁移文件确认历史保留。
 
-### Phase 2: Switcher 组件
+### Phase 2: MultiPanel 组件
 
-- [ ] **Task 5: 实现 src/widget/view/switcher.rs + 模块内单元测试**
-  - **Description:** 按"Switcher API 形态"实现；文件头 `@date 2026/07/21`；公开类型写中文文档注释，明确记录"隐藏面板内焦点在切换后被清除、切回不自动恢复"语义；`view/mod.rs` 挂 `mod switcher;` + `pub use switcher::Switcher;`;`widget/mod.rs` 的 view re-export 追加 `Switcher`。
+- [ ] **Task 5: 实现 src/widget/view/multi_panel.rs + 模块内单元测试**
+  - **Description:** 按"MultiPanel API 形态"实现；文件头 `@date 2026/07/21`；公开类型写中文文档注释，明确记录"隐藏面板内焦点在切换后被清除、切回不自动恢复"语义；`view/mod.rs` 挂 `mod multi_panel;` + `pub use multi_panel::MultiPanel;`;`widget/mod.rs` 的 view re-export 追加 `MultiPanel`。
   - **单元测试清单（模块内）:**
     - [ ] `active` 越界 clamp 到 `len-1`；空 children 时 layout 返回 ZERO 约束尺寸、children 为空。
     - [ ] layout 尺寸 == active 子组件尺寸；切换 active 后尺寸随之变化。
@@ -144,25 +144,25 @@ Task 9 文档同步 + 最终验收           (依赖 Task 8)
     - [ ] sync 传播所有子组件（两个 `Text::bind` 内容都刷新）;binding 闭包驱动 active 切换并 clamp。
     - [ ] `children()/children_mut()` 非空时长度恒为 1。
   - **Acceptance criteria:** 上述测试全绿；`cargo clippy -- -D warnings` 零警告。
-  - **Verification:** `cargo test widget::view::switcher`。
+  - **Verification:** `cargo test widget::view::multi_panel`。
   - **Dependencies:** Task 4
-  - **Files:** `src/widget/view/switcher.rs`（新）, `src/widget/view/mod.rs`, `src/widget/mod.rs`
+  - **Files:** `src/widget/view/multi_panel.rs`（新）, `src/widget/view/mod.rs`, `src/widget/mod.rs`
   - **Scope:** M
 
-- [ ] **Task 6: tests/switcher.rs 集成测试**
+- [ ] **Task 6: tests/multi_panel.rs 集成测试**
   - **Description:** 新建集成测试，只使用 `danqing::widget::{...}` 平铺路径。
   - **集成测试清单：**
     - [ ] FocusManager rebuild 后焦点链只含 active 面板内可聚焦组件；Tab 遍历不进入隐藏面板。
     - [ ] 焦点在面板 A 的 TextInput 时切换 active → rebuild 后焦点清除（锁定文档化行为）。
-    - [ ] `event_at_path` 经 Switcher 路径（索引恒 0）到达 active 子组件并产出消息。
+    - [ ] `event_at_path` 经 MultiPanel 路径（索引恒 0）到达 active 子组件并产出消息。
     - [ ] 点击隐藏面板区域不聚焦其内组件（需先 layout+paint)。
   - **Acceptance criteria:** 全部通过；文件头含 `@author 十四叔` / `@date 2026/07/21`。
-  - **Verification:** `cargo test --test switcher` + 全量 `cargo test`。
+  - **Verification:** `cargo test --test multi_panel` + 全量 `cargo test`。
   - **Dependencies:** Task 5
-  - **Files:** `tests/switcher.rs`（新）
+  - **Files:** `tests/multi_panel.rs`（新）
   - **Scope:** S
 
-- [ ] **Checkpoint B: Switcher 验收**
+- [ ] **Checkpoint B: MultiPanel 验收**
   - fmt + clippy -D warnings + 全测试绿；`cargo doc` 无 broken intra-doc link。
 
 ### Phase 3: showcase 分类导航改造
@@ -172,15 +172,15 @@ Task 9 文档同步 + 最终验收           (依赖 Task 8)
     - `page_base`:**基础 base** ← 计数器 Button + Text 绑定回显（原"交互组件"卡的 Button 部分）。
     - `page_layout`:**布局 layout** ← 品牌色与圆角卡原样（UiBox 网格 + 圆角行 = Column/Row/gap/Box 演示）。
     - `page_form`:**表单 form** ← TextInput + TextArea 两卡。
-    - `page_view`:**视图 view** ← 键盘响应卡（Positioned 自定义组件；页面说明 Switcher/Scrollable 亦属 view)。
+    - `page_view`:**视图 view** ← 键盘响应卡（Positioned 自定义组件；页面说明 MultiPanel/Scrollable 亦属 view)。
   - **Acceptance criteria:** 四个页面函数各自返回 `impl Widget + 'static`；状态经绑定闭包每帧同步，无树重建。
   - **Verification:** `cargo check --example showcase`。
   - **Dependencies:** Task 5
   - **Files:** `examples/showcase.rs`
   - **Scope:** M
 
-- [ ] **Task 8: 侧边栏 + Switcher 接线**
-  - **Description:** `build_tree` 改为 `Column[TitleBar, Row[固定宽侧边栏, fill(Switcher)]]`；四个页面各包 `Scrollable::themed`。侧边栏四项：`基础 base` / `布局 layout` / `表单 form` / `视图 view`；**选中态高亮用 showcase 本地方案**：选中项文本前缀 `"▶ "`、未选中全角空格对齐，不改框架。Switcher 接 `.bind(|s: &Showcase| s.selected)`。
+- [ ] **Task 8: 侧边栏 + MultiPanel 接线**
+  - **Description:** `build_tree` 改为 `Column[TitleBar, Row[固定宽侧边栏, fill(MultiPanel)]]`；四个页面各包 `Scrollable::themed`。侧边栏四项：`基础 base` / `布局 layout` / `表单 form` / `视图 view`；**选中态高亮用 showcase 本地方案**：选中项文本前缀 `"▶ "`、未选中全角空格对齐，不改框架。MultiPanel 接 `.bind(|s: &Showcase| s.selected)`。
   - **Acceptance criteria:**
     - [ ] 点击侧边栏切换右侧面板；所有组件始终实例化。
     - [ ] 四页面内容与原四卡片一一对应，无功能回退（计数器、输入回显、字数统计、键盘方块全部可用）。
@@ -206,7 +206,7 @@ Task 9 文档同步 + 最终验收           (依赖 Task 8)
 | 检查点 | 条件 | 验证命令 |
 |---|---|---|
 | A: 迁移收尾 | Phase 1 完成，行为不变 | fmt --check + clippy --all-targets -D warnings + cargo test + showcase 冒烟 + git log --follow 抽查 |
-| B: Switcher 验收 | Phase 2 完成 | fmt + clippy -D warnings + cargo test + cargo doc 无 broken link |
+| B: MultiPanel 验收 | Phase 2 完成 | fmt + clippy -D warnings + cargo test + cargo doc 无 broken link |
 
 ## Risks and Mitigations
 
@@ -214,7 +214,7 @@ Task 9 文档同步 + 最终验收           (依赖 Task 8)
 |---|---|---|
 | 迁移与 mod 声明不同步导致编译断裂 | 低 | 每任务单步 `cargo check` + 全量 test;Phase 1 串行 |
 | `flow`/`text_editor` 私有 mod 可见性判断失误 | 低 | 已按 Rust 逐段可见性规则论证；Task 3/4 各有编译验证兜底 |
-| Switcher children() 只返回 active 引发焦点路径语义意外 | 中 | 已通读全部 children() 消费点；Task 6 用集成测试锁定"切走清焦、切回不恢复" |
+| MultiPanel children() 只返回 active 引发焦点路径语义意外 | 中 | 已通读全部 children() 消费点；Task 6 用集成测试锁定"切走清焦、切回不恢复" |
 | 隐藏子组件陈旧几何被其它路径读取 | 低 | 已确认 at_path 系列只走 rebuild 校验过的焦点路径 |
 | 侧边栏选中态视觉过弱（仅文本前缀） | 低 | 用户明确"不改框架"；后续 Button 增选中态可平滑替换 |
 | git mv 历史丢失（Windows) | 低 | 统一 `git mv`;Checkpoint A 用 `git log --follow` 抽查 |
@@ -222,4 +222,4 @@ Task 9 文档同步 + 最终验收           (依赖 Task 8)
 
 ## Parallelization Notes
 
-Phase 1 四个迁移任务内容独立但都改 `widget/mod.rs`，串行执行避免冲突。Phase 2/3 严格依赖 Phase 1 的 view/ 目录与 Switcher 组件，全程串行。无并行车道。
+Phase 1 四个迁移任务内容独立但都改 `widget/mod.rs`，串行执行避免冲突。Phase 2/3 严格依赖 Phase 1 的 view/ 目录与 MultiPanel 组件，全程串行。无并行车道。
