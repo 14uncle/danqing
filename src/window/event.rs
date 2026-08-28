@@ -38,6 +38,8 @@ pub enum WindowAppEvent {
     /// 切换点击穿透 (桌面常驻陪伴形态): true = 鼠标事件直达下层窗口,
     /// 本窗口纯观赏; false = 恢复正常交互。只改命中测试, 不动可见性与焦点。
     SetClickThrough(bool),
+    /// 切换置顶层级: true = 恒在普通窗口之上; false = 普通层级。
+    SetTopmost(bool),
 }
 
 /// 应用持有的窗口事件发送器 (轻量 clone, 内部是 mpsc Sender)。
@@ -83,6 +85,11 @@ impl WindowEventSender {
     /// 底层实现幂等: 重复发送同值无副作用。
     pub fn set_click_through(&self, enabled: bool) {
         let _ = self.sender.send(WindowAppEvent::SetClickThrough(enabled));
+    }
+
+    /// 切换置顶层级 (true = 恒在普通窗口之上)。
+    pub fn set_topmost(&self, topmost: bool) {
+        let _ = self.sender.send(WindowAppEvent::SetTopmost(topmost));
     }
 }
 

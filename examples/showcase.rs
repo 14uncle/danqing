@@ -61,6 +61,9 @@ struct Showcase {
     switch_enabled: bool,
     /// 点击穿透演示：当前是否处于穿透态。
     click_through: bool,
+    /// 窗口置顶演示：当前是否置顶 (env DANQING_SHOWCASE_TOPMOST=1 出生即置顶,
+    /// 供脚本验证创建路径的 WS_EX_TOPMOST 落位)。
+    topmost: bool,
     /// 窗口事件发送器 (点击穿透演示用; run_app 启动时注入)。
     sender: Option<WindowEventSender>,
     /// 启动后待开穿透标记 (env DANQING_SHOWCASE_CLICK_THROUGH=1 触发,
@@ -96,6 +99,8 @@ enum Msg {
     SwitchToggle,
     /// 点击穿透演示：切换穿透态 (Switch 与全局热键 Ctrl+Shift+K 双入口)。
     ClickThroughToggle,
+    /// 窗口置顶演示：切换置顶层级。
+    TopmostToggle,
 }
 
 impl App for Showcase {
@@ -141,6 +146,12 @@ impl App for Showcase {
                 self.click_through = !self.click_through;
                 if let Some(sender) = &self.sender {
                     sender.set_click_through(self.click_through);
+                }
+            }
+            Msg::TopmostToggle => {
+                self.topmost = !self.topmost;
+                if let Some(sender) = &self.sender {
+                    sender.set_topmost(self.topmost);
                 }
             }
         }
@@ -480,6 +491,40 @@ fn passthrough_card(t: &LightTheme) -> impl Widget + 'static {
         )
 }
 
+/// 窗口置顶区：窗口行为演示 (desk-window 模块)。
+/// 开启后窗口恒在普通窗口之上; 关闭后回到普通层级。
+fn topmost_card(t: &LightTheme) -> impl Widget + 'static {
+    Row::new()
+        .gap(t.spacing_lg())
+        .cross_center()
+        .child(
+            Row::new()
+                .gap(2.0)
+                .cross_center()
+                .child(
+                    Text::new("窗口置顶：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Switch::new()
+                        .bind(|s: &Showcase| s.topmost)
+                        .on_toggle(|| Msg::TopmostToggle),
+                ),
+        )
+        .child(
+            Text::bind(|s: &Showcase| {
+                if s.topmost {
+                    "已置顶 —— 普通窗口压不住我".to_string()
+                } else {
+                    "普通层级".to_string()
+                }
+            })
+            .font_size(t.font_size_body())
+            .color(t.text_primary()),
+        )
+}
+
 /// 键盘区：方向键 /WASD 移动方块，并回显最后按下的字符键。
 fn keyboard_card(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
@@ -788,7 +833,8 @@ fn page_view(t: &LightTheme) -> impl Widget + 'static {
                 t,
                 "点击穿透 (窗口行为, 热键 Ctrl+Shift+K)",
                 passthrough_card(t),
-            )),
+            ))
+            .child(card(t, "窗口置顶 (窗口行为)", topmost_card(t))),
     )
 }
 
@@ -1014,6 +1060,8 @@ fn build_tree() -> Node {
 fn main() -> anyhow::Result<()> {
     danqing::log::init_log();
 
+    // env DANQING_SHOWCASE_TOPMOST=1: 出生即置顶 (验证创建路径 WS_EX_TOPMOST 落位)。
+    let topmost_at_boot = std::env::var_os("DANQING_SHOWCASE_TOPMOST").is_some();
     let mut app = Showcase {
         count: 0,
         square_pos: Point::ZERO,
@@ -1027,6 +1075,7 @@ fn main() -> anyhow::Result<()> {
         selected_tab: 0,
         switch_enabled: false,
         click_through: false,
+        topmost: topmost_at_boot,
         sender: None,
         pending_click_through: std::env::var_os("DANQING_SHOWCASE_CLICK_THROUGH").is_some(),
     };
@@ -1040,6 +1089,7 @@ fn main() -> anyhow::Result<()> {
         title: "danqing showcase".into(),
         clear_color: t.background(),
         background,
+        topmost: topmost_at_boot,
         // 点击穿透演示的热键 (覆盖默认的番茄钟语义热键 —— showcase 本就不用它们,
         // 覆盖后不再白白全局吞掉 Ctrl+Shift+P/S/Q)。
         hotkeys: vec![GlobalHotkey::ctrl_shift(

@@ -127,6 +127,9 @@ pub struct WindowConfig {
     /// 重新显示时的落位策略：默认 [`ShowPlacement::Center`] (原位显示)。
     /// 热键唤起的工具面板 (剪贴板管理器等) 应设为 [`ShowPlacement::Cursor`]。
     pub placement: ShowPlacement,
+    /// 置顶层级: true = 恒在普通窗口之上 (桌面常驻陪伴形态); 默认 `false`。
+    /// 运行时可经 [`WindowEventSender::set_topmost`] 切换。
+    pub topmost: bool,
     /// 全局热键声明集合：空 = 不注册不启动热键线程。
     /// 默认沿袭首个消费者 (番茄钟) 的 Ctrl+Shift+P/S/Q;
     /// 新产品必须显式声明自己的热键，否则与番茄钟冲突 (后注册者失败)。
@@ -150,6 +153,7 @@ impl Default for WindowConfig {
             maximized: false,
             mode: WindowMode::OnDemand,
             placement: ShowPlacement::Center,
+            topmost: false,
             hotkeys: vec![
                 GlobalHotkey::ctrl_shift(hotkey_ids::TOGGLE_VISIBLE, 0x50), // P
                 GlobalHotkey::ctrl_shift(hotkey_ids::START_PAUSE, 0x53),    // S
@@ -228,6 +232,13 @@ mod tests {
     #[test]
     fn default_config_is_not_maximized() {
         assert!(!WindowConfig::default().maximized);
+    }
+
+    /// 默认不置顶: 既有产品 (番茄钟/剪贴板) 的窗口层级行为不变。
+    /// 常驻陪伴形态 (桌景) 显式设 `topmost: true`。
+    #[test]
+    fn default_config_is_not_topmost() {
+        assert!(!WindowConfig::default().topmost);
     }
 
     /// 冒烟测试：仅创建事件循环 (链接触发 shim 生成的导入库)。

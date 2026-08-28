@@ -21,7 +21,7 @@ use winit::{
     event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow},
     keyboard::{KeyCode, ModifiersState, PhysicalKey},
-    window::{Window as WinitWindow, WindowAttributes, WindowId},
+    window::{Window as WinitWindow, WindowAttributes, WindowId, WindowLevel},
 };
 
 use crate::app::{AnimationCtx, App};
@@ -658,6 +658,13 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 全平台使用自绘标题栏 (按钮布局样式由 TitleBar 按平台适配，
         // 参见 docs/specs/title-bar-cross-platform.md)。
         let attrs = attrs.with_decorations(false);
+        // 置顶层级: 常驻陪伴形态 (桌景) 置顶于普通窗口之上; 默认 Normal,
+        // 既有产品 (番茄钟/剪贴板) 层级行为不变。
+        let attrs = attrs.with_window_level(if self.config.topmost {
+            WindowLevel::AlwaysOnTop
+        } else {
+            WindowLevel::Normal
+        });
         let window = match event_loop.create_window(attrs) {
             Ok(window) => Arc::new(window),
             Err(err) => {
@@ -1053,6 +1060,16 @@ impl<A: App> Handler<'_, A> {
                 // visibility_changed 等回调确认窗口就绪后再发。
                 if let Some(window) = &self.window {
                     super::passthrough::set_click_through(window, enabled);
+                }
+            }
+            WindowAppEvent::SetTopmost(topmost) => {
+                self.config.topmost = topmost;
+                if let Some(window) = &self.window {
+                    window.set_window_level(if topmost {
+                        WindowLevel::AlwaysOnTop
+                    } else {
+                        WindowLevel::Normal
+                    });
                 }
             }
         }
