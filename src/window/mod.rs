@@ -12,6 +12,7 @@
 //! - `icon`       窗口 / 托盘图标加载 + Windows 无边框样式
 //! - `hotkey`     全局热键 ID 常量 + Windows 注册线程
 //! - `placement`  窗口显示落位 (跟随鼠标光标) + 钳制数学
+//! - `passthrough` 点击穿透 (桌面常驻陪伴形态)
 //! - `tray`       托盘菜单项 ID + 快捷键 label 单一来源 + 跨平台托盘
 //! - `handler`    ApplicationHandler 实现 (本模块最大，单独拆出)
 
@@ -21,6 +22,7 @@ pub mod foreground;
 mod handler;
 mod hotkey;
 mod icon;
+mod passthrough;
 mod placement;
 pub mod startup;
 pub mod tray;

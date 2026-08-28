@@ -18,8 +18,8 @@ use danqing::widget::{
     Node, Padding, Row, Scrollable, Switch, Tabs, Text, TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
-    App, BackgroundConfig, Color, Event, Key, LightTheme, NamedKey, Point, Rect, ScaleMode, Size,
-    Theme, WindowAction,
+    App, BackgroundConfig, Color, Event, GlobalHotkey, Key, LightTheme, NamedKey, Point, Rect,
+    ScaleMode, Size, Theme, WindowAction, WindowEventSender,
 };
 /// 键盘移动方块的区域尺寸。
 const KEYBOARD_AREA: Size = Size::new(300.0, 180.0);
@@ -27,6 +27,10 @@ const KEYBOARD_AREA: Size = Size::new(300.0, 180.0);
 const SQUARE_SIZE: f32 = 40.0;
 /// 每次按键移动步长 (逻辑像素)。
 const MOVE_STEP: f32 = 20.0;
+/// 点击穿透演示的全局热键 id (showcase 自有, 不用引擎 pomodoro 残留常量)。
+const HOTKEY_CLICK_THROUGH: u8 = 1;
+/// 点击穿透演示的热键主键: K (Virtual-Key 码)。
+const HOTKEY_CLICK_THROUGH_VK: u32 = 0x4B;
 
 /// 分类导航：与 src/widget/ 子目录一一对应。
 const CATEGORIES: [&str; 5] = [
@@ -55,6 +59,13 @@ struct Showcase {
     selected_tab: usize,
     /// Switch 演示：是否启用通知。
     switch_enabled: bool,
+    /// 点击穿透演示：当前是否处于穿透态。
+    click_through: bool,
+    /// 窗口事件发送器 (点击穿透演示用; run_app 启动时注入)。
+    sender: Option<WindowEventSender>,
+    /// 启动后待开穿透标记 (env DANQING_SHOWCASE_CLICK_THROUGH=1 触发,
+    /// 首次显示回调里生效 —— 供截图验证 LAYERED×wgpu 呈现兼容性)。
+    pending_click_through: bool,
 }
 
 /// 应用消息。
@@ -83,6 +94,8 @@ enum Msg {
     OpenImage,
     /// Switch 演示：切换开关状态。
     SwitchToggle,
+    /// 点击穿透演示：切换穿透态 (Switch 与全局热键 Ctrl+Shift+K 双入口)。
+    ClickThroughToggle,
 }
 
 impl App for Showcase {
@@ -124,6 +137,12 @@ impl App for Showcase {
                 }
             }
             Msg::SwitchToggle => self.switch_enabled = !self.switch_enabled,
+            Msg::ClickThroughToggle => {
+                self.click_through = !self.click_through;
+                if let Some(sender) = &self.sender {
+                    sender.set_click_through(self.click_through);
+                }
+            }
         }
     }
 
@@ -163,6 +182,23 @@ impl App for Showcase {
 
     fn maximized_changed(&mut self, is_maximized: bool) {
         self.is_maximized = is_maximized;
+    }
+
+    fn attach_window_sender(&mut self, sender: WindowEventSender) {
+        self.sender = Some(sender);
+    }
+
+    fn visibility_changed(&mut self, visible: bool) {
+        // env 触发 (DANQING_SHOWCASE_CLICK_THROUGH=1): 首次显示后自动开穿透。
+        // 窗口创建前发送会被丢弃, 故挂在首次可见回调上。
+        if visible && self.pending_click_through {
+            self.pending_click_through = false;
+            self.update(Msg::ClickThroughToggle);
+        }
+    }
+
+    fn hotkey(&mut self, id: u8) -> Option<Msg> {
+        (id == HOTKEY_CLICK_THROUGH).then_some(Msg::ClickThroughToggle)
     }
 }
 
@@ -403,6 +439,40 @@ fn switch_card(t: &LightTheme) -> impl Widget + 'static {
                     "已开启".to_string()
                 } else {
                     "已关闭".to_string()
+                }
+            })
+            .font_size(t.font_size_body())
+            .color(t.text_primary()),
+        )
+}
+
+/// 点击穿透区：窗口行为演示 (desk-window 模块)。
+/// 开启后鼠标事件直达下层窗口, 点本窗口无效 —— 切回用全局热键 Ctrl+Shift+K。
+fn passthrough_card(t: &LightTheme) -> impl Widget + 'static {
+    Row::new()
+        .gap(t.spacing_lg())
+        .cross_center()
+        .child(
+            Row::new()
+                .gap(2.0)
+                .cross_center()
+                .child(
+                    Text::new("点击穿透：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Switch::new()
+                        .bind(|s: &Showcase| s.click_through)
+                        .on_toggle(|| Msg::ClickThroughToggle),
+                ),
+        )
+        .child(
+            Text::bind(|s: &Showcase| {
+                if s.click_through {
+                    "已开启 —— 点我无效, 按 Ctrl+Shift+K 切回".to_string()
+                } else {
+                    "已关闭 (或按 Ctrl+Shift+K 开启)".to_string()
                 }
             })
             .font_size(t.font_size_body())
@@ -713,6 +783,11 @@ fn page_view(t: &LightTheme) -> impl Widget + 'static {
                 t,
                 "键盘响应 (自定义 Positioned 组件)",
                 keyboard_card(t),
+            ))
+            .child(card(
+                t,
+                "点击穿透 (窗口行为, 热键 Ctrl+Shift+K)",
+                passthrough_card(t),
             )),
     )
 }
@@ -951,6 +1026,9 @@ fn main() -> anyhow::Result<()> {
         image_data: None,
         selected_tab: 0,
         switch_enabled: false,
+        click_through: false,
+        sender: None,
+        pending_click_through: std::env::var_os("DANQING_SHOWCASE_CLICK_THROUGH").is_some(),
     };
 
     let t = theme();
@@ -962,6 +1040,12 @@ fn main() -> anyhow::Result<()> {
         title: "danqing showcase".into(),
         clear_color: t.background(),
         background,
+        // 点击穿透演示的热键 (覆盖默认的番茄钟语义热键 —— showcase 本就不用它们,
+        // 覆盖后不再白白全局吞掉 Ctrl+Shift+P/S/Q)。
+        hotkeys: vec![GlobalHotkey::ctrl_shift(
+            HOTKEY_CLICK_THROUGH,
+            HOTKEY_CLICK_THROUGH_VK,
+        )],
         ..danqing::WindowConfig::default()
     };
     danqing::run_app(config, &mut app)?;

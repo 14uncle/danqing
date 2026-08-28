@@ -1047,6 +1047,14 @@ impl<A: App> Handler<'_, A> {
                     ctx.set_clear_color(color);
                 }
             }
+            WindowAppEvent::SetClickThrough(enabled) => {
+                // 穿透只改命中测试, 不动可见性与焦点; 底层实现幂等。
+                // 窗口未创建时 (resumed 前) 丢弃 —— 调用方应经
+                // visibility_changed 等回调确认窗口就绪后再发。
+                if let Some(window) = &self.window {
+                    super::passthrough::set_click_through(window, enabled);
+                }
+            }
         }
     }
 }

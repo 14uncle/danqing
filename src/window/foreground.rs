@@ -269,7 +269,9 @@ fn activate(hwnd: HWND) {
 }
 
 /// 从 winit 窗口取原生 HWND；非 Windows 原生句柄返回 `None`。
-fn hwnd_of(window: &Window) -> Option<HWND> {
+///
+/// `pub(crate)`: passthrough (点击穿透) 等窗口子系统内模块共用。
+pub(crate) fn hwnd_of(window: &Window) -> Option<HWND> {
     let handle = window.window_handle().ok()?;
     // raw-window-handle 0.6: `WindowHandle::as_raw()` 取 `RawWindowHandle`,
     // `Win32WindowHandle.hwnd` 为 `NonZeroIsize`, 经 `get()` 取裸指针作 HWND。

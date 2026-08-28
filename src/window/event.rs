@@ -35,6 +35,9 @@ pub enum WindowAppEvent {
     PhaseAdvanced,
     /// 动态更新窗口背景色 (主题切换等场景)。
     SetClearColor(Color),
+    /// 切换点击穿透 (桌面常驻陪伴形态): true = 鼠标事件直达下层窗口,
+    /// 本窗口纯观赏; false = 恢复正常交互。只改命中测试, 不动可见性与焦点。
+    SetClickThrough(bool),
 }
 
 /// 应用持有的窗口事件发送器 (轻量 clone, 内部是 mpsc Sender)。
@@ -74,6 +77,12 @@ impl WindowEventSender {
     /// 动态更新窗口背景色。
     pub fn set_clear_color(&self, color: Color) {
         let _ = self.sender.send(WindowAppEvent::SetClearColor(color));
+    }
+
+    /// 切换点击穿透 (true = 鼠标事件直达下层, 窗口纯观赏)。
+    /// 底层实现幂等: 重复发送同值无副作用。
+    pub fn set_click_through(&self, enabled: bool) {
+        let _ = self.sender.send(WindowAppEvent::SetClickThrough(enabled));
     }
 }
 
