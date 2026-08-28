@@ -16,12 +16,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # 运行阶段 1 演示页(会打开一个 GUI 窗口)
-cargo run --example showcase
+cargo run --example danqing-showcase
 
 # 全部测试(纯逻辑,无需 GPU)
 cargo test --lib --tests
 
-# 性能基准(release 启动到可见 ≤1s、常驻内存 WS ≤360MB(核显记账);须先 cargo build --release --example showcase)
+# 性能基准(release 启动到可见 ≤1s、常驻内存 WS ≤360MB(核显记账);须先 cargo build --release --example danqing-showcase)
 powershell -NoProfile -File tools/benchmark.ps1
 
 # 运行单个测试

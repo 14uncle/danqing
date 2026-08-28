@@ -15,7 +15,7 @@
 ## 运行
 
 ```bash
-cargo run --example showcase   # 打开 M1 演示页
+cargo run --example danqing-showcase   # 打开 M1 演示页
 cargo test                     # 全部测试(无需 GPU)
 cargo clippy -- -D warnings    # 静态检查
 cargo fmt                      # 格式化

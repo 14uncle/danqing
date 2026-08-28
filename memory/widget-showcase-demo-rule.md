@@ -16,7 +16,7 @@ metadata:
 1. 在 `page_view`（或对应分类页）中添加 `card(t, "组件名", demo_card(t))`
 2. demo_card 展示组件的核心功能（状态切换、交互、绑定等）
 3. 使用 `on_change` 或 `bind` 与应用状态联动
-4. 提交前确保 `cargo clippy --example showcase -- -D warnings` 零警告
+4. 提交前确保 `cargo clippy --example danqing-showcase -- -D warnings` 零警告
 
 **Reference:**
 - Tabs demo: `examples/showcase.rs` 的 `tabs_card` 函数
