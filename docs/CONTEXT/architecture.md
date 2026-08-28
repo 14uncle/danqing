@@ -44,11 +44,15 @@ app.rs
 ### 平台适配层 (只允许接触 OS/GPU)
 
 - `src/window/mod.rs` — winit 事件循环、IME/剪贴板、焦点路由、每帧 `request_redraw`
-  - `src/window/event.rs` — 平台无关事件类型
+  - `src/window/event.rs` — 平台无关事件类型 + `WindowAppEvent` 应用→窗口事件通道
   - `src/window/handler.rs` — 事件处理分发
   - `src/window/hotkey.rs` — OS 级全局热键
-  - `src/window/icon.rs` — 窗口图标
+  - `src/window/icon.rs` — 窗口图标 + Windows 无边框圆角/阴影
   - `src/window/tray.rs` — 系统托盘
+  - `src/window/foreground.rs` — 抢前台/焦点对账 (AttachThreadInput)
+  - `src/window/placement.rs` — 显示落位 (Center/Cursor/Remember) + 工作区钳制
+  - `src/window/passthrough.rs` — 点击穿透 (WS_EX_LAYERED|TRANSPARENT)
+  - `src/window/startup.rs` — 开机启动 (HKCU Run 键)
 - `src/render/rect.rs` + `rect.wgsl` — 矩形 SDF 渲染管线
 - `src/render/text.rs` + `text.wgsl` — 文本图集渲染管线
 - `src/render/background.rs` + `background.wgsl` — 多场景背景渲染(含程序化动效)
