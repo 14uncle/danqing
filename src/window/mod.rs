@@ -125,7 +125,8 @@ pub struct WindowConfig {
     /// 番茄钟等需要持续动画的应用应设为 [`WindowMode::Continuous`]。
     pub mode: WindowMode,
     /// 重新显示时的落位策略：默认 [`ShowPlacement::Center`] (原位显示)。
-    /// 热键唤起的工具面板 (剪贴板管理器等) 应设为 [`ShowPlacement::Cursor`]。
+    /// 热键唤起的工具面板 (剪贴板管理器等) 应设为 [`ShowPlacement::Cursor`];
+    /// 常驻陪伴形态 (桌景) 应设为 [`ShowPlacement::Remember`] (位置记忆)。
     pub placement: ShowPlacement,
     /// 置顶层级: true = 恒在普通窗口之上 (桌面常驻陪伴形态); 默认 `false`。
     /// 运行时可经 [`WindowEventSender::set_topmost`] 切换。

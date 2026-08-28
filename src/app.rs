@@ -83,6 +83,21 @@ pub trait App: Any {
         Duration::ZERO
     }
 
+    /// 位置记忆: 读取上次窗口位置 (物理像素, 左上角)。
+    ///
+    /// 仅 `ShowPlacement::Remember` 时在窗口创建后 (显示前) 调用一次;
+    /// 返回 `None` (默认, 无存储) 时退化为居中。存储由产品侧负责,
+    /// 引擎保持零文件 I/O (与托盘「引擎管机制, 产品管内容」同构)。
+    fn load_window_position(&self) -> Option<(i32, i32)> {
+        None
+    }
+
+    /// 位置记忆: 窗口移动 (非最大化) 后回调新位置 (物理像素, 左上角)。
+    ///
+    /// 拖动期间按 `Moved` 事件频率回调, 实现方应自行防抖落盘。
+    /// 仅 `ShowPlacement::Remember` 时回调。默认 no-op。
+    fn save_window_position(&mut self, _x: i32, _y: i32) {}
+
     /// 注入窗口事件发送器 (App 主动控制窗口：显隐 / 全局热键退出等)。
     /// 默认空实现：不需要窗口控制的应用无需关心。
     /// `run_app` 启动时调用一次，在 `resumed` 之前。

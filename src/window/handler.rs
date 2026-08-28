@@ -678,6 +678,15 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         #[cfg(target_os = "windows")]
         apply_windows_undecorated_style(&window);
 
+        // 位置记忆: 创建后 (显示前) 恢复到上次位置, 钳进所在/最近显示器
+        // 工作区; 最大化由系统管理位置, 跳过。无存储 (默认钩子) 时保持居中。
+        #[cfg(target_os = "windows")]
+        if self.config.placement == super::ShowPlacement::Remember && !self.config.maximized {
+            if let Some(saved) = self.app.load_window_position() {
+                super::placement::restore_position(&window, saved, window.inner_size());
+            }
+        }
+
         // 同步 inline 初始化 GPU 上下文 (实例 + surface + 适配器 + 设备 + 管线)。
         // request_adapter 传 `compatible_surface: Some(&surface)` 让 DX12 后端
         // 一步优化 device / presentation engine 创建，比传 None 省 ~200ms。
@@ -827,6 +836,15 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 self.last_real_size = size;
                 if let Some(context) = &mut self.context {
                     context.resize(size.width, size.height);
+                }
+            }
+            WindowEvent::Moved(position) => {
+                // 位置记忆: 拖动后回报物理坐标 (产品侧防抖落盘)。
+                // 最大化时位置由系统管理, 不记 (否则记忆点位被最大化位污染)。
+                if self.config.placement == super::ShowPlacement::Remember
+                    && self.window.as_ref().is_some_and(|w| !w.is_maximized())
+                {
+                    self.app.save_window_position(position.x, position.y);
                 }
             }
             WindowEvent::RedrawRequested => {

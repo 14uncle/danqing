@@ -1,11 +1,14 @@
 //! @author 十四叔
 //! @date 2026/08/17
 //!
-//! 窗口显示落位 ([`ShowPlacement::Cursor`]): 每次显示前把窗口挪到鼠标光标处。
+//! 窗口显示落位: [`ShowPlacement::Cursor`] 跟随鼠标光标 (热键唤起的工具面板),
+//! [`ShowPlacement::Remember`] 位置记忆 (桌面常驻陪伴形态)。
 //!
-//! 热键唤起的工具面板 (剪贴板管理器等) 不应恒在屏幕中央 —— 用户的视线
-//! 与手都在光标附近。Windows 经 `GetCursorPos` 取全局光标物理坐标, 窗口
-//! 左上角贴光标、整体钳进光标所在显示器的工作区 (避开任务栏)。
+//! 光标落位: Windows 经 `GetCursorPos` 取全局光标物理坐标, 窗口左上角贴光标、
+//! 整体钳进光标所在显示器的工作区 (避开任务栏)。
+//! 位置记忆: 记忆点位经 `MonitorFromPoint(DEFAULTTONEAREST)` 归到所在 (或最近
+//! 现存) 显示器再钳位 —— 显示器断开时窗口永不丢到屏幕外; 存储由产品侧经
+//! `App` 钩子负责, 引擎零文件 I/O。
 
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::window::Window;
@@ -19,6 +22,11 @@ pub enum ShowPlacement {
     /// 跟随鼠标光标: 每次显示前挪到光标处 (左上角贴光标), 钳进光标所在
     /// 显示器的工作区。适用于热键唤起的工具面板 (剪贴板管理器等)。
     Cursor,
+    /// 位置记忆: 窗口创建后 (显示前) 经 `App::load_window_position` 读上次
+    /// 位置并钳进工作区恢复; 记忆点位所在显示器断开时回退最近现存显示器。
+    /// 移动经 `App::save_window_position` 回报。无存储 (默认钩子) 时等同
+    /// Center。适用于桌面常驻应用 (桌景等)。非 Windows 平台暂等同 Center。
+    Remember,
 }
 
 /// 把窗口挪到鼠标光标处 (物理像素): 左上角贴光标, 钳进所在显示器工作区。
@@ -29,19 +37,37 @@ pub enum ShowPlacement {
 #[cfg(target_os = "windows")]
 pub fn move_to_cursor(window: &Window, win_size: PhysicalSize<u32>) {
     use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    // SAFETY: 纯查询式系统调用; 失败 (返回 0) 时保持原位, 静默降级。
+    let mut cursor = POINT { x: 0, y: 0 };
+    if unsafe { GetCursorPos(&mut cursor) } == 0 {
+        return;
+    }
+    place_window_at(window, (cursor.x, cursor.y), win_size);
+}
+
+/// 把窗口挪到指定物理点位, 钳进点位所在 (或最近现存) 显示器的工作区。
+///
+/// `DEFAULTTONEAREST`: 点位不在任何现存显示器上 (如副屏已断开) 时归到最近
+/// 显示器 —— 位置记忆的断屏回退由这一语义天然覆盖。
+/// 取显示器信息失败时保持原位 (静默降级, 原位总比不显示强)。
+#[cfg(target_os = "windows")]
+fn place_window_at(window: &Window, point: (i32, i32), win_size: PhysicalSize<u32>) {
+    use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
     // SAFETY: 纯查询式系统调用 + set_outer_position; 无内存/线程安全风险。
     unsafe {
-        let mut cursor = POINT { x: 0, y: 0 };
-        if GetCursorPos(&mut cursor) == 0 {
-            return;
-        }
-        // 光标所在显示器 (DEFAULTTONEAREST 纯防御: 理论上光标必在某屏)
-        let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+        let monitor = MonitorFromPoint(
+            POINT {
+                x: point.0,
+                y: point.1,
+            },
+            MONITOR_DEFAULTTONEAREST,
+        );
         let mut info = MONITORINFO {
             cbSize: std::mem::size_of::<MONITORINFO>() as u32,
             ..std::mem::zeroed()
@@ -51,7 +77,7 @@ pub fn move_to_cursor(window: &Window, win_size: PhysicalSize<u32>) {
         }
         let work = info.rcWork;
         let (x, y) = clamp_into_work_area(
-            (cursor.x, cursor.y),
+            point,
             (win_size.width as i32, win_size.height as i32),
             (work.left, work.top, work.right, work.bottom),
         );
@@ -62,6 +88,19 @@ pub fn move_to_cursor(window: &Window, win_size: PhysicalSize<u32>) {
 /// 非 Windows 平台暂无全局光标位置 API, 保持原位 (居中)。
 #[cfg(not(target_os = "windows"))]
 pub fn move_to_cursor(_window: &Window, _win_size: PhysicalSize<u32>) {}
+
+/// 位置记忆恢复 (物理像素): 把窗口挪到记忆点位, 钳进所在/最近显示器工作区。
+///
+/// `win_size` 同理用最后可信客户区尺寸; 创建后调用时 `window.inner_size()`
+/// 即为真实物理尺寸, 直接传入即可。
+#[cfg(target_os = "windows")]
+pub fn restore_position(window: &Window, saved: (i32, i32), win_size: PhysicalSize<u32>) {
+    place_window_at(window, saved, win_size);
+}
+
+/// 非 Windows 平台位置记忆未实现, 保持原位 (居中)。
+#[cfg(not(target_os = "windows"))]
+pub fn restore_position(_window: &Window, _saved: (i32, i32), _win_size: PhysicalSize<u32>) {}
 
 /// 落位钳制 (纯函数): 窗口左上角贴光标, 但不许越出工作区;
 /// 窗口比工作区还大时贴工作区左上。
@@ -79,7 +118,7 @@ pub(crate) fn clamp_into_work_area(
 
 #[cfg(test)]
 mod tests {
-    use super::clamp_into_work_area;
+    use super::{ShowPlacement, clamp_into_work_area};
 
     /// 光标在工作区中部: 窗口左上角即光标。
     #[test]
@@ -129,5 +168,27 @@ mod tests {
             clamp_into_work_area((500, 500), (2000, 1200), (0, 0, 1920, 1040)),
             (0, 0)
         );
+    }
+
+    /// 位置记忆: 记忆的点位在已断开的显示器上 (如右侧副屏 1920+ 拔掉):
+    /// Win32 层 MonitorFromPoint(DEFAULTTONEAREST) 已把点位归到最近现存显示器,
+    /// 钳制兜底把远在工作区外的点位拉回可见区。
+    #[test]
+    fn disconnected_monitor_point_clamped_into_work() {
+        assert_eq!(
+            clamp_into_work_area((3000, 200), (480, 640), (0, 0, 1920, 1040)),
+            (1440, 200)
+        );
+        assert_eq!(
+            clamp_into_work_area((-3000, 5000), (480, 640), (0, 0, 1920, 1040)),
+            (0, 400)
+        );
+    }
+
+    /// 位置记忆变体存在且默认仍是 Center (既有产品行为不变)。
+    #[test]
+    fn remember_variant_exists_and_default_stays_center() {
+        assert_eq!(ShowPlacement::default(), ShowPlacement::Center);
+        assert_ne!(ShowPlacement::default(), ShowPlacement::Remember);
     }
 }

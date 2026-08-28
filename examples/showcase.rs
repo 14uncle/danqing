@@ -31,6 +31,8 @@ const MOVE_STEP: f32 = 20.0;
 const HOTKEY_CLICK_THROUGH: u8 = 1;
 /// 点击穿透演示的热键主键: K (Virtual-Key 码)。
 const HOTKEY_CLICK_THROUGH_VK: u32 = 0x4B;
+/// 位置记忆演示的落点文件 (target/ 下, gitignore; 演示从简未做防抖)。
+const POSITION_FILE: &str = "target/tmp/showcase-position.txt";
 
 /// 分类导航：与 src/widget/ 子目录一一对应。
 const CATEGORIES: [&str; 5] = [
@@ -210,6 +212,19 @@ impl App for Showcase {
 
     fn hotkey(&mut self, id: u8) -> Option<Msg> {
         (id == HOTKEY_CLICK_THROUGH).then_some(Msg::ClickThroughToggle)
+    }
+
+    /// 位置记忆演示 (ShowPlacement::Remember): 从落点文件恢复。
+    fn load_window_position(&self) -> Option<(i32, i32)> {
+        let text = std::fs::read_to_string(POSITION_FILE).ok()?;
+        let (x, y) = text.trim().split_once(',')?;
+        Some((x.parse().ok()?, y.parse().ok()?))
+    }
+
+    /// 位置记忆演示: 拖动即写文件 (演示从简未防抖; 产品侧应防抖落盘)。
+    fn save_window_position(&mut self, x: i32, y: i32) {
+        let _ = std::fs::create_dir_all("target/tmp");
+        let _ = std::fs::write(POSITION_FILE, format!("{x},{y}"));
     }
 }
 
@@ -1090,6 +1105,8 @@ fn main() -> anyhow::Result<()> {
         clear_color: t.background(),
         background,
         topmost: topmost_at_boot,
+        // 位置记忆演示: 记住上次拖到的位置, 重启复原 (落点文件 target/tmp/)。
+        placement: danqing::ShowPlacement::Remember,
         // 点击穿透演示的热键 (覆盖默认的番茄钟语义热键 —— showcase 本就不用它们,
         // 覆盖后不再白白全局吞掉 Ctrl+Shift+P/S/Q)。
         hotkeys: vec![GlobalHotkey::ctrl_shift(
