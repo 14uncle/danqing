@@ -102,7 +102,7 @@ impl App for Showcase {
             Msg::InputChanged(s) => self.input_value = s,
             Msg::IconInputChanged(s) => self.icon_input_value = s,
             Msg::IconInputSearch => {
-                log::info!("搜索: {}", self.icon_input_value);
+                log::info!("搜索：{}", self.icon_input_value);
             }
             Msg::TextareaChanged(s) => self.textarea_value = s,
             Msg::Select(i) => self.selected = i,
@@ -255,7 +255,7 @@ fn counter_row(t: &LightTheme) -> impl Widget + 'static {
                 .font_size(t.font_size_body())
                 .color(t.text_primary()),
         )
-        // CloseButton: 矢量 × 按钮 (点击清零计数, hover 出底色)。
+        // CloseButton: 矢量 × 按钮 (点击清零计数，hover 出底色)。
         .child(
             CloseButton::new()
                 .on_click(|| Msg::ResetCount)
@@ -318,7 +318,7 @@ fn icon_input_row(t: &LightTheme) -> impl Widget + 'static {
                 if s.icon_input_value.is_empty() {
                     "点击右侧图标搜索".to_string()
                 } else {
-                    format!("搜索: {}", s.icon_input_value)
+                    format!("搜索：{}", s.icon_input_value)
                 }
             })
             .font_size(t.font_size_body())
@@ -959,6 +959,7 @@ fn main() -> anyhow::Result<()> {
         .with_glow("assets/background/glow.png", 0.25)
         .with_noise("assets/background/noise.png", 0.06);
     let config = danqing::WindowConfig {
+        title: "danqing showcase".into(),
         clear_color: t.background(),
         background,
         ..danqing::WindowConfig::default()

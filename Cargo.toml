@@ -1,3 +1,7 @@
+[[example]]
+name = "danqing-showcase"
+path = "examples/showcase.rs"
+
 [package]
 name = "danqing"
 version = "0.1.0"
@@ -32,7 +36,6 @@ winreg = "0.55"
 [dev-dependencies]
 resvg = "0.44"
 anyhow = "1"
-# showcase 示例：打开本地图片文件对话框。
 rfd = "0.15"
 
 [build-dependencies]

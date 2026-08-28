@@ -134,7 +134,7 @@ pub struct WindowConfig {
 impl Default for WindowConfig {
     fn default() -> Self {
         Self {
-            title: "danqing showcase".into(),
+            title: "danqing".into(),
             size: Size::new(1280.0, 800.0),
             // 深蓝灰：非常量黑 / 白，用于验证颜色参数通路
             clear_color: Color::rgb(0.10, 0.16, 0.24),
