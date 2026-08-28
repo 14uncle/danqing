@@ -18,19 +18,19 @@ mod layout;
 mod title_bar;
 mod view;
 
-pub use base::{Button, Text};
+pub use base::{Button, CloseButton, Image, Text};
 pub use focus::FocusManager;
-pub use form::{TextArea, TextInput};
-pub use layout::{Box, Center, Column, Padding, Row, Stack};
+pub use form::{IconInput, Switch, TextArea, TextInput};
+pub use layout::{Box, Center, Column, CrossAlign, Padding, Row, Stack};
 pub use title_bar::{LogoKind, TitleBar, TitleBarStyle};
-pub use view::{ScrollAxis, Scrollable, Switcher};
+pub use view::{MultiPanel, ScrollAxis, Scrollable, Tabs};
 
 use std::any::Any;
 
 use crate::app::AnimationCtx;
 use crate::event::Event;
 use crate::render::{RectBatch, TextBatch};
-use crate::{Constraints, Rect, Size};
+use crate::{Color, Constraints, Point, Rect, Size};
 
 /// 事件处理结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +43,43 @@ pub enum EventResult {
 
 /// 应用消息队列：组件事件 (如按钮点击) 产出的类型擦除消息。
 pub type MsgQueue = Vec<std::boxed::Box<dyn Any>>;
+
+/// 用轴对齐小圆点队列近似一条对角线 (crate 内共享：
+/// TitleBar 的 ×/时钟指针与 CloseButton 的 × 同一算法)。
+///
+/// 每个步进放置一个 `thickness × thickness` 的圆角矩形，
+/// 圆角半径为 `thickness/2` 使其呈圆形，彼此重叠形成平滑线段。
+pub(crate) fn push_diagonal(
+    rects: &mut RectBatch,
+    p1: Point,
+    p2: Point,
+    thickness: f32,
+    color: Color,
+) {
+    if thickness <= 0.0 {
+        return;
+    }
+    let dx = p2.x - p1.x;
+    let dy = p2.y - p1.y;
+    let length = (dx * dx + dy * dy).sqrt();
+    if length < 1e-6 {
+        return;
+    }
+    let half = thickness * 0.5;
+    // 步长取 thickness 的一半，让小圆点高度重叠，对角线看起来更实心。
+    let step = thickness * 0.5;
+    let count = (length / step).ceil().max(1.0) as usize;
+    for i in 0..=count {
+        let t = i as f32 / count as f32;
+        let x = p1.x + dx * t;
+        let y = p1.y + dy * t;
+        rects.push_rect(
+            Rect::from_xywh(x - half, y - half, thickness, thickness),
+            color,
+            half,
+        );
+    }
+}
 
 /// 组件：保留模式 UI 树的一个节点。
 pub trait Widget {
@@ -65,6 +102,11 @@ pub trait Widget {
     ///
     /// `area` 为父组件摆放本组件的矩形 (布局结果)。
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch);
+
+    /// 绘制图像纹理：向 ImageBatch 推送纹理实例。
+    ///
+    /// 默认实现无操作。Image 组件覆盖此方法以推送纹理。
+    fn paint_image(&self, _area: Rect, _images: &mut crate::render::ImageBatch) {}
 
     /// 事件处理 (鼠标事件经命中分发到达; 键盘 /IME 事件经焦点路由到达)。
     ///
@@ -91,9 +133,9 @@ pub trait Widget {
 
     /// 重置焦点视觉状态 (焦点环 / 按压态 / 光标), 不派发事件。
     ///
-    /// 供容器在隐藏子面板时清除旧面板内残留的焦点高亮: 面板切换后,
-    /// FocusOut 经 Switcher 的可见切片无法送达隐藏面板内的旧焦点组件,
-    /// 若不主动清除, 重开面板会残留上一个会话的焦点环。
+    /// 供容器在隐藏子面板时清除旧面板内残留的焦点高亮：面板切换后，
+    /// FocusOut 经 MultiPanel 的可见切片无法送达隐藏面板内的旧焦点组件，
+    /// 若不主动清除，重开面板会残留上一个会话的焦点环。
     /// 默认递归所有子组件; 可聚焦叶子组件覆盖本方法清除自身状态。
     fn reset_focus(&mut self) {
         for child in self.children_mut() {

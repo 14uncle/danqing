@@ -1,6 +1,6 @@
 export const meta = {
   name: 'pre-commit',
-  description: '提交前验证三件套: fmt + clippy + test。零失败才通过。',
+  description: '提交前验证三件套：fmt + clippy + test。零失败才通过。',
   phases: [
     { title: 'Format', detail: 'cargo fmt --check' },
     { title: 'Clippy', detail: 'cargo clippy -- -D warnings' },
@@ -8,9 +8,9 @@ export const meta = {
   ],
 }
 
-// 每个 agent 用结构化结果报告成败, 聚合只读布尔值。
-// (2026-08-01 修复: 旧版用 !includes('warn')/!includes('error') 对自由文本做子串判断,
-// clippy 报告必含 "warnings"/"errors" 字样, 导致全绿也恒报失败。)
+// 每个 agent 用结构化结果报告成败，聚合只读布尔值。
+// (2026-08-01 修复：旧版用 !includes('warn')/!includes('error') 对自由文本做子串判断，
+// clippy 报告必含 "warnings"/"errors" 字样，导致全绿也恒报失败。)
 const RESULT_SCHEMA = {
   type: 'object',
   properties: {

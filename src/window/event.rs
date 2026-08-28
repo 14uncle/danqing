@@ -15,6 +15,7 @@ use winit::{
     keyboard::{Key as WinitKey, ModifiersState, NamedKey as WinitNamedKey},
 };
 
+use crate::Color;
 use crate::Point;
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 
@@ -24,10 +25,16 @@ pub enum WindowAppEvent {
     /// 切换窗口可见性 (Handler 翻转内部状态后应用到 winit)。
     /// 单一事实源在 Handler, App 不持有副本以避免失同步。
     ToggleVisible,
+    /// 仅显示窗口 (不切换)。用于 focus_lost 等场景：窗口已隐藏时不再重复显示。
+    ShowWindow,
+    /// 仅隐藏窗口 (不切换)。用于 focus_lost 和关闭按钮：避免 toggle 导致的反复显隐。
+    HideWindow,
     /// 退出应用 (事件循环收到后 `event_loop.exit()`)。
     Quit,
     /// 阶段流转通知：隐藏态时 Handler 自动呼出窗口 + 抢焦点。
     PhaseAdvanced,
+    /// 动态更新窗口背景色 (主题切换等场景)。
+    SetClearColor(Color),
 }
 
 /// 应用持有的窗口事件发送器 (轻量 clone, 内部是 mpsc Sender)。
@@ -42,6 +49,18 @@ impl WindowEventSender {
         let _ = self.sender.send(WindowAppEvent::ToggleVisible);
     }
 
+    /// 请求 Handler 显示窗口 (仅显示，不切换)。
+    /// 用于 focus_lost 等场景：窗口已隐藏时不再重复显示。
+    pub fn show_window(&self) {
+        let _ = self.sender.send(WindowAppEvent::ShowWindow);
+    }
+
+    /// 请求 Handler 隐藏窗口 (仅隐藏，不切换)。
+    /// 用于 focus_lost 和关闭按钮：避免 toggle 导致的反复显隐。
+    pub fn hide_window(&self) {
+        let _ = self.sender.send(WindowAppEvent::HideWindow);
+    }
+
     /// 退出应用。
     pub fn quit(&self) {
         let _ = self.sender.send(WindowAppEvent::Quit);
@@ -50,6 +69,11 @@ impl WindowEventSender {
     /// 通知 Handler 阶段已流转 (隐藏态时 Handler 决定是否自动呼出)。
     pub fn phase_advanced(&self) {
         let _ = self.sender.send(WindowAppEvent::PhaseAdvanced);
+    }
+
+    /// 动态更新窗口背景色。
+    pub fn set_clear_color(&self, color: Color) {
+        let _ = self.sender.send(WindowAppEvent::SetClearColor(color));
     }
 }
 
@@ -121,6 +145,7 @@ pub(super) fn convert_event(
                 pressed: event.state == ElementState::Pressed,
                 shift: modifiers.shift_key(),
                 ctrl: modifiers.control_key(),
+                alt: modifiers.alt_key(),
             })
         }
         WindowEvent::Ime(ime) => match ime {

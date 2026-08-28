@@ -7,10 +7,12 @@
 //! "清屏 + 绘制一帧矩形"的能力; 文本管线在后续模块中加入。
 
 mod background;
+mod image;
 mod rect;
 mod text;
 
 pub use background::{BackgroundConfig, BackgroundFrame, BackgroundPipeline, ScaleMode};
+pub use image::{ImageBatch, ImagePipeline};
 pub use rect::{DrawTarget, RectBatch, RectPipeline};
 pub use text::{TextBatch, TextPipeline};
 
@@ -86,6 +88,8 @@ pub struct Context {
     rect_pipeline: RectPipeline,
     /// 文本渲染管线。
     text_pipeline: TextPipeline,
+    /// 图像纹理渲染管线。
+    image_pipeline: ImagePipeline,
 }
 
 impl Context {
@@ -181,6 +185,7 @@ impl Context {
         let rect_pipeline = RectPipeline::new(&device, format);
         let text_pipeline = TextPipeline::new(&device, format, crate::GlyphAtlas::DEFAULT_SIZE);
         let background_pipeline = BackgroundPipeline::new(&device, &queue, format, background);
+        let image_pipeline = ImagePipeline::new(&device, format);
         log::info!("渲染管线创建耗时：{:?}", stage.elapsed());
 
         Ok(Self {
@@ -192,6 +197,7 @@ impl Context {
             background_pipeline: Some(background_pipeline),
             rect_pipeline,
             text_pipeline,
+            image_pipeline,
         })
     }
 
@@ -206,6 +212,11 @@ impl Context {
         log::debug!("surface 重建：{width}x{height}");
     }
 
+    /// 动态更新清屏色 (主题切换等场景)。
+    pub fn set_clear_color(&mut self, color: crate::Color) {
+        self.clear_color = color;
+    }
+
     /// 写入应用层产出的每帧背景状态 (场景选择 / 淡化 / 清屏色)。
     ///
     /// 由 `App::background_frame` 的返回值驱动;未提供时保持配置初始化时的静态背景。
@@ -215,9 +226,14 @@ impl Context {
         }
     }
 
-    /// 渲染一帧：背景图 (如有) → 矩形 pass → 文本 pass。
+    /// 渲染一帧：背景图 (如有) → 矩形 pass → 文本 pass → 图像 pass。
     /// 返回 false 表示出现致命错误，应退出。
-    pub fn render(&mut self, rects: &RectBatch, texts: &mut TextBatch) -> bool {
+    pub fn render(
+        &mut self,
+        rects: &RectBatch,
+        texts: &mut TextBatch,
+        images: &mut ImageBatch,
+    ) -> bool {
         use wgpu::CurrentSurfaceTexture as CST;
         let frame = match self.surface.get_current_texture() {
             CST::Success(frame) | CST::Suboptimal(frame) => frame,
@@ -273,6 +289,11 @@ impl Context {
         );
         self.text_pipeline
             .draw(&self.device, &self.queue, &mut encoder, &target, texts);
+        // 图像纹理 pass
+        if !images.is_empty() {
+            self.image_pipeline
+                .draw(&self.device, &self.queue, &mut encoder, &target, images);
+        }
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
         true

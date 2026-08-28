@@ -135,6 +135,13 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
         120
     }
 
+    /// 标准控件高度 (按钮、输入框等单行表单控件)。
+    ///
+    /// 保证同类控件并排时默认对齐; 产品层可按需覆盖。
+    fn control_height(&self) -> f32 {
+        36.0
+    }
+
     /// 超小间距。
     fn spacing_xs(&self) -> f32;
     /// 小间距。
@@ -262,6 +269,10 @@ impl Theme for LightTheme {
 
     fn font_size_heading(&self) -> u16 {
         20
+    }
+
+    fn control_height(&self) -> f32 {
+        36.0
     }
 
     fn spacing_xs(&self) -> f32 {
@@ -624,6 +635,17 @@ mod tests {
         let theme = LightTheme;
         assert!(theme.font_size_small() < theme.font_size_body());
         assert!(theme.font_size_body() < theme.font_size_heading());
+    }
+
+    #[test]
+    fn light_theme_control_height_is_36() {
+        assert_eq!(LightTheme.control_height(), 36.0);
+    }
+
+    #[test]
+    fn scene_theme_control_height_matches_light_theme() {
+        let theme = SceneTheme::new(sample_dark_palette());
+        assert_eq!(theme.control_height(), LightTheme.control_height());
     }
 
     #[test]

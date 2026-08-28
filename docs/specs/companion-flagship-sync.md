@@ -1,8 +1,10 @@
-# Spec: 旗舰数据同步边界 —— 同步什么、怎么合并、订阅归属
+# Spec: 数据同步边界 —— 同步什么、怎么合并
+
+> ⚠️ **付费引用已过时** (2026-08-10): pomodoro 全部功能免费,同步不再与订阅/买断绑定。数据同步本身仍是未来功能,但付费归属部分已失效。意图落盘: `docs/intent/pomodoro-free-release.md`。
 
 - @author 十四叔
 - @date 2026/08/02
-- 状态: 已确认 (2026-08-02 用户裁定 Q1-Q5; 依据 `docs/intent/companion-flagship.md` + `docs/specs/companion-flagship-pricing.md`)
+- 状态: 语义已确认 → **付费归属已废弃** (2026-08-10)
 - 本期不做: 不建后端、不实现同步、不改代码。本 spec 只定语义, 为将来实现立边界。
 
 ## 决策目标

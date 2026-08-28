@@ -1,7 +1,7 @@
 # benchmark.ps1 - release startup + memory benchmark for danqing examples.
 #
 # Usage (from repo root):
-#   powershell -NoProfile -File tools/benchmark.ps1 [-Example showcase] [-Runs 3]
+#   powershell -NoProfile -File tools/benchmark.ps1 [-Example danqing-showcase] [-Runs 3]
 #
 # Prints per-run and aggregate numbers, then PASS/FAIL against budgets:
 #   - startup_to_visible <= StartupBudgetMs
@@ -9,7 +9,7 @@
 # Exit code 0 on PASS, 1 on FAIL. Pure ASCII by design (see repo tooling rules).
 
 param(
-    [string]$Example = "showcase",
+    [string]$Example = "danqing-showcase",
     [int]$Runs = 3,
     [double]$StartupBudgetMs = 1000,
     # LowPower (iGPU) adapter: shared GPU memory is fully counted in the

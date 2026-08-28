@@ -96,13 +96,35 @@ impl Widget for Text {
 
     fn paint(&self, area: Rect, _rects: &mut RectBatch, texts: &mut TextBatch) {
         let baseline = area.origin.y + texts.ascent(f32::from(self.font_size));
-        texts.push_text(
-            &self.content,
-            area.origin.x,
-            baseline,
-            self.font_size,
-            self.color,
-        );
+
+        // 检测 "..." 并拆分渲染：前段 baseline 不变，省略号底边对齐
+        if let Some(prefix) = self.content.strip_suffix("...") {
+            // 前段：正常 baseline
+            if !prefix.is_empty() {
+                texts.push_text(prefix, area.origin.x, baseline, self.font_size, self.color);
+            }
+
+            // 省略号：底边对齐
+            let desc = texts.descent(f32::from(self.font_size));
+            let ellipsis_baseline = area.origin.y + area.size.height - desc;
+            let prefix_width = texts.measure(prefix, self.font_size);
+            texts.push_text(
+                "...",
+                area.origin.x + prefix_width,
+                ellipsis_baseline,
+                self.font_size,
+                self.color,
+            );
+        } else {
+            // 无省略号：正常渲染
+            texts.push_text(
+                &self.content,
+                area.origin.x,
+                baseline,
+                self.font_size,
+                self.color,
+            );
+        }
     }
 }
 
@@ -130,5 +152,37 @@ mod tests {
         let mut text = Text::new("x").color(Color::WHITE);
         text.sync(&() as &dyn Any);
         assert_eq!(text.color, Color::WHITE, "无绑定时静态色不被改动");
+    }
+
+    #[test]
+    fn text_without_ellipsis_uses_ascent_baseline() {
+        // 不含 "..." 时，整段文本使用 ascent baseline (行顶对齐)
+        let text = Text::new("清空");
+        let mut texts = TextBatch::new();
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 40.0);
+        text.paint(area, &mut RectBatch::new(), &mut texts);
+        assert!(!texts.is_empty(), "应有字形输出");
+        // strip_suffix("...") 应返回 None, 走正常渲染分支
+    }
+
+    #[test]
+    fn text_with_ellipsis_uses_descent_baseline() {
+        // 含 "..." 时，省略号使用 descent baseline (行底对齐)
+        let text = Text::new("清空...");
+        let mut texts = TextBatch::new();
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 40.0);
+        text.paint(area, &mut RectBatch::new(), &mut texts);
+        assert!(!texts.is_empty(), "应有字形输出");
+        // strip_suffix("...") 应返回 Some("清空"), 走拆分渲染分支
+    }
+
+    #[test]
+    fn ellipsis_only_text_renders_only_ellipsis() {
+        // 纯 "..." 文本：prefix 为空，只渲染省略号
+        let text = Text::new("...");
+        let mut texts = TextBatch::new();
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 40.0);
+        text.paint(area, &mut RectBatch::new(), &mut texts);
+        assert!(!texts.is_empty(), "纯省略号应有字形输出");
     }
 }

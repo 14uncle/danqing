@@ -5,7 +5,7 @@
 
 use crate::event::Event;
 use crate::render::{RectBatch, TextBatch};
-use crate::widget::layout::flow::{Axis, Flow};
+use crate::widget::layout::flow::{Axis, CrossAlign, Flow};
 use crate::widget::{EventResult, MsgQueue, Widget};
 use crate::{Constraints, Rect, Size};
 
@@ -39,6 +39,18 @@ impl Row {
     /// 要求子项的宽度不随高度增大而增大 (如保持宽高比的图片组件不适用)。
     pub fn cross_stretch(mut self) -> Self {
         self.flow.set_cross_stretch(true);
+        self
+    }
+
+    /// 子项在交叉轴 (垂直) 方向居中对齐。
+    pub fn cross_center(mut self) -> Self {
+        self.flow.set_cross_align(CrossAlign::Center);
+        self
+    }
+
+    /// 子项在交叉轴 (垂直) 方向末尾对齐。
+    pub fn cross_end(mut self) -> Self {
+        self.flow.set_cross_align(CrossAlign::End);
         self
     }
 
@@ -80,6 +92,10 @@ impl Widget for Row {
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
         self.flow.paint(area.origin, rects, texts);
+    }
+
+    fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+        self.flow.paint_image(area.origin, images);
     }
 
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {

@@ -29,6 +29,11 @@ pub enum ScrollAxis {
 /// 用有限大值代替 `f32::INFINITY`,避免 Flow 等布局算法在分配 Fill 权重时溢出。
 const MAX_CONTENT_SIZE: f32 = 1_000_000.0;
 
+/// 可见性区间绑定闭包: 每帧从应用状态读取 (revision, top, height)。
+///
+/// 语义见 [`Scrollable::bind_visible`]。
+type VisibleBinding = Box<dyn Fn(&dyn std::any::Any) -> (u64, f32, f32)>;
+
 /// 滚动容器。
 pub struct Scrollable {
     child: Node,
@@ -47,6 +52,10 @@ pub struct Scrollable {
     thumb_radius: f32,
     /// 自身绝对矩形,在 paint 阶段缓存,供 hit_area 使用。
     area: Cell<Rect>,
+    /// 可见性区间绑定 (键盘选中跟随等)。
+    visible_binding: Option<VisibleBinding>,
+    /// 已应用的绑定 revision; 仅在 revision 变化时纠偏, 滚轮自由。
+    applied_rev: u64,
 }
 
 impl Scrollable {
@@ -69,6 +78,8 @@ impl Scrollable {
             track_width: theme.spacing_xs(),
             thumb_radius: theme.radius_sm(),
             area: Cell::new(Rect::default()),
+            visible_binding: None,
+            applied_rev: 0,
         }
     }
 
@@ -87,6 +98,38 @@ impl Scrollable {
     /// 当前滚动偏移。
     pub fn scroll_offset(&self) -> Point {
         self.scroll_offset
+    }
+
+    /// 绑定「保持可见」区间: 每帧 `sync` 时经闭包读取 `(revision, top, height)`
+    /// (内容坐标), revision 变化时调整滚动偏移使该区间落入视口。
+    ///
+    /// 典型用法: 键盘选中行跟随 —— 应用把选中行的 revision / y / 行高
+    /// 放进状态, 选中变化 (revision 递增) 时容器把该行滚入视口。
+    /// revision 不变则不纠偏: 滚轮滚远后不会被每帧绑回, 滚轮自由。
+    ///
+    /// 仅对纵向滚动生效 (纠偏只调 y 轴); 请勿用于 Horizontal / Both 容器。
+    ///
+    /// 状态类型 `S` 须与 [`App`](crate::App) 实现者一致。
+    pub fn bind_visible<S: 'static>(mut self, f: impl Fn(&S) -> (u64, f32, f32) + 'static) -> Self {
+        self.visible_binding = Some(Box::new(move |state: &dyn std::any::Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("Scrollable::bind_visible 绑定的状态类型不匹配");
+            f(state)
+        }));
+        self
+    }
+
+    /// 调整偏移使纵向区间 [top, top+height] 落入视口 (最小纠偏)。
+    fn ensure_visible(&mut self, top: f32, height: f32) {
+        let bottom = top + height;
+        let view_bottom = self.scroll_offset.y + self.viewport_size.height;
+        if top < self.scroll_offset.y {
+            self.scroll_offset.y = top;
+        } else if bottom > view_bottom {
+            self.scroll_offset.y = bottom - self.viewport_size.height;
+        }
+        self.clamp_offset();
     }
 
     fn max_offset(&self) -> Point {
@@ -229,6 +272,16 @@ impl Scrollable {
 impl Widget for Scrollable {
     fn sync(&mut self, state: &dyn std::any::Any) {
         self.child.sync(state);
+        if let Some(binding) = &self.visible_binding {
+            let (rev, top, height) = binding(state);
+            // 视口未就绪 (首帧 sync 在 layout 前, viewport 仍为 ZERO) 时不消费
+            // revision: 此时 ensure_visible 算出的偏移会被 clamp 归零, 纠偏无效,
+            // 若消费了 rev 该项将永远滚不进视口, 直到下一次 rev 变化。
+            if rev != self.applied_rev && self.viewport_size.height > 0.0 {
+                self.applied_rev = rev;
+                self.ensure_visible(top, height);
+            }
+        }
     }
 
     fn animate(&mut self, ctx: &crate::app::AnimationCtx) {
@@ -264,6 +317,20 @@ impl Widget for Scrollable {
 
         // 绘制滚动条(在裁剪区外,不需要再裁剪)。
         self.draw_scrollbar(area, rects);
+    }
+
+    fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+        // 与 paint 一致: 图像同样裁剪到视口, 滚出视口的不进批次
+        images.push_clip(area);
+        let child_area = Rect::new(
+            Point::new(
+                area.origin.x - self.scroll_offset.x,
+                area.origin.y - self.scroll_offset.y,
+            ),
+            self.child_size,
+        );
+        self.child.paint_image(child_area, images);
+        images.pop_clip();
     }
 
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
@@ -400,5 +467,94 @@ mod tests {
         scroll.handle_wheel((-5.0, 0.0));
         assert!(scroll.scroll_offset.x > 0.0);
         assert!(scroll.scroll_offset.y.abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn bind_visible_scrolls_into_view_only_on_revision_change() {
+        struct State {
+            rev: u64,
+            top: f32,
+        }
+        let mut texts = TextBatch::new();
+        let mut scroll = Scrollable::new(UiBox::new(Color::BLACK).size(100.0, 1000.0))
+            .bind_visible(|s: &State| (s.rev, s.top, 50.0));
+        scroll.layout(Constraints::tight(Size::new(100.0, 100.0)), &mut texts);
+
+        // 初次应用: 目标区间 [800, 850] 在视口 [0, 100] 之下, 纠偏为底对齐。
+        scroll.sync(&State { rev: 1, top: 800.0 });
+        assert!((scroll.scroll_offset.y - 750.0).abs() < f32::EPSILON);
+
+        // revision 不变: 滚轮滚回顶部后不绑回 (滚轮自由)。
+        scroll.handle_wheel((0.0, 25.0));
+        scroll.sync(&State { rev: 1, top: 800.0 });
+        assert!(scroll.scroll_offset.y.abs() < f32::EPSILON);
+
+        // revision 变化: 新区间 [0, 50] 在当前视口之上, 纠偏为顶对齐。
+        scroll.handle_wheel((0.0, -25.0));
+        scroll.sync(&State { rev: 2, top: 0.0 });
+        assert!(scroll.scroll_offset.y.abs() < f32::EPSILON);
+    }
+
+    /// 生命周期是 sync → layout: 首帧 sync 时视口仍为 ZERO, 此时不得消费
+    /// revision —— 否则纠偏被 clamp 归零且 rev 已记, 该项永远滚不进视口。
+    #[test]
+    fn bind_visible_defers_revision_until_viewport_ready() {
+        struct State {
+            rev: u64,
+            top: f32,
+        }
+        let mut texts = TextBatch::new();
+        let mut scroll = Scrollable::new(UiBox::new(Color::BLACK).size(100.0, 1000.0))
+            .bind_visible(|s: &State| (s.rev, s.top, 50.0));
+
+        // layout 前 sync: revision 不被消费, 偏移不变 (无可纠偏的视口)。
+        scroll.sync(&State { rev: 1, top: 800.0 });
+        assert!(scroll.scroll_offset.y.abs() < f32::EPSILON);
+        assert_eq!(scroll.applied_rev, 0);
+
+        // layout 后 rev 仍未消费: 下一帧 sync 正常纠偏 (底对齐 750)。
+        scroll.layout(Constraints::tight(Size::new(100.0, 100.0)), &mut texts);
+        scroll.sync(&State { rev: 1, top: 800.0 });
+        assert!((scroll.scroll_offset.y - 750.0).abs() < f32::EPSILON);
+        assert_eq!(scroll.applied_rev, 1);
+    }
+
+    /// 子组件在子坐标系底部推图像; 视口高 100。
+    struct BottomImage;
+    impl Widget for BottomImage {
+        fn layout(&mut self, _c: Constraints, _t: &mut TextBatch) -> Size {
+            Size::new(100.0, 1000.0)
+        }
+        fn paint(&self, _a: Rect, _r: &mut RectBatch, _t: &mut TextBatch) {}
+        fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+            let data = [255u8; 4];
+            images.push_image(
+                &data,
+                1,
+                1,
+                Rect::from_xywh(area.origin.x, area.origin.y + 950.0, 40.0, 40.0),
+            );
+        }
+    }
+
+    /// paint 有 push_clip/pop_clip, paint_image 也必须裁剪到视口,
+    /// 否则滚出视口的图像仍会被绘制 (clipboard 列表缩略图场景踩实)。
+    #[test]
+    fn paint_image_clips_to_viewport() {
+        let mut texts = TextBatch::new();
+        let mut scroll = Scrollable::new(BottomImage);
+        scroll.layout(Constraints::tight(Size::new(100.0, 100.0)), &mut texts);
+        let viewport = Rect::from_xywh(0.0, 0.0, 100.0, 100.0);
+
+        // 未滚动: 图像在子坐标 950..990, 完全在视口之下 → 应被裁掉
+        let mut images = crate::render::ImageBatch::new();
+        scroll.paint_image(viewport, &mut images);
+        assert_eq!(images.len(), 0, "视口外的图像不应进入批次");
+
+        // 滚动 900: 图像落在视口 y 50..90 → 保留
+        scroll.handle_wheel((0.0, -900.0 / 25.0)); // 每单位 25px
+        let mut images = crate::render::ImageBatch::new();
+        scroll.paint_image(viewport, &mut images);
+        assert_eq!(images.len(), 1, "滚入视口的图像应保留");
     }
 }

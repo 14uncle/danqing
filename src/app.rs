@@ -48,10 +48,24 @@ pub trait App: Any {
     /// 未被组件树消费的鼠标事件也会到达这里。
     fn event(&mut self, _event: &Event) {}
 
+    /// 键盘前置过滤: 在焦点组件分发**之前**调用, 给应用层拦截机会。
+    ///
+    /// 返回 `Some(msg)` 表示应用消费了该按键 (消息入队, 事件不再下发);
+    /// 返回 `None` 表示放行, 继续走焦点路由。
+    /// 默认 `None` (不拦截)。
+    fn app_key_filter(&mut self, _event: &Event) -> Option<Self::Msg> {
+        None
+    }
+
     /// 每帧心跳：在 `sync` 之前调用，驱动计时 / 过渡动画等时间相关状态。
     ///
     /// 默认空实现;需要逐帧推进状态的应用 (如番茄钟) 覆盖之。
     fn tick(&mut self, _ctx: &AnimationCtx) {}
+
+    /// 窗口可见性变化回调: 由框架在 show/hide 后调用。
+    /// 启动首次显示后也会回调一次 (初始状态同步) —— 应用层的可见性镜像
+    /// (如热键 toggle 方向判断) 以此为准, 无需自行假设初始值。
+    fn visibility_changed(&mut self, _visible: bool) {}
 
     /// 每帧背景状态：场景选择 / 淡化进度 / 清屏色。
     ///
@@ -114,4 +128,16 @@ pub trait App: Any {
     /// 焦点恢复请求已被框架应用 (一次性语义)：实现者应清除请求状态。
     /// 默认空实现。
     fn focus_restored(&mut self) {}
+
+    /// 窗口失去 OS 焦点时回调。
+    ///
+    /// 用于实现"失焦自动隐藏"等行为。默认空实现。
+    /// 调用时机：`WindowEvent::Focused(false)` 到达时。
+    fn focus_lost(&mut self) {}
+
+    /// 窗口获得 OS 焦点时回调。
+    ///
+    /// 用于跟踪焦点状态 (如剪贴板管理器的首次焦点守卫)。默认空实现。
+    /// 调用时机：`WindowEvent::Focused(true)` 到达时。
+    fn focus_gained(&mut self) {}
 }

@@ -62,6 +62,7 @@ fn typing_into_focused_input() {
             pressed: true,
             shift: false,
             ctrl: false,
+            alt: false,
         },
         Rect::default(),
         &mut msgs,

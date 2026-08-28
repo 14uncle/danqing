@@ -60,6 +60,17 @@ impl Widget for Padding {
         self.child.paint(inner, rects, texts);
     }
 
+    fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+        let inner = Rect::new(
+            Point::new(
+                area.origin.x + self.edges.left,
+                area.origin.y + self.edges.top,
+            ),
+            self.child_size,
+        );
+        self.child.paint_image(inner, images);
+    }
+
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
         let inner = Rect::new(
             Point::new(

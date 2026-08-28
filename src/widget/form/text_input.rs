@@ -43,6 +43,8 @@ pub struct TextInput {
     focus_border_color: Color,
     /// 边框粗细。
     border_width: f32,
+    /// 关闭自绘背景与边框: 由外层容器绘制外壳, 组件只管文本/光标/选区/IME。
+    chromeless: bool,
     /// 显式宽度 (未指定则按约束上限)。
     width: Option<f32>,
     /// layout/paint 缓存：自身绝对矩形。
@@ -51,12 +53,23 @@ pub struct TextInput {
     char_offsets: Vec<f32>,
     /// 行高 (用于 IME 区域与光标高度)。
     line_height: f32,
+    /// 垂直内边距 (由 control_height 和行高动态计算，保证精确对齐)。
+    vertical_pad: f32,
     /// 光标可见性 (由动画控制闪烁)。
     caret_visible: bool,
     /// IME 合成文本 (显示在光标处，带下划线)。
     preedit: Option<String>,
     /// 鼠标拖拽选区状态。
     dragging: bool,
+    /// 占位文字 (空态显示, 居中, 可经 offset 微调垂直位置)。
+    placeholder: Option<String>,
+    /// 占位文字颜色。
+    placeholder_color: Color,
+    /// 占位文字相对正常 baseline 的垂直偏移 (正=下, 负=上)。
+    /// 产品层可据此微调占位文字位置, 不影响光标/输入文字。
+    placeholder_offset: f32,
+    /// 标准控件高度 (来自 Theme token)。
+    control_height: f32,
 }
 
 impl TextInput {
@@ -80,13 +93,19 @@ impl TextInput {
             border_color: theme.border(),
             focus_border_color: theme.accent(),
             border_width: 1.0,
+            chromeless: false,
             width: None,
             area: Cell::new(Rect::default()),
             char_offsets: Vec::new(),
             line_height: 0.0,
+            vertical_pad: 0.0,
             caret_visible: true,
             preedit: None,
             dragging: false,
+            placeholder: None,
+            placeholder_color: Color::from_srgb8(160, 160, 160),
+            placeholder_offset: 0.0,
+            control_height: theme.control_height(),
         }
     }
 
@@ -126,6 +145,57 @@ impl TextInput {
         self
     }
 
+    /// 设置内边距 (文本起点与外框边缘的间距)。
+    ///
+    /// chromeless 场景下外层容器自绘占位文字/外壳时,
+    /// 用同一份 padding 对齐两侧的文字起点, 避免光标与占位文字错位。
+    pub fn padding(mut self, padding: Edges) -> Self {
+        self.padding = padding;
+        self
+    }
+
+    /// 设置占位文字与颜色 (文本为空且无 IME 合成时显示)。
+    ///
+    /// 占位文字默认与正常文字同 baseline (居中);
+    /// 可经 [`Self::placeholder_offset`] 微调垂直位置, 不影响光标/输入文字。
+    pub fn placeholder(mut self, text: impl Into<String>, color: Color) -> Self {
+        self.placeholder = Some(text.into());
+        self.placeholder_color = color;
+        self
+    }
+
+    /// 占位文字垂直偏移 (逻辑像素, 正=下, 负=上)。
+    ///
+    /// 相对正常 baseline 偏移, 仅影响占位文字, 不影响光标与输入文字。
+    /// 典型用法: 产品层需要占位文字靠下对齐时传正值。
+    pub fn placeholder_offset(mut self, offset: f32) -> Self {
+        self.placeholder_offset = offset;
+        self
+    }
+
+    /// 关闭自绘背景与边框: 外壳 (底色/边框/焦点态描边) 交由外层容器绘制,
+    /// 组件只负责文本、光标、选区与 IME preedit。
+    ///
+    /// 焦点态描边由外层经 [`Self::is_focused`] 查询后画在自己的外壳矩形上,
+    /// 避免组件在内缩的文字区里再画一圈小边框 (双框)。
+    pub fn chromeless(mut self) -> Self {
+        self.chromeless = true;
+        self
+    }
+
+    /// 是否持有键盘焦点 (供外层容器绘制焦点态外壳)。
+    pub fn is_focused(&self) -> bool {
+        self.focused
+    }
+
+    /// 是否有进行中的 IME 合成 (preedit 未上屏)。
+    ///
+    /// 合成期间 `value()` 仍为空 —— 外层容器画占位文字时须连同此状态判断,
+    /// 否则占位文字与拼音字母重叠, 直到候选词上屏才消失。
+    pub fn is_composing(&self) -> bool {
+        self.preedit.is_some()
+    }
+
     /// 设置文本变化回调 (每次编辑后触发)。
     pub fn on_change<M: 'static>(mut self, f: impl Fn(&str) -> M + 'static) -> Self {
         self.editor = self.editor.on_change(f);
@@ -135,6 +205,32 @@ impl TextInput {
     /// 当前文本 (不含 preedit)。
     pub fn value(&self) -> &str {
         self.editor.text()
+    }
+
+    /// 清空文本 (可撤销)。
+    ///
+    /// 保留组件实例与焦点状态 —— 需要「清空输入」时不要用新建实例替代:
+    /// FocusIn 只派发一次, 新实例永远等不到焦点态 (光标不显示)。
+    ///
+    /// 不产生 `on_change` 消息: 应用状态侧须自行同步清空 (下帧 bind 也会纠回)。
+    pub fn clear(&mut self) {
+        self.editor.select_all();
+        self.editor.cut_selection();
+        self.preedit = None;
+    }
+
+    /// 设置文本内容 (可撤销)。
+    ///
+    /// 替换全部文本并把光标移到末尾。不产生 `on_change` 消息:
+    /// 应用状态侧须自行同步 (下帧 bind 也会纠回)。
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.editor.set_text(text);
+        self.preedit = None;
+    }
+
+    /// 替换占位文字, 保留焦点与输入状态。
+    pub fn set_placeholder(&mut self, text: impl Into<String>) {
+        self.placeholder = Some(text.into());
     }
 
     /// 光标位置 (测试用)。
@@ -177,6 +273,18 @@ impl TextInput {
     #[cfg(test)]
     pub(crate) fn radius_value(&self) -> f32 {
         self.radius
+    }
+
+    /// 当前标准控件高度 (测试用)。
+    #[cfg(test)]
+    pub(crate) fn control_height_value(&self) -> f32 {
+        self.control_height
+    }
+
+    /// 当前垂直内边距 (测试用)。
+    #[cfg(test)]
+    pub(crate) fn vertical_pad_value(&self) -> f32 {
+        self.vertical_pad
     }
 
     /// 在光标处插入文本。
@@ -257,7 +365,8 @@ impl Widget for TextInput {
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
         let content_width = texts.measure(self.editor.text(), self.font_size);
         let line_height = texts.line_height(f32::from(self.font_size));
-        let height = line_height + self.padding.vertical();
+        let height = self.control_height;
+        let vertical_pad = ((height - line_height) / 2.0).max(0.0);
         let width = self
             .width
             .unwrap_or(constraints.max_width)
@@ -265,6 +374,7 @@ impl Widget for TextInput {
         let size = constraints.constrain(Size::new(width, height));
         self.area.set(Rect::new(crate::Point::ZERO, size));
         self.line_height = line_height;
+        self.vertical_pad = vertical_pad;
 
         // 缓存每个字符右侧的 x 偏移，用于鼠标点击定位光标。
         self.char_offsets.clear();
@@ -282,20 +392,23 @@ impl Widget for TextInput {
 
         // 背景与边框共用同一份像素对齐几何：轮廓精确重合 (贴合),
         // 且 1px 描边落在完整像素行上满强度渲染 (底边发虚的根因对策)。
-        let surface = area.snap_to_pixels();
-        rects.push_rect(surface, self.background, self.radius);
+        // chromeless 模式下外壳由外层容器绘制, 这里跳过。
+        if !self.chromeless {
+            let surface = area.snap_to_pixels();
+            rects.push_rect(surface, self.background, self.radius);
 
-        // 边框：聚焦时使用 accent，否则使用默认边框色。
-        let border_color = if self.focused {
-            self.focus_border_color
-        } else {
-            self.border_color
-        };
-        rects.push_rounded_border(surface, border_color, self.radius, self.border_width);
+            // 边框：聚焦时使用 accent，否则使用默认边框色。
+            let border_color = if self.focused {
+                self.focus_border_color
+            } else {
+                self.border_color
+            };
+            rects.push_rounded_border(surface, border_color, self.radius, self.border_width);
+        }
 
         // 文本起点
         let text_x = area.origin.x + self.padding.left;
-        let baseline = area.origin.y + self.padding.top + texts.ascent(f32::from(self.font_size));
+        let baseline = area.origin.y + self.vertical_pad + texts.ascent(f32::from(self.font_size));
 
         // 选区高亮
         let (sel_start, sel_end) = self.selection_range();
@@ -305,9 +418,9 @@ impl Widget for TextInput {
             rects.push_rect(
                 Rect::from_xywh(
                     x0,
-                    area.origin.y + self.padding.top,
+                    area.origin.y + self.vertical_pad,
                     x1 - x0,
-                    area.size.height - self.padding.vertical(),
+                    self.line_height,
                 ),
                 self.selection_color,
                 0.0,
@@ -322,6 +435,19 @@ impl Widget for TextInput {
             self.font_size,
             self.color,
         );
+
+        // 占位文字: 空态 + 无 IME 合成时显示, 可经 offset 微调垂直位置
+        if self.editor.text().is_empty() && self.preedit.is_none() {
+            if let Some(placeholder) = &self.placeholder {
+                texts.push_text(
+                    placeholder,
+                    text_x,
+                    baseline + self.placeholder_offset,
+                    self.font_size,
+                    self.placeholder_color,
+                );
+            }
+        }
 
         // preedit 文本与下划线
         if let Some(preedit) = &self.preedit {
@@ -340,7 +466,7 @@ impl Widget for TextInput {
         if self.focused && self.caret_visible {
             let caret_x = text_x + self.measure_to(texts, self.editor.cursor());
             let caret_height = texts.line_height(f32::from(self.font_size));
-            let caret_y = area.origin.y + self.padding.top;
+            let caret_y = area.origin.y + self.vertical_pad;
             rects.push_rect(
                 Rect::from_xywh(caret_x, caret_y, 2.0, caret_height),
                 self.caret_color,
@@ -368,6 +494,7 @@ impl Widget for TextInput {
                 pressed: true,
                 shift,
                 ctrl,
+                ..
             } => match key {
                 Key::Character(s) if !ctrl => {
                     self.insert(s);
@@ -529,7 +656,7 @@ impl Widget for TextInput {
             self.char_offsets.get(cursor - 1).copied().unwrap_or(0.0)
         };
         let x = area.origin.x + self.padding.left + cursor_x;
-        let y = area.origin.y + self.padding.top;
+        let y = area.origin.y + self.vertical_pad;
         Some(Rect::from_xywh(x, y, 0.0, self.line_height))
     }
 
@@ -549,6 +676,20 @@ mod tests {
         assert_eq!(input.text_color_value(), LightTheme.text_primary());
         assert_eq!(input.background_color(), LightTheme.surface_input());
         assert_eq!(input.radius_value(), LightTheme.radius_sm());
+        assert_eq!(input.control_height_value(), LightTheme.control_height());
+    }
+
+    #[test]
+    fn text_input_layout_height_equals_control_height() {
+        let mut input = TextInput::new();
+        let mut texts = TextBatch::new();
+        let size = input.layout(Constraints::loose(Size::new(200.0, 100.0)), &mut texts);
+        assert!(
+            (size.height - LightTheme.control_height()).abs() < 0.01,
+            "输入框高度应精确等于 control_height {}, 实际 {}",
+            LightTheme.control_height(),
+            size.height
+        );
     }
 
     #[test]
@@ -571,6 +712,55 @@ mod tests {
     }
 
     #[test]
+    fn chromeless_skips_background_and_border() {
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 36.0);
+        let mut texts = TextBatch::new();
+
+        let normal = TextInput::new();
+        let mut rects = RectBatch::new();
+        normal.paint(area, &mut rects, &mut texts);
+        assert!(!rects.is_empty(), "默认模式应自绘背景 + 边框");
+
+        let chromeless = TextInput::new().chromeless();
+        let mut rects = RectBatch::new();
+        chromeless.paint(area, &mut rects, &mut texts);
+        assert!(rects.is_empty(), "chromeless 不应自绘外壳 (背景/边框)");
+    }
+
+    #[test]
+    fn composing_state_tracks_preedit_lifecycle() {
+        let mut t = TextInput::new();
+        let mut msgs = Vec::new();
+        assert!(!t.is_composing());
+        t.event(
+            &Event::Ime(ImeEvent::Preedit {
+                value: "ni".into(),
+                cursor: None,
+            }),
+            Rect::default(),
+            &mut msgs,
+        );
+        assert!(t.is_composing(), "preedit 期间应处于合成态");
+        t.event(
+            &Event::Ime(ImeEvent::Commit {
+                value: "你".into()
+            }),
+            Rect::default(),
+            &mut msgs,
+        );
+        assert!(!t.is_composing(), "上屏后合成态应结束");
+        assert_eq!(t.value(), "你");
+    }
+
+    #[test]
+    fn clear_empties_text_and_resets_cursor() {
+        let mut t = TextInput::new().text("要清空的文本");
+        t.clear();
+        assert_eq!(t.value(), "");
+        assert_eq!(t.cursor(), 0);
+    }
+
+    #[test]
     fn insert_moves_cursor() {
         let mut t = input();
         t.insert(" world");
@@ -587,6 +777,7 @@ mod tests {
                 pressed: true,
                 shift: false,
                 ctrl: false,
+                alt: false,
             },
             Rect::default(),
             &mut Vec::new(),
@@ -605,6 +796,7 @@ mod tests {
                 pressed: true,
                 shift: false,
                 ctrl: false,
+                alt: false,
             },
             Rect::default(),
             &mut Vec::new(),
@@ -618,6 +810,7 @@ mod tests {
                 pressed: true,
                 shift: false,
                 ctrl: true,
+                alt: false,
             },
             Rect::default(),
             &mut Vec::new(),
@@ -635,6 +828,7 @@ mod tests {
                 pressed: true,
                 shift: false,
                 ctrl: true,
+                alt: false,
             },
             Rect::default(),
             &mut Vec::new(),
@@ -677,6 +871,7 @@ mod tests {
                 pressed: true,
                 shift: true,
                 ctrl: true,
+                alt: false,
             },
             Rect::default(),
             &mut Vec::new(),
@@ -693,6 +888,7 @@ mod tests {
                 pressed: true,
                 shift: false,
                 ctrl: true,
+                alt: false,
             },
             Rect::default(),
             &mut Vec::new(),
@@ -742,6 +938,7 @@ mod tests {
                 pressed: true,
                 shift: false,
                 ctrl: false,
+                alt: false,
             },
             Rect::default(),
             &mut Vec::new(),
@@ -789,6 +986,7 @@ mod tests {
                 pressed: true,
                 shift: false,
                 ctrl: true,
+                alt: false,
             },
             Rect::default(),
             &mut Vec::new(),
@@ -893,10 +1091,10 @@ mod tests {
         let mut texts = TextBatch::new();
         t.layout(Constraints::loose(Size::new(500.0, 100.0)), &mut texts);
 
-        // paint 前 area 为本地原点，IME 区域应位于 (padding.left, padding.top)。
+        // paint 前 area 为本地原点，IME 区域应位于 (padding.left, vertical_pad)。
         let local = t.ime_area().unwrap();
         assert!((local.origin.x - t.padding.left).abs() < f32::EPSILON);
-        assert!((local.origin.y - t.padding.top).abs() < f32::EPSILON);
+        assert!((local.origin.y - t.vertical_pad_value()).abs() < f32::EPSILON);
 
         // paint 后缓存绝对矩形，IME 区域应跟随光标平移。
         let abs = Rect::from_xywh(20.0, 30.0, 500.0, 100.0);
@@ -905,10 +1103,58 @@ mod tests {
 
         let area = t.ime_area().unwrap();
         let expected_x = abs.origin.x + t.padding.left;
-        let expected_y = abs.origin.y + t.padding.top;
+        let expected_y = abs.origin.y + t.vertical_pad_value();
         assert!((area.origin.x - expected_x).abs() < f32::EPSILON);
         assert!((area.origin.y - expected_y).abs() < f32::EPSILON);
         assert_eq!(area.size.width, 0.0);
         assert_eq!(area.size.height, t.line_height);
+    }
+
+    #[test]
+    fn placeholder_shown_when_empty_and_not_composing() {
+        let color = Color::from_srgb8(160, 160, 160);
+        let t = TextInput::new().placeholder("搜索历史...", color);
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 36.0);
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        t.paint(area, &mut rects, &mut texts);
+        // 无文本内容时应有占位文字字形
+        assert!(!texts.is_empty(), "空输入应渲染占位文字");
+    }
+
+    #[test]
+    fn placeholder_hidden_when_text_present() {
+        let color = Color::from_srgb8(160, 160, 160);
+        let t = TextInput::new()
+            .text("Hello")
+            .placeholder("搜索历史...", color);
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 36.0);
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        t.paint(area, &mut rects, &mut texts);
+        // 有文本内容时不应有占位文字字形 (只有 "Hello" 5 个)
+        assert_eq!(texts.len(), 5, "有输入时不应渲染占位文字");
+    }
+
+    #[test]
+    fn placeholder_hidden_during_composition() {
+        let color = Color::from_srgb8(160, 160, 160);
+        let mut t = TextInput::new().placeholder("搜索历史...", color);
+        // 触发 IME 合成
+        let mut msgs = Vec::new();
+        t.event(
+            &Event::Ime(ImeEvent::Preedit {
+                value: "ni".into(),
+                cursor: None,
+            }),
+            Rect::from_xywh(0.0, 0.0, 200.0, 36.0),
+            &mut msgs,
+        );
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 36.0);
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        t.paint(area, &mut rects, &mut texts);
+        // 合成中: 只有 preedit 字母, 没有占位文字
+        assert_eq!(texts.len(), 2, "合成中不应渲染占位文字, 只有 preedit 字母");
     }
 }

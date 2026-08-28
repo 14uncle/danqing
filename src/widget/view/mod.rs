@@ -3,8 +3,10 @@
 
 //! 视图组件: 滚动视口与可见性切换。
 
+mod multi_panel;
 mod scrollable;
-mod switcher;
+mod tabs;
 
+pub use multi_panel::MultiPanel;
 pub use scrollable::{ScrollAxis, Scrollable};
-pub use switcher::Switcher;
+pub use tabs::Tabs;

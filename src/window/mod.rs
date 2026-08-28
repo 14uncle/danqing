@@ -11,15 +11,18 @@
 //! - `foreground` 窗口抢前台 / 顶层 (Windows AttachThreadInput)
 //! - `icon`       窗口 / 托盘图标加载 + Windows 无边框样式
 //! - `hotkey`     全局热键 ID 常量 + Windows 注册线程
+//! - `placement`  窗口显示落位 (跟随鼠标光标) + 钳制数学
 //! - `tray`       托盘菜单项 ID + 快捷键 label 单一来源 + 跨平台托盘
 //! - `handler`    ApplicationHandler 实现 (本模块最大，单独拆出)
 
 mod event;
 #[cfg(target_os = "windows")]
-mod foreground;
+pub mod foreground;
 mod handler;
 mod hotkey;
 mod icon;
+mod placement;
+pub mod startup;
 pub mod tray;
 
 use std::sync::mpsc::channel;
@@ -33,7 +36,8 @@ use crate::widget::Node;
 use crate::{Color, Size};
 
 pub use event::{WindowAppEvent, WindowEventSender};
-pub use hotkey::hotkey_ids;
+pub use hotkey::{GlobalHotkey, hotkey_ids};
+pub use placement::ShowPlacement;
 pub use tray::tray_action_ids;
 #[allow(unused_imports)]
 pub use tray::{TrayHandle, shortcut_for_id};
@@ -78,6 +82,20 @@ pub enum CloseBehavior {
     Hide,
 }
 
+/// 窗口渲染模式。
+///
+/// 控制事件循环的 `ControlFlow` 策略，影响隐藏态 CPU 占用与帧率行为。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowMode {
+    /// 按需渲染 (默认): 隐藏态 `ControlFlow::Wait` 零唤醒; 可见且无动画时
+    /// 事件驱动 redraw。适用于效率工具 (剪贴板管理器等)。
+    #[default]
+    OnDemand,
+    /// 持续渲染：隐藏态仍保持 `WaitUntil(16ms)` ≈ 60fps tick。
+    /// 适用于需要持续动画/音频的应用 (番茄钟等)。
+    Continuous,
+}
+
 /// 窗口初始配置。
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
@@ -101,12 +119,22 @@ pub struct WindowConfig {
     pub logo_name: String,
     /// 初始是否最大化。默认 `false` (普通尺寸 + 居中)。
     pub maximized: bool,
+    /// 窗口渲染模式：默认 [`WindowMode::OnDemand`] (按需渲染，省电)。
+    /// 番茄钟等需要持续动画的应用应设为 [`WindowMode::Continuous`]。
+    pub mode: WindowMode,
+    /// 重新显示时的落位策略：默认 [`ShowPlacement::Center`] (原位显示)。
+    /// 热键唤起的工具面板 (剪贴板管理器等) 应设为 [`ShowPlacement::Cursor`]。
+    pub placement: ShowPlacement,
+    /// 全局热键声明集合：空 = 不注册不启动热键线程。
+    /// 默认沿袭首个消费者 (番茄钟) 的 Ctrl+Shift+P/S/Q;
+    /// 新产品必须显式声明自己的热键，否则与番茄钟冲突 (后注册者失败)。
+    pub hotkeys: Vec<GlobalHotkey>,
 }
 
 impl Default for WindowConfig {
     fn default() -> Self {
         Self {
-            title: "danqing showcase".into(),
+            title: "danqing".into(),
             size: Size::new(1280.0, 800.0),
             // 深蓝灰：非常量黑 / 白，用于验证颜色参数通路
             clear_color: Color::rgb(0.10, 0.16, 0.24),
@@ -118,6 +146,13 @@ impl Default for WindowConfig {
             close_behavior: CloseBehavior::Exit,
             logo_name: "logo".into(),
             maximized: false,
+            mode: WindowMode::OnDemand,
+            placement: ShowPlacement::Center,
+            hotkeys: vec![
+                GlobalHotkey::ctrl_shift(hotkey_ids::TOGGLE_VISIBLE, 0x50), // P
+                GlobalHotkey::ctrl_shift(hotkey_ids::START_PAUSE, 0x53),    // S
+                GlobalHotkey::ctrl_shift(hotkey_ids::QUIT, 0x51),           // Q
+            ],
         }
     }
 }
@@ -139,8 +174,8 @@ pub fn run_app<A: App>(config: WindowConfig, app: &mut A) -> Result<(), WindowEr
     app.attach_window_sender(WindowEventSender {
         sender: window_event_tx,
     });
-    // 启动全局热键监听线程 (None 表示平台不支持)
-    let hotkey_rx = hotkeys::spawn().map(|(rx, _handle)| rx);
+    // 启动全局热键监听线程 (空声明 / 平台不支持 → None)
+    let hotkey_rx = hotkeys::spawn(&config.hotkeys).map(|(rx, _handle)| rx);
     // 安装系统托盘 (图标 + 菜单)。load_tray_icon 失败则降级到无托盘。
     #[cfg(target_os = "windows")]
     let tray = {

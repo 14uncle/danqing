@@ -87,6 +87,15 @@ impl Widget for Center {
             .paint(Rect::new(origin, self.child_size), rects, texts);
     }
 
+    fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
+        let origin = Point::new(
+            area.origin.x + (area.size.width - self.child_size.width) / 2.0,
+            area.origin.y + (area.size.height - self.child_size.height) / 2.0,
+        );
+        self.child
+            .paint_image(Rect::new(origin, self.child_size), images);
+    }
+
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
         let origin = Point::new(
             area.origin.x + (area.size.width - self.child_size.width) / 2.0,

@@ -40,6 +40,10 @@ pub struct Button {
     child_size: Size,
     /// layout 缓存：自身绝对矩形 (用于焦点命中与 IME 区域)。
     area: Rect,
+    /// 标准控件高度 (来自 Theme token)。
+    control_height: f32,
+    /// 垂直内边距 (由 control_height 和子组件高度动态计算，保证精确对齐)。
+    vertical_pad: f32,
 }
 
 impl Button {
@@ -59,7 +63,7 @@ impl Button {
             hover_binding: None,
             focus_color: Color::WHITE,
             focus_binding: None,
-            radius: theme.radius_md(),
+            radius: theme.radius_sm(),
             padding: Edges::symmetric(theme.spacing_lg(), theme.spacing_md()),
             hovered: false,
             pressed: false,
@@ -67,6 +71,8 @@ impl Button {
             id: None,
             child_size: Size::ZERO,
             area: Rect::default(),
+            control_height: theme.control_height(),
+            vertical_pad: 0.0,
         }
     }
 
@@ -191,12 +197,27 @@ impl Widget for Button {
     }
 
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
-        self.child_size = self.child.layout(constraints.deflate(self.padding), texts);
+        let height = self.control_height;
+        // 水平方向用 padding 约束，垂直方向不限制子组件（由 vertical_pad 居中）。
+        let h_pad = Edges {
+            top: 0.0,
+            right: self.padding.right,
+            bottom: 0.0,
+            left: self.padding.left,
+        };
+        let mut child_constraints = constraints.deflate(h_pad);
+        // 垂直轴松开下限：cross_stretch 会传入 tight 约束 (min==max==36)，
+        // 若透传给 Text 会导致 layout 返回 36 而非自然行高，vertical_pad 归零，
+        // 文字贴顶、省略号贴底。松开后 Text 返回自然行高，居中正确。
+        child_constraints.min_height = 0.0;
+        self.child_size = self.child.layout(child_constraints, texts);
+        let vertical_pad = ((height - self.child_size.height) / 2.0).max(0.0);
         let size = constraints.constrain(Size::new(
             self.child_size.width + self.padding.horizontal(),
-            self.child_size.height + self.padding.vertical(),
+            height,
         ));
         self.area = Rect::new(Point::ZERO, size);
+        self.vertical_pad = vertical_pad;
         size
     }
 
@@ -218,7 +239,7 @@ impl Widget for Button {
         let inner = Rect::new(
             Point::new(
                 area.origin.x + self.padding.left,
-                area.origin.y + self.padding.top,
+                area.origin.y + self.vertical_pad,
             ),
             self.child_size,
         );
@@ -346,6 +367,11 @@ impl Button {
     pub(crate) fn padding_value(&self) -> Edges {
         self.padding
     }
+
+    /// 当前标准控件高度 (测试用)。
+    pub(crate) fn control_height_value(&self) -> f32 {
+        self.control_height
+    }
 }
 
 #[cfg(test)]
@@ -358,10 +384,24 @@ mod tests {
         let button = Button::new(Text::new("OK"));
         assert_eq!(button.color_value(), LightTheme.accent());
         assert_eq!(button.focus_color_value(), Color::WHITE);
-        assert_eq!(button.radius_value(), LightTheme.radius_md());
+        assert_eq!(button.radius_value(), LightTheme.radius_sm());
         assert_eq!(
             button.padding_value(),
             Edges::symmetric(LightTheme.spacing_lg(), LightTheme.spacing_md())
+        );
+        assert_eq!(button.control_height_value(), LightTheme.control_height());
+    }
+
+    #[test]
+    fn button_layout_height_equals_control_height() {
+        let mut button = Button::new(Text::new("OK"));
+        let mut texts = TextBatch::new();
+        let size = button.layout(Constraints::loose(Size::new(200.0, 100.0)), &mut texts);
+        assert!(
+            (size.height - LightTheme.control_height()).abs() < 0.01,
+            "按钮高度应精确等于 control_height {}, 实际 {}",
+            LightTheme.control_height(),
+            size.height
         );
     }
 
@@ -369,7 +409,7 @@ mod tests {
     fn button_themed_uses_provided_theme() {
         let button = Button::themed(&LightTheme, Text::new("OK"));
         assert_eq!(button.color_value(), LightTheme.accent());
-        assert_eq!(button.radius_value(), LightTheme.radius_md());
+        assert_eq!(button.radius_value(), LightTheme.radius_sm());
     }
 
     #[test]

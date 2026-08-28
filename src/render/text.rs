@@ -96,6 +96,15 @@ impl TextBatch {
             .unwrap_or(px * 0.8)
     }
 
+    /// 指定字号下的 descent(基线到行底的距离)。
+    pub fn descent(&self, px: f32) -> f32 {
+        self.font
+            .inner()
+            .horizontal_line_metrics(px)
+            .map(|m| m.descent.abs())
+            .unwrap_or(px * 0.2)
+    }
+
     /// 测量单行文本宽度 (逐字前进宽度之和; 顺带预热图集缓存)。
     pub fn measure(&mut self, text: &str, px: u16) -> f32 {
         let mut width = 0.0;
@@ -486,5 +495,16 @@ mod tests {
         batch.pop_clip();
         batch.push_text("A", 0.0, 20.0, 16, Color::BLACK);
         assert!(!batch.is_empty());
+    }
+
+    #[test]
+    fn descent_returns_fallback_when_no_metrics() {
+        let batch = TextBatch::new();
+        let d = batch.descent(16.0);
+        // 无字体 metrics 时应回退 px * 0.2
+        assert!(
+            (d - 3.2).abs() < 0.01,
+            "descent 应为 16.0 * 0.2 = 3.2, 实际 {d}"
+        );
     }
 }

@@ -1,3 +1,7 @@
+[[example]]
+name = "danqing-showcase"
+path = "examples/showcase.rs"
+
 [package]
 name = "danqing"
 version = "0.1.0"
@@ -18,21 +22,21 @@ bytemuck = "1"
 pollster = "1"
 thiserror = "2"
 log = "0.4"
+env_logger = "0.11"
+# 日志时间戳 + panic hook 时间格式。
+chrono = "0.4"
 arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 tray-icon = "0.19"
-windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_Debug", "Win32_System_Threading"] }
+windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_Graphics_Gdi"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
 
 [dev-dependencies]
 resvg = "0.44"
 anyhow = "1"
-env_logger = "0.11"
-chrono = "0.4"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-dirs = "5"
-# 番茄钟环境音: 仅 OGG Vorbis 解码 + 播放, 精简 symphonia 特性。
-rodio = { version = "0.22", default-features = false, features = ["playback", "symphonia-ogg", "symphonia-vorbis"] }
+rfd = "0.15"
 
 [build-dependencies]
 winresource = "0.1"

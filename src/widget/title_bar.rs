@@ -26,6 +26,8 @@ pub enum LogoKind {
     Default,
     /// 番茄钟：玉色外环 (计时轨道) + 朱砂时针 / 分针 + 轴心。
     Pomodoro,
+    /// 剪贴板：深色圆角矩形 + 青色夹子 + 青色横线。
+    Clipboard,
 }
 
 /// 标题栏按钮布局样式。
@@ -154,6 +156,10 @@ pub struct TitleBar {
     font_size: u16,
     /// 三个按钮状态，按角色序索引 (0= 关闭，1= 最大化，2= 最小化)。
     buttons: [TitleButton; 3],
+    /// 是否显示最小化按钮。
+    show_minimize: bool,
+    /// 是否显示最大化按钮。
+    show_maximize: bool,
     /// 关闭按钮回调。
     on_close: Option<ActionFactory>,
     /// 最小化按钮回调。
@@ -246,6 +252,8 @@ impl TitleBar {
             traffic_leading: theme.spacing_md(),
             font_size: theme.font_size_body(),
             buttons: [TitleButton::default(); 3],
+            show_minimize: true,
+            show_maximize: true,
             on_close: None,
             on_minimize: None,
             on_maximize: None,
@@ -304,6 +312,18 @@ impl TitleBar {
         self
     }
 
+    /// 设置是否显示最小化按钮 (默认显示)。
+    pub fn show_minimize(mut self, show: bool) -> Self {
+        self.show_minimize = show;
+        self
+    }
+
+    /// 设置是否显示最大化按钮 (默认显示)。
+    pub fn show_maximize(mut self, show: bool) -> Self {
+        self.show_maximize = show;
+        self
+    }
+
     /// 设置 LOGO 变体，覆盖默认母 logo。
     pub fn logo_kind(mut self, kind: LogoKind) -> Self {
         self.logo_kind = kind;
@@ -349,15 +369,40 @@ impl TitleBar {
             TitleBarStyle::Standard => {
                 let size = self.height;
                 let right = area.origin.x + area.size.width;
-                let x = right - (pos as f32 + 1.0) * size - pos as f32 * self.button_gap;
+                // 计算此按钮之前 (更靠右) 有多少可见按钮
+                let visible_before = placed
+                    .iter()
+                    .take(pos)
+                    .filter(|r| self.is_button_visible(**r))
+                    .count();
+                let x = right
+                    - (visible_before as f32 + 1.0) * size
+                    - visible_before as f32 * self.button_gap;
                 Rect::from_xywh(x, area.origin.y, size, size)
             }
             TitleBarStyle::TrafficLights => {
                 let d = self.traffic_diameter;
-                let x = area.origin.x + self.traffic_leading + pos as f32 * (d + self.traffic_gap);
+                // 计算此按钮之前有多少可见按钮
+                let visible_before = placed
+                    .iter()
+                    .take(pos)
+                    .filter(|r| self.is_button_visible(**r))
+                    .count();
+                let x = area.origin.x
+                    + self.traffic_leading
+                    + visible_before as f32 * (d + self.traffic_gap);
                 let y = area.origin.y + (self.height - d) / 2.0;
                 Rect::from_xywh(x, y, d, d)
             }
+        }
+    }
+
+    /// 判断指定角色按钮是否应显示。
+    fn is_button_visible(&self, role: ButtonRole) -> bool {
+        match role {
+            ButtonRole::Close => true,
+            ButtonRole::Minimize => self.show_minimize,
+            ButtonRole::Maximize => self.show_maximize,
         }
     }
 
@@ -390,6 +435,7 @@ impl TitleBar {
     fn hit_button(&self, area: Rect, position: Point) -> Option<ButtonRole> {
         ButtonRole::ALL
             .into_iter()
+            .filter(|role| self.is_button_visible(*role))
             .find(|role| self.button_rect(area, *role).contains(position))
     }
 
@@ -511,14 +557,14 @@ impl TitleBar {
         match role {
             // 关闭:× 形两条对角线，用小圆点队列近似。
             ButtonRole::Close => {
-                self.push_axis_aligned_diagonal(
+                super::push_diagonal(
                     rects,
                     Point::new(cx - extent, cy - extent),
                     Point::new(cx + extent, cy + extent),
                     thickness,
                     color,
                 );
-                self.push_axis_aligned_diagonal(
+                super::push_diagonal(
                     rects,
                     Point::new(cx - extent, cy + extent),
                     Point::new(cx + extent, cy - extent),
@@ -631,43 +677,6 @@ impl TitleBar {
             half_thick,
         );
     }
-
-    /// 用轴对齐小圆点队列近似一条对角线。
-    ///
-    /// 每个步进放置一个 `thickness × thickness` 的圆角矩形，
-    /// 圆角半径为 `thickness/2` 使其呈圆形，彼此重叠形成平滑线段。
-    fn push_axis_aligned_diagonal(
-        &self,
-        rects: &mut RectBatch,
-        p1: Point,
-        p2: Point,
-        thickness: f32,
-        color: Color,
-    ) {
-        if thickness <= 0.0 {
-            return;
-        }
-        let dx = p2.x - p1.x;
-        let dy = p2.y - p1.y;
-        let length = (dx * dx + dy * dy).sqrt();
-        if length < 1e-6 {
-            return;
-        }
-        let half = thickness * 0.5;
-        // 步长取 thickness 的一半，让小圆点高度重叠，对角线看起来更实心。
-        let step = thickness * 0.5;
-        let count = (length / step).ceil().max(1.0) as usize;
-        for i in 0..=count {
-            let t = i as f32 / count as f32;
-            let x = p1.x + dx * t;
-            let y = p1.y + dy * t;
-            rects.push_rect(
-                Rect::from_xywh(x - half, y - half, thickness, thickness),
-                color,
-                half,
-            );
-        }
-    }
 }
 
 impl Widget for TitleBar {
@@ -769,7 +778,7 @@ impl Widget for TitleBar {
                 // 分针 (长细，3 点钟 = 15 分): 水平向右。
                 let min_len = logo_size * 0.234; // 60/256, 与 SVG 对齐
                 let min_thick = logo_size * 0.055; // dot-queue 最小可见粗度; 仍与环有间隙
-                self.push_axis_aligned_diagonal(
+                super::push_diagonal(
                     rects,
                     Point::new(cx, py),
                     Point::new(cx + min_len, py),
@@ -781,7 +790,7 @@ impl Widget for TitleBar {
                 // 更容易锯齿，粗度需略大于 SVG 的 stroke-width=10 以保证可辨。
                 let hour_len = logo_size * 0.195; // 50/256
                 let hour_thick = logo_size * 0.07; // dot-queue 对角线最小可辨粗度
-                self.push_axis_aligned_diagonal(
+                super::push_diagonal(
                     rects,
                     Point::new(cx, py),
                     Point::new(cx - 0.383 * hour_len, py - 0.924 * hour_len),
@@ -796,6 +805,54 @@ impl Widget for TitleBar {
                     self.logo_dot_color,
                     pivot_r,
                 );
+            }
+            LogoKind::Clipboard => {
+                // ── 剪贴板：深色圆角矩形 + 青色夹子 + 青色横线 ──
+                let x = logo_rect.origin.x;
+                let y = logo_rect.origin.y;
+                let s = logo_size;
+                let accent = self.logo_frame_color;
+
+                // 主体：用 text_secondary 做底色 (深色主题下是灰色,
+                // 浅色主题下是深灰)，确保在两种背景上都可见。
+                let body_inset = s * 0.12;
+                let body_rect = logo_rect.inset(body_inset);
+                let body_r = s * 0.14;
+                rects.push_rect(body_rect, self.button_color, body_r);
+
+                // 夹子：顶部居中圆角矩形
+                let clip_w = s * 0.36;
+                let clip_h = s * 0.22;
+                let clip_x = x + (s - clip_w) / 2.0;
+                let clip_y = y + s * 0.04;
+                let clip_r = s * 0.08;
+                rects.push_rect(
+                    Rect::from_xywh(clip_x, clip_y, clip_w, clip_h),
+                    accent,
+                    clip_r,
+                );
+                // 夹子缺口 (与主体同色覆盖，形成 U 形)
+                let notch_w = clip_w * 0.52;
+                let notch_h = clip_h * 0.45;
+                let notch_x = clip_x + (clip_w - notch_w) / 2.0;
+                let notch_y = clip_y + clip_h - notch_h;
+                rects.push_rect(
+                    Rect::from_xywh(notch_x, notch_y, notch_w, notch_h),
+                    self.button_color,
+                    0.0,
+                );
+
+                // 三条横线 (文字行)
+                let line_x = body_rect.origin.x + s * 0.16;
+                let line_w = body_rect.size.width - s * 0.32;
+                let line_h = s * 0.055;
+                let line_r = line_h / 2.0;
+                let line_gap = s * 0.105;
+                let line_start_y = body_rect.origin.y + s * 0.32;
+                for i in 0..3 {
+                    let ly = line_start_y + i as f32 * line_gap;
+                    rects.push_rect(Rect::from_xywh(line_x, ly, line_w, line_h), accent, line_r);
+                }
             }
         }
 
@@ -819,6 +876,9 @@ impl Widget for TitleBar {
                 // (其他平台) 处理，自绘圆角反而无法与真实窗体圆角 / 最大化
                 // 直角状态保持一致。
                 for role in self.style.placed_roles() {
+                    if !self.is_button_visible(role) {
+                        continue;
+                    }
                     let bg = self.button_rect(area, role);
                     let icon = self.button_icon_rect(bg);
                     if let Some(bg_color) = self.button_background_color(role) {
@@ -830,6 +890,9 @@ impl Widget for TitleBar {
             TitleBarStyle::TrafficLights => {
                 // 红绿灯：始终绘制主题色实心圆，仅 hover 时叠加深色符号。
                 for role in self.style.placed_roles() {
+                    if !self.is_button_visible(role) {
+                        continue;
+                    }
                     let circle = self.button_rect(area, role);
                     rects.push_rect(circle, self.traffic_color(role), circle.size.width / 2.0);
                     if self.buttons[role.index()].hovered {
@@ -1494,11 +1557,11 @@ mod tests {
         );
         let all_rects = rects.instance_rects();
         assert!(
-            all_rects.iter().any(|r| *r == expected_top),
+            all_rects.contains(&expected_top),
             "还原图标应有上方水平线段，右端到 ({corner_x:.1})"
         );
         assert!(
-            all_rects.iter().any(|r| *r == expected_right),
+            all_rects.contains(&expected_right),
             "还原图标应有右侧垂直线段，从 ({corner_y:.1}) 开始"
         );
     }

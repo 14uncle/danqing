@@ -16,7 +16,7 @@ use winit::window::Icon;
 
 /// 从 PNG 文件加载 winit 图标。
 ///
-/// 将 PNG 解码为 RGBA 后,通过 [`Icon::from_rgba`] 创建图标。
+/// 将 PNG 解码为 RGBA 后，通过 [`Icon::from_rgba`] 创建图标。
 /// 返回 `Err` 时调用方可选择回退到默认图标。
 fn load_icon_from_png(path: &std::path::Path) -> Result<Icon, Box<dyn std::error::Error>> {
     let img = image::open(path)?.into_rgba8();
@@ -27,7 +27,7 @@ fn load_icon_from_png(path: &std::path::Path) -> Result<Icon, Box<dyn std::error
 /// Windows 下为无边框窗口恢复圆角与阴影。
 ///
 /// 使用 winit 公开的平台扩展 API, 避免手写 unsafe DWM 调用。
-/// 若设置失败仅记录警告,不影响窗口功能。
+/// 若设置失败仅记录警告，不影响窗口功能。
 #[cfg(target_os = "windows")]
 pub(super) fn apply_windows_undecorated_style(window: &winit::window::Window) {
     use winit::platform::windows::{CornerPreference, WindowExtWindows};
@@ -40,14 +40,29 @@ pub(super) fn apply_windows_undecorated_style(window: &winit::window::Window) {
     }
 }
 
+/// 基于可执行文件所在目录构建资源路径。
+///
+/// 打包便携版从非 exe 目录启动时，CWD 不一定是 exe 目录。
+/// 优先用 `current_exe()` 的 parent() 拼接; 若该路径不存在则回退到 CWD,
+/// 保证 `cargo test` 等开发场景也能正常工作。
+fn exe_relative(path: &str) -> std::path::PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join(path);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    std::path::PathBuf::from(path)
+}
+
 /// 加载应用窗口图标。
 ///
-/// 读取 `assets/logo/{name}_256.png`;
+/// 读取 `assets/logo/{name}_256.png`（相对于 exe 所在目录）;
 /// 失败时记录警告并返回 `None`, 避免窗口创建因图标问题而 panic。
 pub(super) fn load_window_icon(name: &str) -> Option<Icon> {
-    let path = std::path::Path::new("assets")
-        .join("logo")
-        .join(format!("{name}_256.png"));
+    let path = exe_relative(&format!("assets/logo/{name}_256.png"));
     match load_icon_from_png(&path) {
         Ok(icon) => Some(icon),
         Err(err) => {
@@ -57,7 +72,7 @@ pub(super) fn load_window_icon(name: &str) -> Option<Icon> {
     }
 }
 
-/// 窗口图标对 (标题栏小图标, 任务栏大图标)。
+/// 窗口图标对 (标题栏小图标，任务栏大图标)。
 ///
 /// Windows 上任务栏按钮图标首选 ICON_BIG, 而 winit 0.30 的 `with_window_icon` 只发
 /// `WM_SETICON(ICON_SMALL)` (标题栏/小图标); 不补 ICON_BIG 时任务栏偶发回退到
@@ -85,13 +100,12 @@ pub(super) fn with_taskbar_icon(
 
 /// 加载托盘图标 (16x16, Windows 任务栏首选尺寸)。
 ///
-/// 读取 `assets/logo/{name}_16.png`; 失败时记录警告并返回 `None`。
+/// 读取 `assets/logo/{name}_16.png`（相对于 exe 所在目录）;
+/// 失败时记录警告并返回 `None`。
 /// 返回 tray-icon 自身的 `Icon` 类型 (与 winit Icon 不通用)。
 #[cfg(target_os = "windows")]
 pub(super) fn load_tray_icon(name: &str) -> Option<tray_icon::Icon> {
-    let path = std::path::Path::new("assets")
-        .join("logo")
-        .join(format!("{name}_16.png"));
+    let path = exe_relative(&format!("assets/logo/{name}_16.png"));
     match image::open(&path) {
         Ok(img) => {
             let rgba = img.into_rgba8();
@@ -99,13 +113,13 @@ pub(super) fn load_tray_icon(name: &str) -> Option<tray_icon::Icon> {
             match tray_icon::Icon::from_rgba(rgba.into_raw(), width, height) {
                 Ok(icon) => Some(icon),
                 Err(err) => {
-                    log::warn!("构建托盘 Icon 失败: {err}");
+                    log::warn!("构建托盘 Icon 失败：{err}");
                     None
                 }
             }
         }
         Err(err) => {
-            log::warn!("加载托盘图标失败: {err}");
+            log::warn!("加载托盘图标失败：{err}");
             None
         }
     }

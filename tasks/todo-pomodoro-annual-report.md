@@ -9,7 +9,7 @@
   - [x] CP1: `cargo test --example pomodoro` 全绿 (26 个 stats 测试)
 - [x] **S2** 报告视图 + 切换(main.rs)
   - [x] `report_open` + `Msg::ToggleReport` + 三面板互斥(含焦点恢复 `report-button`)
-  - [x] Switcher 第 4 子项 + bind 优先
+  - [x] MultiPanel 第 4 子项 + bind 优先
   - [x] `report_panel`: 本年汇总 / 场景分布 / 近 12 月趋势
   - [x] 控制条「报告」按钮 + Esc 关闭
   - [x] toggle/互斥/escape/焦点恢复测试

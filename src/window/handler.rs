@@ -17,16 +17,16 @@ use std::time::{Duration, Instant};
 
 use winit::{
     application::ApplicationHandler,
-    dpi::{LogicalPosition, LogicalSize},
-    event::WindowEvent,
+    dpi::{LogicalPosition, LogicalSize, PhysicalSize},
+    event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow},
-    keyboard::ModifiersState,
+    keyboard::{KeyCode, ModifiersState, PhysicalKey},
     window::{Window as WinitWindow, WindowAttributes, WindowId},
 };
 
 use crate::app::{AnimationCtx, App};
 use crate::event::{Event, ImeEvent, Key, NamedKey, WindowAction};
-use crate::render::{Context, RectBatch, TextBatch};
+use crate::render::{Context, ImageBatch, RectBatch, TextBatch};
 use crate::widget::{
     FocusManager, MsgQueue, Node, event_at_path, ime_area_at_path, selected_text_at_path,
     wants_ime_at_path,
@@ -86,6 +86,25 @@ pub(super) struct Handler<'a, A: App> {
     /// 且此时 winit 已清零修饰键状态，无法靠 Alt 识别。唯一可靠的判据是
     /// 到达时窗口尚未持有 OS 焦点 (见 [`dispatch_focused_event`] 的 Tab 守卫)。
     has_os_focus: bool,
+    /// 最后一次可信的客户区尺寸 (物理像素)，窗口创建时取真实 inner_size 初始化。
+    ///
+    /// Windows 坑 (2026-08-16 定位「剪贴板唤起列表不全」根因):
+    /// set_visible(false) 隐藏窗口后，系统补发一个 160x28 的幻影 WM_SIZE
+    /// (历史 minimized 占位尺寸), 而再次 set_visible(true) 时并不补发真实
+    /// 尺寸 —— winit 缓存的 inner_size 就此卡死在幻影值：布局视口归零
+    /// (Scrollable 纠偏被无限推迟)、surface 尺寸与窗口失配导致
+    /// get_current_texture 永久 Outdated, 窗口定格在隐藏前的最后一帧。
+    /// 对策：隐藏态的 Resized 一律不信 (见 window_event), 每帧布局尺寸以
+    /// 本字段为准而非再问 winit, 显示时用 request_inner_size 自愈 winit 缓存。
+    /// 已知取舍：隐藏期间的 DPI 变化 (拖到别的显示器) 同样被忽略, 唤起时
+    /// 会以旧物理像素强制回尺寸 —— 对固定尺寸弹窗影响小, 下次真实尺寸
+    /// 变化即自愈。
+    last_real_size: PhysicalSize<u32>,
+    /// 热键主键吞键守卫 (热键触发时置入, 主键抬起 / 失焦时清除)。
+    /// 详见 [`hotkey_swallow_filter`]。
+    swallow_hotkey_key: Option<KeyCode>,
+    /// 图像纹理收集器 (每帧清空，paint 阶段填充)。
+    images: ImageBatch,
 }
 
 impl<'a, A: App> Handler<'a, A> {
@@ -128,6 +147,9 @@ impl<'a, A: App> Handler<'a, A> {
             window_event_rx,
             is_visible: true,
             has_os_focus: false,
+            last_real_size: PhysicalSize::new(0, 0),
+            swallow_hotkey_key: None,
+            images: ImageBatch::new(),
         }
     }
 }
@@ -140,6 +162,113 @@ use super::{CloseBehavior, WindowConfig};
 /// (此时 `has_os_focus == false`); 用户主动遍历只发生在持有 OS 焦点期间。
 fn tab_traverse_allowed(has_os_focus: bool) -> bool {
     has_os_focus
+}
+
+/// Windows 虚拟键码 → winit KeyCode (仅覆盖字母与数字键; 其他键不吞, 返回 None)。
+///
+/// 字母键的 vk 即 ASCII 大写码 (0x41..=0x5A), 主键盘数字键同理 (0x30..=0x39)。
+fn vk_to_key_code(vk: u32) -> Option<KeyCode> {
+    let code = match vk {
+        0x41 => KeyCode::KeyA,
+        0x42 => KeyCode::KeyB,
+        0x43 => KeyCode::KeyC,
+        0x44 => KeyCode::KeyD,
+        0x45 => KeyCode::KeyE,
+        0x46 => KeyCode::KeyF,
+        0x47 => KeyCode::KeyG,
+        0x48 => KeyCode::KeyH,
+        0x49 => KeyCode::KeyI,
+        0x4A => KeyCode::KeyJ,
+        0x4B => KeyCode::KeyK,
+        0x4C => KeyCode::KeyL,
+        0x4D => KeyCode::KeyM,
+        0x4E => KeyCode::KeyN,
+        0x4F => KeyCode::KeyO,
+        0x50 => KeyCode::KeyP,
+        0x51 => KeyCode::KeyQ,
+        0x52 => KeyCode::KeyR,
+        0x53 => KeyCode::KeyS,
+        0x54 => KeyCode::KeyT,
+        0x55 => KeyCode::KeyU,
+        0x56 => KeyCode::KeyV,
+        0x57 => KeyCode::KeyW,
+        0x58 => KeyCode::KeyX,
+        0x59 => KeyCode::KeyY,
+        0x5A => KeyCode::KeyZ,
+        0x30 => KeyCode::Digit0,
+        0x31 => KeyCode::Digit1,
+        0x32 => KeyCode::Digit2,
+        0x33 => KeyCode::Digit3,
+        0x34 => KeyCode::Digit4,
+        0x35 => KeyCode::Digit5,
+        0x36 => KeyCode::Digit6,
+        0x37 => KeyCode::Digit7,
+        0x38 => KeyCode::Digit8,
+        0x39 => KeyCode::Digit9,
+        _ => return None,
+    };
+    Some(code)
+}
+
+/// 热键主键此刻是否仍被物理按住 (武装吞键守卫的前置检查)。
+///
+/// 热键经线程消息队列 + 100ms 心跳轮询到达主循环, 天然滞后于物理按键;
+/// 快速点按时主键在武装前早已抬起。焦点合成只覆盖「按住中的键」,
+/// 已抬起就意味着不会有漏键, 无需守卫 —— 此时若强行武装, 守卫将因永远
+/// 收不到主键抬起而卡死, 误吞用户本次会话里后续的主动输入。
+#[cfg(target_os = "windows")]
+fn vk_still_held(vk: u32) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    // 返回值的最高位 = 当前按住 (最低位是"自上次调用以来按过", 不看)。
+    unsafe { (GetAsyncKeyState(vk as i32) as u16) & 0x8000 != 0 }
+}
+
+/// 非 Windows 平台无全局热键线程, 守卫永不武装。
+#[cfg(not(target_os = "windows"))]
+fn vk_still_held(_vk: u32) -> bool {
+    false
+}
+
+/// 热键主键吞键判定 (2026-08-16 定位「剪贴板唤起列表不全」真根因)。
+///
+/// 热键触发后，主键的按下事件仍可能漏进刚唤起并抢到焦点的窗口，有两条路径
+/// (实测均发生):
+/// 1. winit 在 WM_SETFOCUS 时给所有物理按住中的键合成 Pressed 事件
+///    (合成事件 `repeat=false`, 顺序: 字母键在前修饰键在后 —— 日志实锤);
+/// 2. 主键按住不放时 Windows 键盘自动重复继续投递 (`repeat=true`,
+///    RegisterHotKey 的 MOD_NOREPEAT 只挡 WM_HOTKEY 重发, 不挡按键本身)。
+///
+/// 漏进的 "v" 落进检索框, 历史列表被静默过滤 (表现: 行数变少、缺最新条目,
+/// 清空检索框即恢复)。
+///
+/// `swallow` 为热键触发时记下的主键; 返回 true 表示该键盘事件应被丢弃。
+/// 武装前置条件 (vk_still_held): 主键此刻仍被物理按住 —— 快速点按 (抬起
+/// 早于武装) 不会武装, 也就不会形成「等不到抬起事件」的卡死守卫。
+///
+/// 已知残余 (可接受): 若主键恰在武装检查与焦点窃取之间的毫秒级空窗抬起,
+/// 守卫仍会卡死至下次失焦 (Focused(false) 兜底解除); 期间用户第一次主动
+/// 按下主键会被吞一次 (含 Ctrl+V 粘贴按键流), 该次的 Released 到达即自愈。
+/// 相比被修掉的静默过滤 (无感知、须清检索框才恢复), 这是数量级改善。
+fn hotkey_swallow_filter(
+    swallow: &mut Option<KeyCode>,
+    physical: PhysicalKey,
+    state: ElementState,
+) -> bool {
+    let Some(code) = *swallow else {
+        return false;
+    };
+    if physical != PhysicalKey::Code(code) {
+        return false;
+    }
+    match state {
+        // 主键仍按住期间的按下 (焦点合成 / 自动重复): 吞, 守卫保持。
+        ElementState::Pressed => true,
+        // 主键抬起: 解除守卫, 事件放行 (对文本输入无副作用)。
+        ElementState::Released => {
+            *swallow = None;
+            false
+        }
+    }
 }
 
 impl<A: App> Handler<'_, A> {
@@ -231,6 +360,14 @@ impl<A: App> Handler<'_, A> {
             self.app.event(event);
             return;
         };
+
+        // 键盘前置过滤: 应用层在焦点分发前拦截 (如无修饰字母键触发收藏)
+        if let Event::Key { pressed: true, .. } = event {
+            if let Some(msg) = self.app.app_key_filter(event) {
+                self.msgs.push(Box::new(msg));
+                return;
+            }
+        }
 
         match event {
             Event::Key { key, pressed, .. } if *pressed => {
@@ -414,9 +551,14 @@ impl<A: App> Handler<'_, A> {
         let frame_start = Instant::now();
         let mut rects = RectBatch::new();
         self.texts.clear();
-        let screen = self.window.as_ref().map(|w| {
-            let size = w.inner_size();
-            Size::new(size.width as f32, size.height as f32)
+        self.images = ImageBatch::new();
+        let screen = self.window.as_ref().map(|_| {
+            // 尺寸取自 last_real_size 而非 winit inner_size: 后者在 Windows 上
+            // 被隐藏态的幻影 WM_SIZE 污染后不再自愈 (见 last_real_size 字段注释)。
+            Size::new(
+                self.last_real_size.width as f32,
+                self.last_real_size.height as f32,
+            )
         });
         if let Some(screen) = screen {
             let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
@@ -444,6 +586,7 @@ impl<A: App> Handler<'_, A> {
                 .layout(crate::Constraints::tight(screen), &mut self.texts);
             self.root_area = Rect::new(Point::ZERO, size);
             self.tree.paint(self.root_area, &mut rects, &mut self.texts);
+            self.tree.paint_image(self.root_area, &mut self.images);
             // 无边框窗口下自绘边框与圆角。
             if self.config.border_thickness > 0.0 {
                 rects.push_rounded_border(
@@ -461,7 +604,7 @@ impl<A: App> Handler<'_, A> {
                 context.set_background_frame(frame);
             }
             // Context::render 目前恒返回 true; 失败路径为防御 (退出事件循环)。
-            if !context.render(&rects, &mut self.texts) {
+            if !context.render(&rects, &mut self.texts, &mut self.images) {
                 event_loop.exit();
                 return;
             }
@@ -549,7 +692,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 return;
             }
         }
-        // 先持有窗口引用: 预渲染首帧需要查询 inner_size。
+        // 先持有窗口引用并记下真实客户区尺寸: 预渲染首帧需要布局基准;
+        // 此后每帧布局以 last_real_size 为准 (隐藏后 winit inner_size 会卡幻影值)。
+        self.last_real_size = window.inner_size();
         self.window = Some(Arc::clone(&window));
         // 预渲染首帧: 隐藏时渲染 + present, 显示时直接见内容 — 避免首帧就绪前白屏。
         // 平台注: 已在 Windows/DX12 验证。Wayland 上隐藏表面未映射, get_current_texture
@@ -562,6 +707,11 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             window.set_maximized(true);
         }
         log::info!("窗口已显示");
+        // 初始可见性同步: visibility_changed 的契约是「可见性变化后必回调」,
+        // 启动首次显示也是一次变化 —— 漏掉则应用层的可见性镜像 (热键/Esc 的
+        // toggle 方向判断) 与真相相反 (2026-08-27 剪贴板首轮启动 Esc 与
+        // 点走双双失效的根因: 首轮 ToggleVisible 误判方向走了显示路径)。
+        self.app.visibility_changed(self.is_visible);
         // 机器可读启动基准 (ASCII, 供 tools/benchmark.ps1 解析)。
         log::info!("perf startup_to_visible {:?}", self.boot.elapsed());
         // 持续渲染模式: render_frame 末尾已请求首帧, 之后每帧结束再请求下一帧。
@@ -578,6 +728,32 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         }
         if let WindowEvent::Focused(gained) = event {
             self.has_os_focus = gained;
+            if !gained {
+                // 失焦即解除吞键守卫 (主键抬起事件可能随焦点易手而错过)。
+                self.swallow_hotkey_key = None;
+            }
+            // 窗口焦点变化时通知应用层 (用于失焦自动隐藏等行为)。
+            if gained {
+                self.app.focus_gained();
+            } else {
+                self.app.focus_lost();
+            }
+        }
+
+        // 热键主键吞键: 唤起抢到焦点后, 主键仍按住期间的按下事件 (焦点合成 /
+        // 自动重复) 会漏进本窗口 (见 hotkey_swallow_filter), 必须吞掉。
+        if let WindowEvent::KeyboardInput {
+            event: key_event, ..
+        } = &event
+        {
+            if hotkey_swallow_filter(
+                &mut self.swallow_hotkey_key,
+                key_event.physical_key,
+                key_event.state,
+            ) {
+                log::debug!("吞掉热键主键按下：{:?}", key_event.physical_key);
+                return;
+            }
         }
 
         // 鼠标事件经组件树命中分发，分发后可能更新焦点
@@ -635,6 +811,13 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             }
             WindowEvent::Resized(size) => {
                 log::info!("窗口尺寸变化：{}x{}", size.width, size.height);
+                // 隐藏态的 Resized 不可信 (Windows 幻影 160x28, 见 last_real_size
+                // 字段注释): 不接受、不重建 surface, 待显示时以 last_real_size 为准。
+                if !self.is_visible {
+                    log::info!("隐藏态忽略尺寸变化：{}x{}", size.width, size.height);
+                    return;
+                }
+                self.last_real_size = size;
                 if let Some(context) = &mut self.context {
                     context.resize(size.width, size.height);
                 }
@@ -658,6 +841,16 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 全局热键通道轮询
         if let Some(rx) = &self.hotkey_rx {
             while let Ok(id) = rx.try_recv() {
+                // 记下热键主键: 按住热键时主键的按下事件会漏进刚唤起的窗口
+                // (见 hotkey_swallow_filter), 抬起前这些按下必须吞掉。
+                // 仅当主键此刻仍被物理按住才武装守卫 (见 vk_still_held)。
+                self.swallow_hotkey_key = self
+                    .config
+                    .hotkeys
+                    .iter()
+                    .find(|h| h.id == id)
+                    .filter(|h| vk_still_held(h.vk))
+                    .and_then(|h| vk_to_key_code(h.vk));
                 if let Some(msg) = self.app.hotkey(id) {
                     self.app.update(msg);
                 }
@@ -678,30 +871,54 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         while let Ok(event) = self.window_event_rx.try_recv() {
             self.apply_window_event(event, event_loop);
         }
-        // 控制流：统一 WaitUntil(16ms) ≈ 60fps, 无论窗口可见与否。
-        //   可见时：主动 request_redraw 驱动渲染; WaitUntil 比 Poll 省 CPU
-        //     (空载时 Poll 一秒跑几千次，WaitUntil 仅 ~60 次), 同时 OS 调度超时 /
-        //     外部事件 / 模态菜单 close 仍能及时唤醒 winit, 行为等价。
-        //   隐藏时：RedrawRequested 不会发 (窗口不可见), 但 about_to_wait 中的
-        //     app.tick() 仍每帧推进 (计时器 / 持久化 / 环境音)。用 WaitUntil 而非
-        //     Poll 限制 tick 频率至 ~60fps, 避免 Poll 空转 (数千 fps) 导致环境音
-        //     player.play()/set_volume() 被高频调用, 干扰音频线程缓冲区 → 噪声。
+        // 焦点事件流对账 (Windows): AttachThreadInput 抢前台后, Windows 的
+        // 焦点消息投递可能整体失真 (WM_SETFOCUS / WM_NCACTIVATE / WM_KILLFOCUS
+        // 任一缺席 —— 2026-08-25 日志实锤两种形态), winit 的 Focused 事件流
+        // 随之卡死。此处每帧拿 OS 前台真相对照 winit 报到状态, 缺什么补什么
+        // (详见 foreground::reconcile_focus_state); 一两帧内收敛, 幂等自限。
+        #[cfg(target_os = "windows")]
+        if self.is_visible {
+            if let Some(window) = &self.window {
+                super::foreground::reconcile_focus_state(window, self.has_os_focus);
+            }
+        }
+        // 控制流策略：根据窗口模式决定 ControlFlow。
+        //   OnDemand (默认): 隐藏态 → Wait (零唤醒, 省电); 可见态 → WaitUntil(16ms)。
+        //   Continuous (番茄钟等): 无论可见与否都用 WaitUntil(16ms), 保持 tick 推进。
+        //
+        //   WaitUntil 比 Poll 省 CPU (空载时 Poll 一秒跑几千次，WaitUntil 仅 ~60 次),
+        //   同时 OS 调度超时 / 外部事件 / 模态菜单 close 仍能及时唤醒 winit。
         //   关键：muda 托盘菜单的 TrackPopupMenu 是 Windows 阻塞 API, 会在主线程
         //     跑模态消息循环，期间 winit 事件循环被冻结; 菜单关闭后必须主动
         //     重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
         //     过滤/丢弃, UI 卡在旧值不更新 (读秒停止、按钮 label 不切)。
+        let control_flow = self.control_flow_for_current_state();
         if self.is_visible {
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
         }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(
-            Instant::now() + Duration::from_millis(16),
-        ));
+        event_loop.set_control_flow(control_flow);
     }
 }
 
 impl<A: App> Handler<'_, A> {
+    /// 根据当前窗口模式和可见性决定控制流。
+    ///
+    /// - `OnDemand` + 隐藏 → `WaitUntil(100ms)` (低频轮询, 确保热键及时响应)
+    /// - `OnDemand` + 可见 → `WaitUntil(16ms)` (事件驱动重绘, ~60fps)
+    /// - `Continuous` (任何状态) → `WaitUntil(16ms)` (番茄钟等需持续 tick)
+    fn control_flow_for_current_state(&self) -> ControlFlow {
+        match self.config.mode {
+            // 隐藏态使用 100ms 轮询: 既保证热键及时响应, 又避免零唤醒导致热键失效
+            // (ControlFlow::Wait 无法被标准库 mpsc 通道唤醒)
+            super::WindowMode::OnDemand if !self.is_visible => {
+                ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100))
+            }
+            _ => ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16)),
+        }
+    }
+
     /// 关闭请求 (Alt+F4 / 标题栏关闭按钮) 的统一策略：
     /// `CloseBehavior::Hide` 常驻型应用只隐藏窗口; `CloseBehavior::Exit` 退出进程。
     fn handle_close_request(&mut self, event_loop: &ActiveEventLoop, source: &str) {
@@ -720,10 +937,26 @@ impl<A: App> Handler<'_, A> {
     /// 隐藏窗口：应用层 `is_visible` 与 OS 状态同步翻转。
     /// 状态切换的"动作"统一收口在此，减少 toggle / close / min 等路径的复制。
     fn hide_window(&mut self) {
+        // is_visible 必须先于 set_visible 置位: Windows 隐藏后补发的幻影
+        // WM_SIZE (160x28, 见 last_real_size 注释) 若以同步 SendMessage 语义
+        // 派发, 会在 set_visible 调用内重入窗口过程 —— 此时 is_visible 必须
+        // 已为 false, 隐藏态守卫才能拦住它 (CloseBehavior::Hide 路径依赖此序)。
+        self.is_visible = false;
+        // 隐藏即非前台: SW_HIDE 后 OS 焦点必然易手, 不等 winit 的 Focused(false)
+        // 报到 —— 焦点消息失真的环境下 (AttachThreadInput 抢前台后遗症) 它可能
+        // 永远不到, has_os_focus 残留 true 会让下次唤起时的对账补发被跳过
+        // (2026-08-25 日志实锤: toggle 隐藏 → 残留 → 唤起无 Focused(true))。
+        // 同步补发 WM_KILLFOCUS: 把 winit 的 is_focused 一并洗回 false,
+        // 否则它残留 true 时下次对账补获得无法构成跳变 (同日志, 连按轮死锁)。
+        // 若真实 Focused(false) 随后补到, 重复置 false 无副作用。
+        self.has_os_focus = false;
+        #[cfg(target_os = "windows")]
+        if let Some(window) = &self.window {
+            super::foreground::inject_focus_loss(window);
+        }
         if let Some(window) = &self.window {
             window.set_visible(false);
         }
-        self.is_visible = false;
     }
 
     /// 最大化窗口并同步应用层最大化状态 (标题栏图标据此切换 □/□□)。
@@ -739,12 +972,28 @@ impl<A: App> Handler<'_, A> {
     /// 显式抢前台防止"已显示但被遮" (尤其在另一 app 后台时)。
     fn show_window(&self) {
         if let Some(window) = &self.window {
+            // 显示落位: Cursor 策略下先把窗口挪到鼠标光标处 (热键唤起的面板
+            // 贴手边, 不再恒居中)。最大化窗口不挪 (位置由系统管理)。
+            if self.config.placement == super::ShowPlacement::Cursor && !window.is_maximized() {
+                super::placement::move_to_cursor(window, self.last_real_size);
+            }
             window.set_visible(true);
+            // 自愈 winit 尺寸缓存: 隐藏期间若被幻影尺寸污染, 显示时强制回到
+            // 最后可信尺寸, 触发真实 WM_SIZE 让 winit 内部状态恢复健康。
+            // 最大化窗口不可经 SetWindowPos 改尺寸 (request_inner_size 会清
+            // 最大化标志), 跳过 —— 其恢复依赖 SW_SHOW 还原最大化时系统补发
+            // 真实 WM_SIZE (彼时 is_visible=true, 会被正常接受)。
+            // 尺寸本就一致时 Windows 不会补发 WM_SIZE, 无副作用。
+            if !window.is_maximized() && window.inner_size() != self.last_real_size {
+                let _ = window.request_inner_size(self.last_real_size);
+            }
             window.request_redraw();
             // Windows: winit 的 focus_window() 走合成 Alt + SetForegroundWindow,
             // 对后台常驻进程受前台锁限制而静默失败 —— 窗口"已显示但被遮"。
             // 用 foreground 模块的 AttachThreadInput 方案硬抢 (先直调, 失败再挂接);
             // 其它平台保留 winit 原生 focus_window。
+            // 抢前台造成的 winit 焦点事件流失真由 about_to_wait 的每帧对账
+            // (reconcile_focus_state) 统一修复, 此处不做即时补发。
             #[cfg(target_os = "windows")]
             super::foreground::bring_to_foreground(window);
             #[cfg(not(target_os = "windows"))]
@@ -763,6 +1012,23 @@ impl<A: App> Handler<'_, A> {
                 } else {
                     self.hide_window();
                 }
+                self.app.visibility_changed(self.is_visible);
+            }
+            WindowAppEvent::ShowWindow => {
+                // 仅显示窗口 (不切换)。用于 focus_lost 等场景。
+                if !self.is_visible {
+                    self.is_visible = true;
+                    self.show_window();
+                    self.app.visibility_changed(true);
+                }
+            }
+            WindowAppEvent::HideWindow => {
+                // 仅隐藏窗口 (不切换)。用于 focus_lost 和关闭按钮。
+                if self.is_visible {
+                    self.is_visible = false;
+                    self.hide_window();
+                    self.app.visibility_changed(false);
+                }
             }
             WindowAppEvent::Quit => event_loop.exit(),
             WindowAppEvent::PhaseAdvanced => {
@@ -775,13 +1041,79 @@ impl<A: App> Handler<'_, A> {
                     self.maximize_window();
                 }
             }
+            WindowAppEvent::SetClearColor(color) => {
+                self.config.clear_color = color;
+                if let Some(ctx) = self.context.as_mut() {
+                    ctx.set_clear_color(color);
+                }
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::tab_traverse_allowed;
+    use super::super::WindowMode;
+    use super::{hotkey_swallow_filter, tab_traverse_allowed, vk_to_key_code};
+    use winit::event::ElementState;
+    use winit::keyboard::{KeyCode, PhysicalKey};
+
+    /// 热键主键在守卫期间的按下被吞, 且守卫保持 (继续吞后续按下)。
+    /// 焦点合成 (repeat=false) 与自动重复 (repeat=true) 两种来源在
+    /// 过滤器入口处不作区分 —— 守卫期间的按下都不可能是主动输入。
+    /// 回归: 「唤起后 v 漏进检索框, 列表被静默过滤」(2026-08-16 定位)。
+    #[test]
+    fn hotkey_key_press_is_swallowed_while_held() {
+        let mut swallow = Some(KeyCode::KeyV);
+        let v = PhysicalKey::Code(KeyCode::KeyV);
+        assert!(hotkey_swallow_filter(
+            &mut swallow,
+            v,
+            ElementState::Pressed
+        ));
+        assert!(swallow.is_some());
+    }
+
+    /// 主键抬起解除守卫, 之后的主动输入正常放行。
+    #[test]
+    fn hotkey_key_release_lifts_swallow() {
+        let mut swallow = Some(KeyCode::KeyV);
+        let v = PhysicalKey::Code(KeyCode::KeyV);
+        assert!(!hotkey_swallow_filter(
+            &mut swallow,
+            v,
+            ElementState::Released
+        ));
+        assert!(swallow.is_none());
+        assert!(!hotkey_swallow_filter(
+            &mut swallow,
+            v,
+            ElementState::Pressed
+        ));
+    }
+
+    /// 非热键主键的按下/重复 (如长按 Backspace 连删) 不受影响。
+    #[test]
+    fn other_key_press_is_not_swallowed() {
+        let mut swallow = Some(KeyCode::KeyV);
+        let backspace = PhysicalKey::Code(KeyCode::Backspace);
+        assert!(!hotkey_swallow_filter(
+            &mut swallow,
+            backspace,
+            ElementState::Pressed
+        ));
+        assert!(swallow.is_some());
+    }
+
+    /// 字母/数字 vk 映射; 未覆盖的 vk 不吞。
+    #[test]
+    fn vk_maps_letters_and_digits() {
+        assert_eq!(vk_to_key_code(0x56), Some(KeyCode::KeyV));
+        assert_eq!(vk_to_key_code(0x41), Some(KeyCode::KeyA));
+        assert_eq!(vk_to_key_code(0x30), Some(KeyCode::Digit0));
+        assert_eq!(vk_to_key_code(0x39), Some(KeyCode::Digit9));
+        assert_eq!(vk_to_key_code(0x01), None);
+    }
 
     #[test]
     fn tab_without_os_focus_is_suppressed() {
@@ -794,5 +1126,74 @@ mod tests {
     fn tab_with_os_focus_traverses() {
         // 持有 OS 焦点期间的 Tab 是用户主动遍历, 必须放行。
         assert!(tab_traverse_allowed(true));
+    }
+
+    /// 按需渲染模式: 隐藏态应使用 Wait (零唤醒)。
+    #[test]
+    fn on_demand_hidden_uses_wait() {
+        let control_flow = control_flow_for_mode(WindowMode::OnDemand, false, false);
+        assert!(
+            matches!(control_flow, winit::event_loop::ControlFlow::Wait),
+            "OnDemand 隐藏态应使用 ControlFlow::Wait"
+        );
+    }
+
+    /// 按需渲染模式: 可见且无动画应使用 WaitUntil (事件驱动重绘)。
+    #[test]
+    fn on_demand_visible_no_animation_uses_wait_until() {
+        let control_flow = control_flow_for_mode(WindowMode::OnDemand, true, false);
+        assert!(
+            matches!(control_flow, winit::event_loop::ControlFlow::WaitUntil(_)),
+            "OnDemand 可见无动画应使用 ControlFlow::WaitUntil"
+        );
+    }
+
+    /// 按需渲染模式: 可见且有动画应使用 WaitUntil (持续渲染)。
+    #[test]
+    fn on_demand_visible_with_animation_uses_wait_until() {
+        let control_flow = control_flow_for_mode(WindowMode::OnDemand, true, true);
+        assert!(
+            matches!(control_flow, winit::event_loop::ControlFlow::WaitUntil(_)),
+            "OnDemand 可见有动画应使用 ControlFlow::WaitUntil"
+        );
+    }
+
+    /// 持续渲染模式: 隐藏态仍使用 WaitUntil (番茄钟等需要持续 tick)。
+    #[test]
+    fn continuous_hidden_uses_wait_until() {
+        let control_flow = control_flow_for_mode(WindowMode::Continuous, false, false);
+        assert!(
+            matches!(control_flow, winit::event_loop::ControlFlow::WaitUntil(_)),
+            "Continuous 隐藏态应使用 ControlFlow::WaitUntil (保持 tick)"
+        );
+    }
+
+    /// 持续渲染模式: 可见态使用 WaitUntil (原有行为)。
+    #[test]
+    fn continuous_visible_uses_wait_until() {
+        let control_flow = control_flow_for_mode(WindowMode::Continuous, true, false);
+        assert!(
+            matches!(control_flow, winit::event_loop::ControlFlow::WaitUntil(_)),
+            "Continuous 可见态应使用 ControlFlow::WaitUntil"
+        );
+    }
+
+    /// 根据窗口模式和可见性决定控制流。
+    ///
+    /// - `OnDemand` + 隐藏 → `Wait` (零唤醒, 省电)
+    /// - `OnDemand` + 可见 → `WaitUntil(16ms)` (事件驱动重绘, ~60fps)
+    /// - `Continuous` (任何状态) → `WaitUntil(16ms)` (番茄钟等需持续 tick)
+    fn control_flow_for_mode(
+        mode: WindowMode,
+        is_visible: bool,
+        has_animation: bool,
+    ) -> winit::event_loop::ControlFlow {
+        use std::time::{Duration, Instant};
+        use winit::event_loop::ControlFlow;
+
+        match mode {
+            WindowMode::OnDemand if !is_visible && !has_animation => ControlFlow::Wait,
+            _ => ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16)),
+        }
     }
 }

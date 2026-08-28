@@ -68,15 +68,14 @@ app.rs
 - `src/widget/base/` — Button、Text
 - `src/widget/layout/` — Box、Column、Row、Padding、Center、Stack(共享 `flow.rs`)
 - `src/widget/form/` — TextInput、TextArea(共享 `text_editor.rs`)
-- `src/widget/view/` — Scrollable、Switcher
+- `src/widget/view/` — Scrollable、MultiPanel
 - `src/widget/focus.rs` — FocusManager 焦点链与 Tab 遍历
 - `src/widget/title_bar.rs` — 框架层标题栏
 
 ### 示例
 
 - `examples/showcase.rs` — 持续生长,以用代测
-- `examples/pomodoro/` — 番茄钟 POC
-  - `timer.rs` / `scenes.rs` / `fader.rs` / `flash.rs` / `audio.rs` / `state.rs` / `stats.rs` / `ambient.rs` / `motion.rs` / `today.rs` / `hint.rs` / `tray.rs` / `close_button.rs` / `main.rs`
+- 番茄钟产品已独立为 `../danqing-pomodoro` 仓库(2026-08 抽取,全功能免费发布);本仓库不再内置 pomodoro 示例
 - `examples/common/log.rs` — 共享 `init_log`
 - `examples/minimal.rs` — 最小骨架
 - `examples/mem_probe.rs` — 内存探针
@@ -92,7 +91,7 @@ app.rs
 ### 测试
 
 - 单元测试:各模块 `#[cfg(test)]` 内
-- 集成测试: `tests/event_dispatch.rs` / `focus_input.rs` / `widget_tree.rs` / `switcher.rs` / `title_bar_window.rs` / `assets.rs` / `design_system.rs` / `hover_debug.rs`
+- 集成测试: `tests/event_dispatch.rs` / `focus_input.rs` / `widget_tree.rs` / `multi_panel.rs` / `title_bar_window.rs` / `assets.rs` / `design_system.rs` / `hover_debug.rs`
 
 ### 工具
 

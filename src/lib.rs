@@ -11,6 +11,7 @@
 mod app;
 pub mod event;
 pub mod layout;
+pub mod log;
 mod render;
 mod text;
 pub mod theme;
@@ -21,8 +22,8 @@ pub use app::{AnimationCtx, App};
 pub use event::{Event, ImeEvent, Key, MouseButton, NamedKey, WindowAction};
 pub use layout::{Color, Constraints, Edges, FlowChild, Point, Rect, Size, distribute};
 pub use render::{
-    BackgroundConfig, BackgroundFrame, Context as RenderContext, RectBatch, RenderError, ScaleMode,
-    TextBatch,
+    BackgroundConfig, BackgroundFrame, Context as RenderContext, ImageBatch, RectBatch,
+    RenderError, ScaleMode, TextBatch,
 };
 pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo, Line, break_lines};
 pub use theme::{
@@ -31,8 +32,9 @@ pub use theme::{
 };
 pub use window::tray::TrayHandle;
 pub use window::{
-    CloseBehavior, WindowAppEvent, WindowConfig, WindowError, WindowEventSender, hotkey_ids, run,
-    run_app, shortcut_for_id, tray, tray_action_ids,
+    CloseBehavior, GlobalHotkey, ShowPlacement, WindowAppEvent, WindowConfig, WindowError,
+    WindowEventSender, WindowMode, foreground, hotkey_ids, run, run_app, shortcut_for_id, startup,
+    tray, tray_action_ids,
 };
 // 托盘子模块：re-export tray-icon (含 menu), 供例子构建菜单使用。
 pub use ::tray_icon;

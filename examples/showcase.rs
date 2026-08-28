@@ -5,7 +5,7 @@
 //!
 //! 本示例是唯一且持续生长的演示程序：框架每落地一项能力，
 //! 就在这里展示一项 (以用代测)。左侧按 widget/ 目录分类导航
-//! (基础 / 布局 / 表单 / 视图), 右侧经 Switcher 切换分类面板;
+//! (基础 / 布局 / 表单 / 视图), 右侧经 MultiPanel 切换分类面板;
 //! 所有面板常驻实例化，切换不重建组件树。
 
 #![cfg_attr(
@@ -14,16 +14,13 @@
 )]
 
 use danqing::widget::{
-    self, Box as UiBox, Button, Column, EventResult, MsgQueue, Node, Padding, Row, Scrollable,
-    Switcher, Text, TextArea, TextInput, TitleBar, Widget,
+    self, Box as UiBox, Button, CloseButton, Column, EventResult, IconInput, MsgQueue, MultiPanel,
+    Node, Padding, Row, Scrollable, Switch, Tabs, Text, TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
     App, BackgroundConfig, Color, Event, Key, LightTheme, NamedKey, Point, Rect, ScaleMode, Size,
     Theme, WindowAction,
 };
-#[path = "common/log.rs"]
-mod example_log;
-
 /// 键盘移动方块的区域尺寸。
 const KEYBOARD_AREA: Size = Size::new(300.0, 180.0);
 /// 方块尺寸。
@@ -32,7 +29,13 @@ const SQUARE_SIZE: f32 = 40.0;
 const MOVE_STEP: f32 = 20.0;
 
 /// 分类导航：与 src/widget/ 子目录一一对应。
-const CATEGORIES: [&str; 4] = ["基础 base", "布局 layout", "表单 form", "视图 view"];
+const CATEGORIES: [&str; 5] = [
+    "基础 base",
+    "布局 layout",
+    "表单 form",
+    "导航 nav",
+    "视图 view",
+];
 
 /// showcase 应用 (状态容器 + 消息更新 + 视图树)。
 struct Showcase {
@@ -40,27 +43,46 @@ struct Showcase {
     square_pos: Point,
     last_key: String,
     input_value: String,
+    icon_input_value: String,
     textarea_value: String,
-    /// 当前选中的分类索引 (驱动 Switcher)。
+    /// 当前选中的分类索引 (驱动 MultiPanel)。
     selected: usize,
     /// 窗口是否已最大化 (决定标题栏按钮图标 □/□□)。
     is_maximized: bool,
+    /// 当前显示的图像 (RGBA 数据，宽，高)。
+    image_data: Option<(Vec<u8>, u32, u32)>,
+    /// Tabs 演示：当前选中的 tab 索引。
+    selected_tab: usize,
+    /// Switch 演示：是否启用通知。
+    switch_enabled: bool,
 }
 
 /// 应用消息。
 enum Msg {
     /// 计数器 +1。
     Increment,
+    /// 计数器清零 (CloseButton 演示)。
+    ResetCount,
     /// 移动键盘方块。
     MoveSquare { dx: f32, dy: f32 },
     /// 字符键输入。
     KeyChar(String),
     /// 文本输入框内容变化。
     InputChanged(String),
+    /// 图标输入框内容变化。
+    IconInputChanged(String),
+    /// 图标输入框图标点击。
+    IconInputSearch,
     /// 多行文本域内容变化。
     TextareaChanged(String),
     /// 切换分类面板。
     Select(usize),
+    /// Tabs 演示：切换 tab。
+    TabChanged(usize),
+    /// 打开本地图片。
+    OpenImage,
+    /// Switch 演示：切换开关状态。
+    SwitchToggle,
 }
 
 impl App for Showcase {
@@ -69,6 +91,7 @@ impl App for Showcase {
     fn update(&mut self, msg: Msg) {
         match msg {
             Msg::Increment => self.count += 1,
+            Msg::ResetCount => self.count = 0,
             Msg::MoveSquare { dx, dy } => {
                 self.square_pos.x =
                     (self.square_pos.x + dx).clamp(0.0, KEYBOARD_AREA.width - SQUARE_SIZE);
@@ -77,8 +100,30 @@ impl App for Showcase {
             }
             Msg::KeyChar(c) => self.last_key = c,
             Msg::InputChanged(s) => self.input_value = s,
+            Msg::IconInputChanged(s) => self.icon_input_value = s,
+            Msg::IconInputSearch => {
+                log::info!("搜索：{}", self.icon_input_value);
+            }
             Msg::TextareaChanged(s) => self.textarea_value = s,
             Msg::Select(i) => self.selected = i,
+            Msg::TabChanged(i) => self.selected_tab = i,
+            Msg::OpenImage => {
+                // 打开文件对话框选择图片
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("图片", &["png", "jpg", "jpeg", "gif", "bmp"])
+                    .pick_file()
+                {
+                    match image::open(&path) {
+                        Ok(img) => {
+                            let rgba = img.to_rgba8();
+                            let (w, h) = rgba.dimensions();
+                            self.image_data = Some((rgba.into_raw(), w, h));
+                        }
+                        Err(e) => log::warn!("加载图片失败：{e}"),
+                    }
+                }
+            }
+            Msg::SwitchToggle => self.switch_enabled = !self.switch_enabled,
         }
     }
 
@@ -191,8 +236,11 @@ fn palette_and_rounded_card(t: &LightTheme) -> impl Widget + 'static {
 
 /// 交互区：按钮 + 计数文本。
 fn counter_row(t: &LightTheme) -> impl Widget + 'static {
+    let symbol_color = t.text_secondary();
+    let hover_color = t.surface_variant();
     Row::new()
         .gap(t.spacing_lg())
+        .cross_center()
         .child(
             Button::themed(
                 t,
@@ -207,21 +255,34 @@ fn counter_row(t: &LightTheme) -> impl Widget + 'static {
                 .font_size(t.font_size_body())
                 .color(t.text_primary()),
         )
+        // CloseButton: 矢量 × 按钮 (点击清零计数，hover 出底色)。
+        .child(
+            CloseButton::new()
+                .on_click(|| Msg::ResetCount)
+                .bind_color(move |_: &Showcase| symbol_color)
+                .bind_hover_color(move |_: &Showcase| hover_color),
+        )
 }
 
 /// 输入区:TextInput + 实时回显。
 fn input_row(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
         .gap(t.spacing_lg())
+        .cross_center()
         .child(
-            Text::new("输入：")
-                .font_size(t.font_size_body())
-                .color(t.text_primary()),
-        )
-        .child(
-            TextInput::themed(t)
-                .width(240.0)
-                .on_change(|s: &str| Msg::InputChanged(s.to_string())),
+            Row::new()
+                .gap(2.0)
+                .cross_center()
+                .child(
+                    Text::new("输入：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    TextInput::themed(t)
+                        .width(240.0)
+                        .on_change(|s: &str| Msg::InputChanged(s.to_string())),
+                ),
         )
         .child(
             Text::bind(|s: &Showcase| format!("已输入：{}", s.input_value))
@@ -230,33 +291,119 @@ fn input_row(t: &LightTheme) -> impl Widget + 'static {
         )
 }
 
-/// 多行输入区:Scrollable + TextArea + 实时回显字数 / 行数。
-fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
+/// 图标输入区:IconInput + 实时回显 + 图标点击搜索。
+fn icon_input_row(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
         .gap(t.spacing_lg())
+        .cross_center()
         .child(
-            Text::new("多行：")
-                .font_size(t.font_size_body())
-                .color(t.text_primary()),
-        )
-        .child(
-            // 透明尺寸壳：只为 Scrollable 提供 400×160 视口，背景职责归 TextArea,
-            // 避免外层 UiBox 与 TextArea 双层 surface 叠出接缝。
-            UiBox::new(Color::TRANSPARENT)
-                .size(400.0, 160.0)
-                .child(Scrollable::themed(
-                    t,
-                    TextArea::themed(t)
-                        .width(400.0)
-                        .height(160.0)
-                        .on_change(|s: &str| Msg::TextareaChanged(s.to_string())),
-                )),
+            Row::new()
+                .gap(2.0)
+                .cross_center()
+                .child(
+                    Text::new("搜索：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    IconInput::themed(t)
+                        .width(280.0)
+                        .placeholder("输入关键词...", t.text_secondary())
+                        .on_change(|s: &str| Msg::IconInputChanged(s.to_string()))
+                        .on_icon_click(|| Msg::IconInputSearch),
+                ),
         )
         .child(
             Text::bind(|s: &Showcase| {
-                let chars = s.textarea_value.chars().count();
-                let lines = s.textarea_value.lines().count();
-                format!("字数：{} 行数：{}", chars, lines)
+                if s.icon_input_value.is_empty() {
+                    "点击右侧图标搜索".to_string()
+                } else {
+                    format!("搜索：{}", s.icon_input_value)
+                }
+            })
+            .font_size(t.font_size_body())
+            .color(t.text_primary()),
+        )
+}
+
+/// 多行输入区:Scrollable + TextArea + 实时回显字数 / 行数。
+fn textarea_card(t: &LightTheme) -> impl Widget + 'static {
+    // 与单行输入框等高
+    let label_height = t.control_height();
+    Row::new()
+        .gap(t.spacing_lg())
+        .child(
+            // label + TextArea 紧凑排列 (3px 间距)
+            Row::new()
+                .gap(2.0)
+                .child(
+                    // label 固定为单行输入框高度，内部 Center 使文本在其自身高度内垂直居中;
+                    // 不用 cross_center —— 那会把 label 居中到多行 TextArea 的完整高度。
+                    UiBox::new(Color::TRANSPARENT)
+                        .height(label_height)
+                        .child(widget::Center::new(
+                            Text::new("多行：")
+                                .font_size(t.font_size_body())
+                                .color(t.text_primary()),
+                        )),
+                )
+                .child(
+                    // 透明尺寸壳：只为 Scrollable 提供 400×160 视口，背景职责归 TextArea,
+                    // 避免外层 UiBox 与 TextArea 双层 surface 叠出接缝。
+                    UiBox::new(Color::TRANSPARENT)
+                        .size(400.0, 160.0)
+                        .child(Scrollable::themed(
+                            t,
+                            TextArea::themed(t)
+                                .width(400.0)
+                                .height(160.0)
+                                .on_change(|s: &str| Msg::TextareaChanged(s.to_string())),
+                        )),
+                ),
+        )
+        .child(
+            // 与 label 等高，文本在 control_height 内垂直居中
+            UiBox::new(Color::TRANSPARENT)
+                .height(label_height)
+                .child(widget::Center::new(
+                    Text::bind(|s: &Showcase| {
+                        let chars = s.textarea_value.chars().count();
+                        let lines = s.textarea_value.lines().count();
+                        format!("字数：{} 行数：{}", chars, lines)
+                    })
+                    .font_size(t.font_size_body())
+                    .color(t.text_primary()),
+                )),
+        )
+}
+
+/// 滑动开关区：Switch 组件演示。
+fn switch_card(t: &LightTheme) -> impl Widget + 'static {
+    Row::new()
+        .gap(t.spacing_lg())
+        .cross_center()
+        .child(
+            Row::new()
+                .gap(2.0)
+                .cross_center()
+                .child(
+                    Text::new("通知：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Switch::new()
+                        .bind(|s: &Showcase| s.switch_enabled)
+                        .on_toggle(|| Msg::SwitchToggle),
+                ),
+        )
+        .child(
+            Text::bind(|s: &Showcase| {
+                if s.switch_enabled {
+                    "已开启".to_string()
+                } else {
+                    "已关闭".to_string()
+                }
             })
             .font_size(t.font_size_body())
             .color(t.text_primary()),
@@ -373,8 +520,149 @@ fn page_base(t: &LightTheme) -> impl Widget + 'static {
     page(
         t,
         "基础 base — 按钮与文本",
-        card(t, "按钮与计数", counter_row(t)),
+        Column::new()
+            .gap(t.spacing_lg())
+            .cross_stretch()
+            .child(card(t, "按钮与计数", counter_row(t)))
+            .child(card(t, "Image 组件", ImageDemo::new())),
     )
+}
+
+/// Image 组件演示：显示 LOGO 图片，支持打开本地图片。
+///
+/// 按钮 + 信息文本由 Row 框架管理; Image 因动态替换仍手动布局。
+struct ImageDemo {
+    /// 第一行：按钮 + 图片尺寸信息 (框架管理 sync/animate/layout/paint/event)。
+    header: Node,
+    /// 图片组件 (动态数据，手动管理)。
+    image: widget::Image,
+    /// header 布局尺寸缓存。
+    header_size: Size,
+}
+
+impl ImageDemo {
+    fn new() -> Self {
+        let t = theme();
+        let (data, width, height) = load_logo();
+        let header = Row::new()
+            .gap(t.spacing_sm())
+            .cross_center()
+            .child(
+                Button::themed(
+                    &t,
+                    Text::new("打开图片")
+                        .font_size(t.font_size_body())
+                        .color(Color::WHITE),
+                )
+                .on_click(|| Msg::OpenImage),
+            )
+            .child(
+                Text::bind(|s: &Showcase| match &s.image_data {
+                    Some((_, w, h)) => format!("{w}×{h} px"),
+                    None => String::new(),
+                })
+                .font_size(t.font_size_small())
+                .color(Color::rgba(0.6, 0.6, 0.6, 1.0)),
+            );
+        Self {
+            header: Box::new(header),
+            image: widget::Image::new(data, width, height),
+            header_size: Size::ZERO,
+        }
+    }
+}
+
+impl Widget for ImageDemo {
+    fn sync(&mut self, state: &dyn std::any::Any) {
+        self.header.sync(state);
+        let state = state
+            .downcast_ref::<Showcase>()
+            .expect("ImageDemo 绑定状态类型不匹配");
+        if let Some((data, w, h)) = &state.image_data {
+            self.image = widget::Image::new(data.clone(), *w, *h);
+        }
+    }
+
+    fn animate(&mut self, ctx: &danqing::AnimationCtx) {
+        self.header.animate(ctx);
+    }
+
+    fn layout(
+        &mut self,
+        constraints: danqing::Constraints,
+        texts: &mut danqing::TextBatch,
+    ) -> Size {
+        self.header_size = self.header.layout(constraints, texts);
+        let gap = 8.0;
+        let image_size = self.image.layout(
+            danqing::Constraints::loose(Size::new(
+                constraints.max_width,
+                constraints.max_height - self.header_size.height - gap,
+            )),
+            texts,
+        );
+        Size::new(
+            image_size.width.max(self.header_size.width),
+            self.header_size.height + gap + image_size.height,
+        )
+    }
+
+    fn paint(&self, area: Rect, rects: &mut danqing::RectBatch, texts: &mut danqing::TextBatch) {
+        self.header.paint(area, rects, texts);
+        let gap = 8.0;
+        let image_area = Rect::from_xywh(
+            area.origin.x,
+            area.origin.y + self.header_size.height + gap,
+            area.size.width,
+            area.size.height - self.header_size.height - gap,
+        );
+        self.image.paint(image_area, rects, texts);
+    }
+
+    fn paint_image(&self, area: Rect, images: &mut danqing::ImageBatch) {
+        let gap = 8.0;
+        let image_area = Rect::from_xywh(
+            area.origin.x,
+            area.origin.y + self.header_size.height + gap,
+            area.size.width,
+            area.size.height - self.header_size.height - gap,
+        );
+        self.image.paint_image(image_area, images);
+    }
+
+    fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
+        self.header.event(event, area, msgs)
+    }
+
+    fn children(&self) -> &[Node] {
+        self.header.children()
+    }
+
+    fn children_mut(&mut self) -> &mut [Node] {
+        self.header.children_mut()
+    }
+}
+
+/// 从 assets/logo/logo_256.png 加载 LOGO 图片。
+fn load_logo() -> (Vec<u8>, u32, u32) {
+    let path = std::path::Path::new("assets/logo/logo_256.png");
+    match image::open(path) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            (rgba.into_raw(), w, h)
+        }
+        Err(_) => {
+            // 回退：创建一个 2x2 的默认图片
+            let data = vec![
+                100, 150, 180, 255, // 浅蓝
+                120, 160, 170, 255, // 蓝绿
+                90, 140, 160, 255, // 深蓝
+                110, 150, 170, 255, // 中间色
+            ];
+            (data, 2, 2)
+        }
+    }
 }
 
 /// 布局页：盒模型与流式排布。
@@ -395,7 +683,21 @@ fn page_form(t: &LightTheme) -> impl Widget + 'static {
             .gap(t.spacing_lg())
             .cross_stretch()
             .child(card(t, "单行输入", input_row(t)))
-            .child(card(t, "多行输入", textarea_card(t))),
+            .child(card(t, "图标输入", icon_input_row(t)))
+            .child(card(t, "多行输入", textarea_card(t)))
+            .child(card(t, "滑动开关", switch_card(t))),
+    )
+}
+
+/// 导航页：Tabs 多面板切换。
+fn page_nav(t: &LightTheme) -> impl Widget + 'static {
+    page(
+        t,
+        "导航 nav — Tabs 多面板切换",
+        Column::new()
+            .gap(t.spacing_lg())
+            .cross_stretch()
+            .child(card(t, "Tabs 组件 (多面板切换)", tabs_card(t))),
     )
 }
 
@@ -403,9 +705,67 @@ fn page_form(t: &LightTheme) -> impl Widget + 'static {
 fn page_view(t: &LightTheme) -> impl Widget + 'static {
     page(
         t,
-        "视图 view — 每个面板都是 Scrollable, 分类切换由 Switcher 驱动",
-        card(t, "键盘响应 (自定义 Positioned 组件)", keyboard_card(t)),
+        "视图 view — 自定义组件演示",
+        Column::new()
+            .gap(t.spacing_lg())
+            .cross_stretch()
+            .child(card(
+                t,
+                "键盘响应 (自定义 Positioned 组件)",
+                keyboard_card(t),
+            )),
     )
+}
+
+/// Tabs 演示：三个 tab 切换不同内容。
+fn tabs_card(t: &LightTheme) -> impl Widget + 'static {
+    Tabs::new(t)
+        .tab("概览")
+        .tab("设置")
+        .tab("关于")
+        .child(
+            Column::new()
+                .gap(t.spacing_md())
+                .child(
+                    Text::new("这是概览面板")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Text::new("Tabs 组件演示：点击上方 tab 切换面板内容")
+                        .font_size(t.font_size_small())
+                        .color(t.text_secondary()),
+                ),
+        )
+        .child(
+            Column::new()
+                .gap(t.spacing_md())
+                .child(
+                    Text::new("设置面板")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Text::new("每个面板独立持有组件状态")
+                        .font_size(t.font_size_small())
+                        .color(t.text_secondary()),
+                ),
+        )
+        .child(
+            Column::new()
+                .gap(t.spacing_md())
+                .child(
+                    Text::new("关于")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Text::new("danqing 丹青 UI 框架")
+                        .font_size(t.font_size_small())
+                        .color(t.text_secondary()),
+                ),
+        )
+        .on_change(Msg::TabChanged)
 }
 
 /// 侧边栏导航项：选中时实心 accent (Button::bind_color 等状态绑定) 并在左缘绘制竖条。
@@ -560,12 +920,13 @@ fn build_tree() -> Node {
             .fill(
                 Row::new()
                     .child(Padding::all(t.spacing_lg(), sidebar(&t)))
-                    // 分类面板：四个页面常驻实例化，Switcher 只切换可见性。
+                    // 分类面板：四个页面常驻实例化，MultiPanel 只切换可见性。
                     .fill(
-                        Switcher::new()
+                        MultiPanel::new()
                             .child(page_base(&t))
                             .child(page_layout(&t))
                             .child(page_form(&t))
+                            .child(page_nav(&t))
                             .child(page_view(&t))
                             .bind(|s: &Showcase| s.selected),
                         1,
@@ -576,16 +937,20 @@ fn build_tree() -> Node {
 }
 
 fn main() -> anyhow::Result<()> {
-    example_log::init_log();
+    danqing::log::init_log();
 
     let mut app = Showcase {
         count: 0,
         square_pos: Point::ZERO,
         last_key: String::from("-"),
         input_value: String::new(),
+        icon_input_value: String::new(),
         textarea_value: String::new(),
         selected: 0,
         is_maximized: false,
+        image_data: None,
+        selected_tab: 0,
+        switch_enabled: false,
     };
 
     let t = theme();
@@ -594,6 +959,7 @@ fn main() -> anyhow::Result<()> {
         .with_glow("assets/background/glow.png", 0.25)
         .with_noise("assets/background/noise.png", 0.06);
     let config = danqing::WindowConfig {
+        title: "danqing showcase".into(),
         clear_color: t.background(),
         background,
         ..danqing::WindowConfig::default()

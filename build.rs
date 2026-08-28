@@ -1,16 +1,14 @@
 //! @author 十四叔
 //! @date 2026/07/31
 //!
-//! 构建脚本: Windows 可执行文件嵌入图标资源。
+//! 构建脚本: Windows 平台嵌入 exe 图标 (仅图标，不含 FileDescription/ProductName，
+//! 因为库 crate 的 build.rs 会被所有产品继承)。
 
 fn main() {
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     {
-        if let Err(e) = winresource::WindowsResource::new()
-            .set_icon("assets/logo/pomodoro.ico")
-            .compile()
-        {
-            eprintln!("图标嵌入失败（不影响功能）: {e}");
-        }
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon("assets/logo/logo.ico");
+        res.compile().unwrap();
     }
 }
