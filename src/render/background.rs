@@ -41,6 +41,14 @@ pub struct BackgroundConfig {
     pub glow: Option<PathBuf>,
     /// 可选噪声叠加图路径 (通常为 `assets/background/noise.png`)。
     pub noise: Option<PathBuf>,
+    /// 天空蒙版 (灰度图: 天空区域白, 其余黑) —— 时辰系统「活的天空」
+    /// (scene-world 天级路线 B); 未配置时绑占位黑图 (天空永不夜空化)。
+    /// v1 为窗口级单蒙版 (单场景); 多场景各自蒙版归 scene-dlc。
+    pub sky_mask: Option<PathBuf>,
+    /// 发光蒙版 (灰度图: 发光区灰度值 = 亮灯时序阈值, 灰度高先亮) ——
+    /// 入夜灯一盏盏亮起的错落感 (scene-world 签名时刻)。
+    /// 未配置时绑占位黑图 (永不点亮)。
+    pub glow_mask: Option<PathBuf>,
     /// 主背景图缩放模式。
     pub scale: ScaleMode,
     /// 光晕图叠加不透明度 (0.0 ..= 1.0)。
@@ -84,6 +92,21 @@ pub struct BackgroundFrame {
     pub nightmarket_intensity: f32,
     /// 火车动效强度 (0.0 ..= 1.0; 默认 0 = 无动效)。
     pub train_intensity: f32,
+    /// 时辰色调 (RGB 乘性; 默认 [1,1,1] 原样 —— 既有产品零漂移)。
+    /// 天级留存「活的时间」路线 A 分级调色; 经 [`BackgroundFrame::with_time_of_day`] 设置。
+    pub tod_tint: [f32; 3],
+    /// 时辰亮度乘性 (默认 1.0; 夹到 0..2)。
+    pub tod_brightness: f32,
+    /// 时辰饱和度乘性 (默认 1.0; 0 = 灰度; 夹到 0..2)。
+    pub tod_saturation: f32,
+    /// 天空蒙版夜空化进度 (0..1; 默认 0 = 天空原样)。
+    /// 蒙版纹理经 [`BackgroundConfig::with_sky_mask`] 配置; 未配置时绑占位黑图,
+    /// 本值无视觉效果。
+    pub sky_amount: f32,
+    /// 发光蒙版点亮进度 (0..1; 默认 0 = 灯未亮)。灰度 + 抖动阈值实现
+    /// 灯一盏盏亮起的错落感 (天级签名时刻, 路线 B); 蒙版经
+    /// [`BackgroundConfig::with_glow_mask`] 配置, 未配置时本值无视觉效果。
+    pub glow_amount: f32,
 }
 
 impl BackgroundFrame {
@@ -105,6 +128,11 @@ impl BackgroundFrame {
             cave_intensity: 0.0,
             nightmarket_intensity: 0.0,
             train_intensity: 0.0,
+            tod_tint: [1.0, 1.0, 1.0],
+            tod_brightness: 1.0,
+            tod_saturation: 1.0,
+            sky_amount: 0.0,
+            glow_amount: 0.0,
         }
     }
 
@@ -168,6 +196,31 @@ impl BackgroundFrame {
         self.rain_time = rain_time;
         self
     }
+
+    /// 设置时辰调色 (路线 A): 乘性色调 (分量夹 0..1) + 亮度/饱和度
+    /// (夹 0..2, 留提亮/超饱和空间)。恒等值 [1,1,1]/1.0/1.0 = 原样输出。
+    pub fn with_time_of_day(mut self, tint: [f32; 3], brightness: f32, saturation: f32) -> Self {
+        self.tod_tint = [
+            tint[0].clamp(0.0, 1.0),
+            tint[1].clamp(0.0, 1.0),
+            tint[2].clamp(0.0, 1.0),
+        ];
+        self.tod_brightness = brightness.clamp(0.0, 2.0);
+        self.tod_saturation = saturation.clamp(0.0, 2.0);
+        self
+    }
+
+    /// 设置天空蒙版夜空化进度 (夹 0..1; 0 = 天空原样)。
+    pub fn with_sky_amount(mut self, amount: f32) -> Self {
+        self.sky_amount = amount.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 设置发光蒙版点亮进度 (夹 0..1; 蒙版灰度阈值决定各灯点亮先后)。
+    pub fn with_glow_amount(mut self, amount: f32) -> Self {
+        self.glow_amount = amount.clamp(0.0, 1.0);
+        self
+    }
 }
 
 /// 场景动效时间取模周期 (秒): 与 background.wgsl 雨/火/海效果频率的公共周期一致
@@ -222,6 +275,18 @@ impl BackgroundConfig {
         self
     }
 
+    /// 配置天空蒙版 (灰度图, 天空区域白)。
+    pub fn with_sky_mask(mut self, path: impl Into<PathBuf>) -> Self {
+        self.sky_mask = Some(path.into());
+        self
+    }
+
+    /// 配置发光蒙版 (灰度图, 灰度值 = 亮灯时序阈值)。
+    pub fn with_glow_mask(mut self, path: impl Into<PathBuf>) -> Self {
+        self.glow_mask = Some(path.into());
+        self
+    }
+
     /// 设置主背景图缩放模式。
     pub fn scale(mut self, scale: ScaleMode) -> Self {
         self.scale = scale;
@@ -229,8 +294,8 @@ impl BackgroundConfig {
     }
 }
 
-/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐，覆盖 19 字段 × 4B = 76B 有效数据)。
-pub(crate) const UNIFORM_BUFFER_BYTES: u64 = 80;
+/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐，覆盖 24 字段 × 4B = 96B 有效数据)。
+pub(crate) const UNIFORM_BUFFER_BYTES: u64 = 96;
 
 /// 单个已上传的背景纹理。
 #[allow(dead_code)]
@@ -286,14 +351,20 @@ pub struct BackgroundPipeline {
     glow: Option<BackgroundTexture>,
     /// 噪声叠加纹理 (单一资源，启动时即用，不进 LRU)。
     noise: Option<BackgroundTexture>,
-    /// 星野纹理 bind group (group 3): 启动时创建占位 1×1 纹理, 运行时按需替换。
-    starfield_bind: wgpu::BindGroup,
+    /// 附加纹理 bind group (group 3): 星野 + 天空蒙版 + 发光蒙版三纹理
+    /// 合一 —— wgpu 默认 max_bind_groups=4 (uniform/from/to/extras 四组),
+    /// 不能为蒙版单开组 (2026-08-30 实测超限 panic; 星野纹理无运行时替换
+    /// API, 启动后静态, 合并无副作用)。未配置的槽位 = 1×1 黑占位 (特性关)。
+    extras_bind: wgpu::BindGroup,
     scale: ScaleMode,
     glow_opacity: f32,
     noise_opacity: f32,
     /// 应用层每帧写入的背景状态 (场景选择 / 淡化 / 清屏色)。
     frame: Option<BackgroundFrame>,
 }
+
+/// 时辰调色恒等值 (叠加层用): 原样色调/亮度/饱和度, 蒙版量 0。
+const TOD_IDENTITY: [f32; 7] = [1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0];
 
 /// 单个顶点：归一化位置 (0..1) + UV。
 #[repr(C)]
@@ -374,13 +445,42 @@ impl BackgroundPipeline {
             ],
         });
 
+        // group 3 附加纹理布局: 星野 + 天空蒙版 + 发光蒙版 (三纹理合一,
+        // 共享一个采样器) —— wgpu 默认 max_bind_groups=4, 蒙版不能单开组
+        // (2026-08-30 实测超限 panic; 星野无运行时替换 API, 启动后静态,
+        // 合并无副作用)。
+        let extras_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let extras_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("background extras layout"),
+            entries: &[
+                extras_entry(0), // 星野
+                extras_entry(1), // 天空蒙版
+                extras_entry(2), // 发光蒙版
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("background pipeline layout"),
             bind_group_layouts: &[
                 Some(&uniform_layout),
                 Some(&texture_layout),
                 Some(&texture_layout),
-                Some(&texture_layout), // group 3: starfield texture
+                Some(&extras_layout), // group 3: 星野 + 天空/发光蒙版 (三纹理合一)
             ],
             ..Default::default()
         });
@@ -458,31 +558,33 @@ impl BackgroundPipeline {
             .as_deref()
             .and_then(|p| load_texture(device, queue, &texture_layout, p, "noise"));
 
-        // 星野纹理: 创建 1×1 占位纹理 (全黑), 运行时由 starfield 模块替换。
-        let starfield_tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("starfield placeholder"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let starfield_view = starfield_tex.create_view(&wgpu::TextureViewDescriptor::default());
-        let starfield_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("starfield sampler"),
+        // group 3 附加纹理: 星野 (恒 1×1 占位黑 —— 运行时替换 API 从未实现,
+        // 死代码面见 extras_bind 字段注释) + 天空/发光蒙版 (配置了路径用真
+        // 纹理, 未配置 1×1 黑占位 = 蒙版值 0 → 特性天然关闭)。
+        // wgpu BindGroup 内部强引用 GPU 资源, 创建后 Rust 侧 Texture/View
+        // 包装可安全 drop。
+        let starfield_view = black_placeholder_view(device, "starfield");
+        let sky_view = config
+            .sky_mask
+            .as_deref()
+            .and_then(|p| load_texture(device, queue, &texture_layout, p, "sky_mask"))
+            .map(|t| t.view)
+            .unwrap_or_else(|| black_placeholder_view(device, "sky_mask"));
+        let glow_view = config
+            .glow_mask
+            .as_deref()
+            .and_then(|p| load_texture(device, queue, &texture_layout, p, "glow_mask"))
+            .map(|t| t.view)
+            .unwrap_or_else(|| black_placeholder_view(device, "glow_mask"));
+        let extras_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("extras sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let starfield_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("starfield bind group"),
-            layout: &texture_layout,
+        let extras_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("background extras bind group"),
+            layout: &extras_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -490,7 +592,15 @@ impl BackgroundPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&starfield_sampler),
+                    resource: wgpu::BindingResource::TextureView(&sky_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&glow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&extras_sampler),
                 },
             ],
         });
@@ -509,7 +619,7 @@ impl BackgroundPipeline {
             texture_layout: texture_layout.clone(),
             glow,
             noise,
-            starfield_bind,
+            extras_bind,
             scale: config.scale,
             glow_opacity: config.glow_opacity.clamp(0.0, 1.0),
             noise_opacity: config.noise_opacity.clamp(0.0, 1.0),
@@ -659,23 +769,11 @@ impl BackgroundPipeline {
         encoder: &mut wgpu::CommandEncoder,
         target: &DrawTarget,
     ) {
-        let frame = self.frame.unwrap_or(BackgroundFrame {
-            from: 0,
-            to: 0,
-            fade: 0.0,
-            clear_color: target.clear_color,
-            time: 0.0,
-            rain_intensity: 0.0,
-            fire_intensity: 0.0,
-            sea_intensity: 0.0,
-            rain_time: 0.0,
-            mountain_intensity: 0.0,
-            forest_intensity: 0.0,
-            blacksmith_intensity: 0.0,
-            cave_intensity: 0.0,
-            nightmarket_intensity: 0.0,
-            train_intensity: 0.0,
-        });
+        // 默认帧走构造器 (动效全零 + 时辰恒等), 不手写字面量 ——
+        // BackgroundFrame 加字段时此处自动跟随, 无漂移面。
+        let frame = self
+            .frame
+            .unwrap_or(BackgroundFrame::new(0, 0, 0.0, target.clear_color));
         let Some((from, to, fade)) = resolve_frame(frame, self.scene_bytes.len()) else {
             return;
         };
@@ -700,6 +798,16 @@ impl BackgroundPipeline {
             frame.cave_intensity,
             frame.nightmarket_intensity,
             frame.train_intensity,
+        ];
+        // 时辰调色 + 双蒙版进度 (仅场景层取真值; 叠加层用恒等, 既有产品零漂移)。
+        let tod = [
+            frame.tod_tint[0],
+            frame.tod_tint[1],
+            frame.tod_tint[2],
+            frame.tod_brightness,
+            frame.tod_saturation,
+            frame.sky_amount,
+            frame.glow_amount,
         ];
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -734,12 +842,12 @@ impl BackgroundPipeline {
         let tex_to = self.scene_cache.get(&to);
         if let (Some(tex_from), Some(tex_to)) = (tex_from, tex_to) {
             self.draw_layer(
-                &mut pass, queue, target, 0, tex_from, tex_to, self.scale, 1.0, fade, motion,
+                &mut pass, queue, target, 0, tex_from, tex_to, self.scale, 1.0, fade, motion, tod,
             );
         } else if let Some(only) = tex_from.or(tex_to) {
             // 仅一端就绪：单图绘制，fade=0 (无淡化)
             self.draw_layer(
-                &mut pass, queue, target, 0, only, only, self.scale, 1.0, 0.0, motion,
+                &mut pass, queue, target, 0, only, only, self.scale, 1.0, 0.0, motion, tod,
             );
         } // 两端都缺失：不画场景层，让 clear_color 透出
         if let Some(glow) = &self.glow {
@@ -754,6 +862,7 @@ impl BackgroundPipeline {
                 self.glow_opacity,
                 0.0,
                 [0.0; 13],
+                TOD_IDENTITY,
             );
         }
         if let Some(noise) = &self.noise {
@@ -768,12 +877,14 @@ impl BackgroundPipeline {
                 self.noise_opacity,
                 0.0,
                 [0.0; 13],
+                TOD_IDENTITY,
             );
         }
     }
 
     /// 绘制单个叠加层：上传该层顶点与 uniform, 绑定资源后绘制。
     /// `motion` = [雨丝强度，取模后的动效时间，篝火强度，海强度，取模后的雨钟，山强度，森林强度，星夜强度(退役), 星野基础(退役), 铁匠铺强度，洞穴强度，夜市强度，火车强度], 仅场景层 (层 0) 非零。
+    /// `tod` = [时辰色调 RGB, 亮度, 饱和度, 天空蒙版量, 发光蒙版量], 仅场景层取真值。
     #[allow(clippy::too_many_arguments)]
     fn draw_layer(
         &self,
@@ -787,6 +898,7 @@ impl BackgroundPipeline {
         opacity: f32,
         fade: f32,
         motion: [f32; 13],
+        tod: [f32; 7],
     ) {
         // 淡化要求 from/to 同尺寸 (场景生成管线保证统一画布);
         // UV 按 from 纹理计算，尺寸不一致时退回只画 from。
@@ -807,18 +919,21 @@ impl BackgroundPipeline {
             opacity,
             fade,
             motion,
+            tod,
         );
         pass.set_bind_group(0, &self.uniform_binds[layer], &[]);
         pass.set_bind_group(1, &tex_from.bind_group, &[]);
         pass.set_bind_group(2, &tex_to.bind_group, &[]);
-        pass.set_bind_group(3, &self.starfield_bind, &[]);
+        pass.set_bind_group(3, &self.extras_bind, &[]);
         let first = (layer * VERTS_PER_LAYER) as u32;
         pass.draw(first..first + VERTS_PER_LAYER as u32, 0..1);
     }
 
     /// 按缩放模式计算顶点与 UV, 写入指定层的顶点区段与 uniform buffer。
-    /// uniform 布局 (76B 有效，WGSL 16B 对齐为 80B): [opacity, fade, 雨丝强度, 动效时间, 篝火强度, 海强度, 雨钟, 山强度, 森林强度, 星夜强度(退役), 星野基础(退役), 屏宽, 屏高, 铁匠铺强度, 洞穴强度, 夜市强度, 火车强度, _pad1, _pad2]。
-    /// buffer 实际创建 80B (与 WGSL 自动对齐一致)。
+    /// uniform 布局 (96B 有效，恰 16B 对齐): [opacity, fade, 雨丝强度, 动效时间,
+    /// 篝火强度, 海强度, 雨钟, 山强度, 森林强度, 星夜强度(退役), 星野基础(退役),
+    /// 屏宽, 屏高, 铁匠铺强度, 洞穴强度, 夜市强度, 火车强度, 时辰色调 R, G, B,
+    /// 时辰亮度, 时辰饱和度, 天空蒙版量, 发光蒙版量]。
     #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
@@ -831,6 +946,7 @@ impl BackgroundPipeline {
         opacity: f32,
         fade: f32,
         motion: [f32; 13],
+        tod: [f32; 7],
     ) {
         let screen_w = target.width;
         let screen_h = target.height;
@@ -900,10 +1016,31 @@ impl BackgroundPipeline {
             bytemuck::cast_slice(&[
                 opacity, fade, motion[0], motion[1], motion[2], motion[3], motion[4], motion[5],
                 motion[6], motion[7], motion[8], screen_w, screen_h, motion[9], motion[10],
-                motion[11], motion[12], 0.0f32, 0.0f32,
+                motion[11], motion[12], tod[0], tod[1], tod[2], tod[3], tod[4], tod[5], tod[6],
             ]),
         );
     }
+}
+
+/// 创建 1×1 全黑占位纹理的 view (星野/蒙版未配置槽位用)。
+/// 黑 = 特性关: 天空蒙版值 0 不夜空化, 发光蒙版值 0 不点亮。
+/// 调用方创建 BindGroup 后 (wgpu 内部强引用), 返回的 View 可安全 drop。
+fn black_placeholder_view(device: &wgpu::Device, label: &str) -> wgpu::TextureView {
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    tex.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 /// 读取场景 PNG 文件字节与尺寸 (尺寸从内存字节解析头，不解码); 失败时返回 None。
@@ -1270,7 +1407,8 @@ mod tests {
         // ≤ buffer 大小 (UNIFORM_BUFFER_BYTES),且 buffer 必须 16B 对齐
         // (WGSL uniform 规范)。这是 2026-07-30 山/森林动效漏改触发的护栏 —
         // 之前 buffer 留 32B 但 cast_slice 写 36B,wgpu 启动即 panic。
-        const UNIFORM_FIELDS: usize = 19;
+        // 2026-08-30 时辰调色扩到 24 字段 × 4B = 96B (恰 16B 六倍, 零填充)。
+        const UNIFORM_FIELDS: usize = 24;
         let payload_bytes = UNIFORM_FIELDS * std::mem::size_of::<f32>();
         assert!(
             UNIFORM_BUFFER_BYTES as usize >= payload_bytes,
@@ -1292,6 +1430,57 @@ mod tests {
         assert!((BackgroundFrame::new(0, 1, -0.5, c).fade - 0.0).abs() < f32::EPSILON);
         assert!((BackgroundFrame::new(0, 1, 1.5, c).fade - 1.0).abs() < f32::EPSILON);
         assert!((BackgroundFrame::new(0, 1, 0.4, c).fade - 0.4).abs() < f32::EPSILON);
+    }
+
+    /// 时辰调色默认值 = 恒等 (色调原样/亮度 1/饱和度 1), 蒙版量 0:
+    /// 既有产品 (pomodoro/clipboard) 不设即零漂移。
+    #[test]
+    fn time_of_day_defaults_are_identity() {
+        let f = BackgroundFrame::new(0, 0, 0.0, crate::Color::BLACK);
+        assert_eq!(f.tod_tint, [1.0, 1.0, 1.0]);
+        assert_eq!(f.tod_brightness, 1.0);
+        assert_eq!(f.tod_saturation, 1.0);
+        assert_eq!(f.sky_amount, 0.0, "天空蒙版量默认 0 (白天原样)");
+        assert_eq!(f.glow_amount, 0.0, "发光蒙版量默认 0 (灯未亮)");
+    }
+
+    /// 时辰调色设置与钳制: 色调分量 0..1, 亮度/饱和度 0..2 (留提亮空间)。
+    #[test]
+    fn with_time_of_day_sets_and_clamps() {
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_time_of_day([0.9, 0.8, 0.7], 1.2, 0.8);
+        assert_eq!(f.tod_tint, [0.9, 0.8, 0.7]);
+        assert!((f.tod_brightness - 1.2).abs() < f32::EPSILON);
+        assert!((f.tod_saturation - 0.8).abs() < f32::EPSILON);
+
+        let f = BackgroundFrame::new(0, 0, 0.0, c).with_time_of_day([1.5, -0.2, 0.5], 3.0, -1.0);
+        assert_eq!(f.tod_tint, [1.0, 0.0, 0.5], "色调分量夹到 0..1");
+        assert_eq!(f.tod_brightness, 2.0, "亮度夹到 0..2");
+        assert_eq!(f.tod_saturation, 0.0, "饱和度夹到 0..2");
+    }
+
+    /// 蒙版量设置与钳制 (0..1)。
+    #[test]
+    fn with_mask_amounts_clamp() {
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c)
+            .with_sky_amount(1.5)
+            .with_glow_amount(-0.2);
+        assert_eq!(f.sky_amount, 1.0);
+        assert_eq!(f.glow_amount, 0.0);
+    }
+
+    /// 蒙版路径配置: 默认空 (未配置绑占位黑图 = 特性关), builder 设置。
+    #[test]
+    fn background_config_mask_paths() {
+        let cfg = BackgroundConfig::default();
+        assert!(cfg.sky_mask.is_none() && cfg.glow_mask.is_none());
+
+        let cfg = BackgroundConfig::with_image("a.png")
+            .with_sky_mask("sky.png")
+            .with_glow_mask("glow.png");
+        assert_eq!(cfg.sky_mask.as_ref().unwrap().as_os_str(), "sky.png");
+        assert_eq!(cfg.glow_mask.as_ref().unwrap().as_os_str(), "glow.png");
     }
 
     #[test]

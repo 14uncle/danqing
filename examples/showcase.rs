@@ -72,6 +72,9 @@ struct Showcase {
     /// 启动后待开穿透标记 (env DANQING_SHOWCASE_CLICK_THROUGH=1 触发,
     /// 首次显示回调里生效 —— 供截图验证 LAYERED×wgpu 呈现兼容性)。
     pending_click_through: bool,
+    /// 时辰调色演示: None = 渐变背景原样; Some(hour) = 切到时辰演示场景
+    /// 并按小时调色 (env DANQING_TOD_DEMO=19.0 可预置, 供脚本截图验证)。
+    tod_hour: Option<f32>,
 }
 
 /// 应用消息。
@@ -104,6 +107,8 @@ enum Msg {
     ClickThroughToggle,
     /// 窗口置顶演示：切换置顶层级。
     TopmostToggle,
+    /// 时辰调色演示: 设置演示小时 (None = 复位渐变背景)。
+    SetTod(Option<f32>),
 }
 
 impl App for Showcase {
@@ -157,11 +162,28 @@ impl App for Showcase {
                     sender.set_topmost(self.topmost);
                 }
             }
+            Msg::SetTod(hour) => self.tod_hour = hour,
         }
     }
 
     fn view(&self) -> Node {
         build_tree()
+    }
+
+    /// 时辰调色演示: 每帧产出背景状态 (场景 0 渐变 / 场景 1 时辰演示图)。
+    /// tod_hour 为 None 时输出恒等帧 (与不设 background_frame 视觉一致)。
+    fn background_frame(&self) -> Option<danqing::BackgroundFrame> {
+        let frame = danqing::BackgroundFrame::new(0, 0, 0.0, theme().background());
+        let Some(hour) = self.tod_hour else {
+            return Some(frame);
+        };
+        let (tint, brightness, saturation, sky, glow) = tod_params(hour);
+        Some(
+            danqing::BackgroundFrame::new(1, 1, 0.0, theme().background())
+                .with_time_of_day(tint, brightness, saturation)
+                .with_sky_amount(sky)
+                .with_glow_amount(glow),
+        )
     }
 
     fn event(&mut self, event: &Event) {
@@ -805,8 +827,75 @@ fn page_layout(t: &LightTheme) -> impl Widget + 'static {
             .gap(t.spacing_lg())
             .cross_stretch()
             .child(card(t, "品牌色与圆角", palette_and_rounded_card(t)))
-            .child(card(t, "DragArea 拖拽层", drag_area_card(t))),
+            .child(card(t, "DragArea 拖拽层", drag_area_card(t)))
+            .child(card(t, "时辰调色 + 双蒙版", tod_card(t))),
     )
+}
+
+/// 时辰演示迷你曲线 (演示级 6 帧线性插值; 产品级 8 帧 smoothstep
+/// 曲线归 danqing-deskscape scene-world Task 5)。
+/// 返回 (色调 RGB, 亮度, 饱和度, 天空蒙版量, 发光蒙版量)。
+fn tod_params(hour: f32) -> ([f32; 3], f32, f32, f32, f32) {
+    // (时辰, 色调, 亮度, 饱和度, 天空量, 发光量)
+    const KEYS: [(f32, [f32; 3], f32, f32, f32, f32); 6] = [
+        (0.0, [0.70, 0.78, 1.00], 0.50, 0.72, 0.95, 1.00), // 深夜
+        (6.0, [1.00, 0.88, 0.72], 0.92, 0.90, 0.25, 0.20), // 清晨
+        (12.0, [1.00, 1.00, 1.00], 1.08, 1.02, 0.00, 0.00), // 正午
+        (17.0, [1.00, 0.90, 0.70], 1.00, 0.98, 0.05, 0.05), // 金时
+        (19.0, [0.98, 0.72, 0.52], 0.82, 0.90, 0.45, 0.60), // 黄昏
+        (21.0, [0.80, 0.82, 1.00], 0.62, 0.80, 0.80, 1.00), // 入夜
+    ];
+    let h = hour.rem_euclid(24.0);
+    // 找 h 所在的关键帧区间 (环形: 21 点之后回绕到次日 0 点)。
+    let mut i = KEYS.len() - 1;
+    for (k, key) in KEYS.iter().enumerate() {
+        if h >= key.0 {
+            i = k;
+        }
+    }
+    let a = KEYS[i];
+    let b = KEYS[(i + 1) % KEYS.len()];
+    let span = (b.0 - a.0).rem_euclid(24.0).max(0.001);
+    let t = ((h - a.0).rem_euclid(24.0) / span).clamp(0.0, 1.0);
+    let lerp = |x: f32, y: f32| x + (y - x) * t;
+    (
+        [
+            lerp(a.1[0], b.1[0]),
+            lerp(a.1[1], b.1[1]),
+            lerp(a.1[2], b.1[2]),
+        ],
+        lerp(a.2, b.2),
+        lerp(a.3, b.3),
+        lerp(a.4, b.4),
+        lerp(a.5, b.5),
+    )
+}
+
+/// 时辰调色 + 双蒙版演示卡: 按钮切演示小时 (窗口背景即画布;
+/// env DANQING_TOD_DEMO=19.0 可预置, 供脚本截图验证)。
+fn tod_card(t: &LightTheme) -> impl Widget + 'static {
+    let btn = |label: &'static str, hour: Option<f32>| {
+        Button::themed(
+            t,
+            Text::new(label)
+                .font_size(t.font_size_body())
+                .color(Color::WHITE),
+        )
+        .on_click(move || Msg::SetTod(hour))
+    };
+    Row::new()
+        .gap(t.spacing_sm())
+        .cross_center()
+        .child(
+            Text::new("背景时辰 →")
+                .font_size(t.font_size_body())
+                .color(t.text_secondary()),
+        )
+        .child(btn("清晨", Some(7.0)))
+        .child(btn("正午", Some(12.0)))
+        .child(btn("黄昏", Some(19.0)))
+        .child(btn("深夜", Some(23.0)))
+        .child(btn("复位", None))
 }
 
 /// DragArea 演示: 无边框窗口的背景拖拽层 —— 按住卡片内容区空白
@@ -1109,13 +1198,25 @@ fn main() -> anyhow::Result<()> {
         topmost: topmost_at_boot,
         sender: None,
         pending_click_through: std::env::var_os("DANQING_SHOWCASE_CLICK_THROUGH").is_some(),
+        // env DANQING_TOD_DEMO=19.0: 预置时辰演示小时 (脚本截图验证用,
+        // 合成鼠标点击不到达组件 —— 见 danqing-visual-debug-tooling 记忆)。
+        tod_hour: std::env::var("DANQING_TOD_DEMO")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok()),
     };
 
     let t = theme();
-    let background = BackgroundConfig::with_image("assets/background/gradient.png")
-        .scale(ScaleMode::Cover)
-        .with_glow("assets/background/glow.png", 0.25)
-        .with_noise("assets/background/noise.png", 0.06);
+    // 场景 0 = 渐变 (默认原样) / 场景 1 = 时辰演示图 (tod-demo, 中性日光底
+    // + 天空/发光双蒙版); 蒙版未点亮时 (amount=0) 对渐变场景零影响。
+    let background = BackgroundConfig::with_scenes([
+        "assets/background/gradient.png",
+        "assets/background/tod-demo.png",
+    ])
+    .scale(ScaleMode::Cover)
+    .with_glow("assets/background/glow.png", 0.25)
+    .with_noise("assets/background/noise.png", 0.06)
+    .with_sky_mask("assets/background/tod-demo-sky.png")
+    .with_glow_mask("assets/background/tod-demo-glow.png");
     let config = danqing::WindowConfig {
         title: "danqing showcase".into(),
         clear_color: t.background(),
