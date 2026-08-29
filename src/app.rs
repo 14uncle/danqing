@@ -67,6 +67,11 @@ pub trait App: Any {
     /// (如热键 toggle 方向判断) 以此为准, 无需自行假设初始值。
     fn visibility_changed(&mut self, _visible: bool) {}
 
+    /// 渲染暂停态变化 (仅 WindowMode::Adaptive): 前台全屏应用检出/退出时
+    /// 调用。常驻氛围应用据此把声音一并沉降 (性能洁癖的听觉一半:
+    /// 用户在游戏, 世界的雨声也不该飘进耳机)。默认无操作。
+    fn render_suspended(&mut self, _suspended: bool) {}
+
     /// 每帧背景状态：场景选择 / 淡化进度 / 清屏色。
     ///
     /// 默认 `None` —— 保持 `BackgroundConfig` 初始化时的静态背景

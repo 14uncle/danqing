@@ -1019,6 +1019,8 @@ impl<A: App> Handler<'_, A> {
                     if fullscreen { "检出" } else { "退出" },
                     if fullscreen { "暂停" } else { "恢复" }
                 );
+                // 渲染暂停同步给应用层 (声音沉降等 —— 性能洁癖的听觉一半)。
+                self.app.render_suspended(fullscreen);
             }
         }
         let rate = super::frame_budget::decide(
