@@ -9,6 +9,7 @@
 - [shader step 门禁约定](shader-step-on-probability.md) — step(threshold,hash) 的 on 概率=1-threshold;比例须写 step(1-ratio,h);星野曾误写致实际 ~1280 颗、减量方向算反
 - [AI 场景 UV 位移选择偏好](ai-scene-uv-displacement-preference.md) — UV 位移适合大幅运动(海浪/火焰),additive 适合小幅氛围(雾气);与静态元素重叠时走 additive
 - [shader 常量重复定义检查](shader-duplicate-constant-check.md) — 修改 WGSL 时必须先 grep 同名常量,旧定义被替代须删除;shader 编译错误只在运行时暴露
+- [环境音工作流](ambient-audio-workflow.md) — Freesound CC0-only + 合成混音 + 许可台账;资产库 Desktop\danqing\环境音, rodio 先例在 pomodoro;deskscape 需分层 stems + 混音上引擎
 
 ## 性能/内存
 
