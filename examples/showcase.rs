@@ -78,6 +78,12 @@ struct Showcase {
     /// 音频演示: 懒初始化播放器 (首次点播放才开设备; 无音频设备环境
     /// 静默降级不崩)。
     audio_player: Option<danqing::audio::AudioPlayer>,
+    /// 微事件演示: 萤火虫/闪电包络的触发时刻 (世界时钟 elapsed; None = 未触发)。
+    demo_firefly_at: Option<std::time::Duration>,
+    /// 闪电演示触发时刻。
+    demo_flash_at: Option<std::time::Duration>,
+    /// 最近 tick 的世界时钟 (包络计算基准)。
+    last_elapsed: std::time::Duration,
 }
 
 /// 应用消息。
@@ -114,6 +120,10 @@ enum Msg {
     SetTod(Option<f32>),
     /// 音频演示: 播放 440Hz 正弦测试音 (2s)。
     PlayTestTone,
+    /// 微事件演示: 萤火虫 (8s 包络, 自动切黄昏演示场景)。
+    DemoFirefly,
+    /// 微事件演示: 闪电 (1.6s 双闪脉冲)。
+    DemoFlash,
 }
 
 impl App for Showcase {
@@ -175,6 +185,14 @@ impl App for Showcase {
                     .take_duration(std::time::Duration::from_secs(2));
                 player.play_source(tone, 0.5);
             }
+            Msg::DemoFirefly => {
+                self.tod_hour = Some(19.0); // 萤火虫在黄昏演示场景上才可见
+                self.demo_firefly_at = Some(self.last_elapsed);
+            }
+            Msg::DemoFlash => {
+                self.tod_hour = Some(19.0);
+                self.demo_flash_at = Some(self.last_elapsed);
+            }
         }
     }
 
@@ -190,12 +208,35 @@ impl App for Showcase {
             return Some(frame);
         };
         let (tint, brightness, saturation, sky, glow) = tod_params(hour);
-        Some(
-            danqing::BackgroundFrame::new(1, 1, 0.0, theme().background())
-                .with_time_of_day(tint, brightness, saturation)
-                .with_sky_amount(sky)
-                .with_glow_amount(glow),
-        )
+        let mut frame = danqing::BackgroundFrame::new(1, 1, 0.0, theme().background())
+            .with_time_of_day(tint, brightness, saturation)
+            .with_sky_amount(sky)
+            .with_glow_amount(glow);
+        // 微事件演示包络 (萤火虫 8s 淡入淡出 / 闪电双闪脉冲)。
+        if let Some(t0) = self.demo_firefly_at {
+            let dt = self.last_elapsed.saturating_sub(t0).as_secs_f32();
+            frame = frame.with_event_firefly(firefly_envelope(dt));
+        }
+        if let Some(t0) = self.demo_flash_at {
+            let dt = self.last_elapsed.saturating_sub(t0).as_secs_f32();
+            frame = frame.with_flash(flash_pulse(dt));
+        }
+        Some(frame)
+    }
+
+    /// 微事件演示包络到期自清 (tick 驱动; background_frame 是 &self 不可变)。
+    fn tick(&mut self, ctx: &danqing::AnimationCtx) {
+        self.last_elapsed = ctx.elapsed;
+        if let Some(t0) = self.demo_firefly_at {
+            if ctx.elapsed.saturating_sub(t0).as_secs_f32() > 8.0 {
+                self.demo_firefly_at = None;
+            }
+        }
+        if let Some(t0) = self.demo_flash_at {
+            if ctx.elapsed.saturating_sub(t0).as_secs_f32() > 1.6 {
+                self.demo_flash_at = None;
+            }
+        }
     }
 
     fn event(&mut self, event: &Event) {
@@ -856,6 +897,31 @@ fn audio_card(t: &LightTheme) -> impl Widget + 'static {
     .on_click(|| Msg::PlayTestTone)
 }
 
+/// 萤火虫演示包络 (8s): 1.5s 淡入 → 保持 → 1.5s 淡出。
+fn firefly_envelope(t: f32) -> f32 {
+    let ss = |x: f32| {
+        let t = x.clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    ss(t / 1.5) * (1.0 - ss((t - 6.5) / 1.5))
+}
+
+/// 闪电双闪脉冲 (1.6s): 主闪快衰 → 间隙微光 → 次闪较弱 → 灭。
+/// 形状是产品口味 (桌景闪电同款语义), 引擎只收强度。
+fn flash_pulse(t: f32) -> f32 {
+    if t < 0.0 {
+        0.0
+    } else if t < 0.12 {
+        1.0 - t / 0.12 * 0.55
+    } else if t < 0.22 {
+        0.15
+    } else if t < 0.5 {
+        0.65 * (1.0 - (t - 0.22) / 0.28)
+    } else {
+        0.0
+    }
+}
+
 /// 时辰演示迷你曲线 (演示级 6 帧线性插值; 产品级 8 帧 smoothstep
 /// 曲线归 danqing-deskscape scene-world Task 5)。
 /// 返回 (色调 RGB, 亮度, 饱和度, 天空蒙版量, 发光蒙版量)。
@@ -920,6 +986,29 @@ fn tod_card(t: &LightTheme) -> impl Widget + 'static {
         .child(btn("黄昏", Some(19.0)))
         .child(btn("深夜", Some(23.0)))
         .child(btn("复位", None))
+        .child(
+            Text::new("微事件 →")
+                .font_size(t.font_size_body())
+                .color(t.text_secondary()),
+        )
+        .child(
+            Button::themed(
+                t,
+                Text::new("萤火虫")
+                    .font_size(t.font_size_body())
+                    .color(Color::WHITE),
+            )
+            .on_click(|| Msg::DemoFirefly),
+        )
+        .child(
+            Button::themed(
+                t,
+                Text::new("闪电")
+                    .font_size(t.font_size_body())
+                    .color(Color::WHITE),
+            )
+            .on_click(|| Msg::DemoFlash),
+        )
 }
 
 /// DragArea 演示: 无边框窗口的背景拖拽层 —— 按住卡片内容区空白
@@ -1228,6 +1317,17 @@ fn main() -> anyhow::Result<()> {
             .ok()
             .and_then(|v| v.parse::<f32>().ok()),
         audio_player: None,
+        // 微事件演示: env DANQING_EVENT_DEMO=firefly|flash 启动即触发
+        // (脚本截图验证用, 同 DANQING_TOD_DEMO 的注入理由)。
+        demo_firefly_at: match std::env::var("DANQING_EVENT_DEMO").as_deref() {
+            Ok("firefly") => Some(std::time::Duration::ZERO),
+            _ => None,
+        },
+        demo_flash_at: match std::env::var("DANQING_EVENT_DEMO").as_deref() {
+            Ok("flash") => Some(std::time::Duration::ZERO),
+            _ => None,
+        },
+        last_elapsed: std::time::Duration::ZERO,
     };
 
     let t = theme();

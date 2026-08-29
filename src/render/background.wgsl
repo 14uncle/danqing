@@ -36,6 +36,9 @@ struct Uniforms {
     tod_saturation: f32,   // 时辰饱和度乘性 (0 = 灰度)
     sky_amount: f32,       // 天空蒙版夜空化进度 0..1 (0 = 天空原样)
     glow_amount: f32,      // 发光蒙版点亮进度 0..1 (灰度阈值错落亮灯)
+    // ---- 微事件 (桌景 scene-world 分钟级; 包络由产品调度器算好, 本层只播放) ----
+    event_firefly: f32,    // 萤火虫包络 0..1 (程序化萤绿光点, 免资产)
+    flash_intensity: f32,  // 闪电亮度包络 0..1 (全屏 additive 蓝白)
 }
 
 // ---- 雨幕 (雨场景; 静态图已去丝, 雨全部由本段程序化渲染) ----
@@ -703,6 +706,35 @@ const GLOW_WARM: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
 // 天空夜空化目标色相 (深夜蓝暗, 乘性沉降)。
 const NIGHT_SKY_TINT: vec3<f32> = vec3<f32>(0.30, 0.36, 0.55);
 
+// ---- 萤火虫 (桌景分钟级微事件): 程序化萤绿光点, 免资产 ----
+// 5 只, 下半区慢漂 (基位 hash 固定 + 低频正弦游移), 明灭节奏错开
+// (大部分时间是暗的, 亮时忽然 —— 萤火虫的「眨眼」感); 包络由产品调度器
+// 驱动 (事件开演淡入, 落幕淡出), 本层只播放。
+const FF_COUNT: f32 = 5.0;
+const FF_COLOR: vec3<f32> = vec3<f32>(0.72, 1.0, 0.45); // 萤绿偏暖
+const FF_RADIUS: f32 = 0.004;      // 点半径 (纵向 uv; 小窗里 ~1-2px 亮点)
+const FF_DRIFT_X: f32 = 0.045;     // 横向游移幅度
+const FF_DRIFT_Y: f32 = 0.030;     // 纵向游移幅度
+
+fn firefly_layer(uv: vec2<f32>, t: f32) -> f32 {
+    var acc = 0.0;
+    let aspect = u.screen_w / max(u.screen_h, 1.0);
+    for (var i = 0.0; i < FF_COUNT; i += 1.0) {
+        let h1 = rain_hash(i * 12.9 + 3.1);
+        let h2 = rain_hash(i * 7.7 + 9.3);
+        // 基位下半区 (y 0.50~0.92, 贴地面/小屋生活层, 不上天空)。
+        let cx = 0.08 + h1 * 0.84 + sin(t * 0.35 * (0.7 + 0.5 * h2) + h1 * 6.2831853) * FF_DRIFT_X;
+        let cy = 0.50 + h2 * 0.42 + cos(t * 0.50 * (0.6 + 0.4 * h1) + h2 * 6.2831853) * FF_DRIFT_Y;
+        // 明灭: 频率错开, 暗多亮少 (smoothstep 抬门槛)。
+        let tw = 0.5 + 0.5 * sin(t * (1.2 + h1 * 2.2) + h2 * 6.2831853);
+        let blink = smoothstep(0.55, 0.95, tw);
+        let d = distance(vec2<f32>(uv.x * aspect, uv.y), vec2<f32>(cx * aspect, cy));
+        let spot = 1.0 - smoothstep(FF_RADIUS * 0.3, FF_RADIUS, d);
+        acc += spot * blink;
+    }
+    return min(acc, 1.0);
+}
+
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -859,6 +891,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             let lit = clamp((u.glow_amount - (1.0 - g) + dither) * 8.0, 0.0, 1.0);
             rgb += GLOW_WARM * lit * g * 0.85;
         }
+    }
+    // 萤火虫 (发射光点, 调色之后叠加 —— 与发光蒙版同层语义: 光源不被调色)。
+    if (u.event_firefly > 0.0) {
+        rgb += FF_COLOR * firefly_layer(in.uv, u.time) * u.event_firefly * 0.7;
+    }
+    // 闪电最后 (压过一切的全屏提亮, 蓝白色温; 双闪脉冲形状在产品侧)。
+    if (u.flash_intensity > 0.0) {
+        rgb += vec3<f32>(0.82, 0.88, 1.05) * u.flash_intensity * 0.85;
     }
     return vec4<f32>(rgb, color.a * u.opacity);
 }

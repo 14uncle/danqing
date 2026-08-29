@@ -107,6 +107,12 @@ pub struct BackgroundFrame {
     /// 灯一盏盏亮起的错落感 (天级签名时刻, 路线 B); 蒙版经
     /// [`BackgroundConfig::with_glow_mask`] 配置, 未配置时本值无视觉效果。
     pub glow_amount: f32,
+    /// 萤火虫微事件包络 (0..1; 默认 0 = 无萤火虫)。程序化萤绿光点
+    /// (免资产 additive), 事件生命周期由产品侧调度器驱动 (scene-world)。
+    pub event_firefly: f32,
+    /// 闪电亮度包络 (0..1; 默认 0)。全屏 additive 蓝白提亮;
+    /// 双闪脉冲形状由产品侧算好 (本值只是强度)。
+    pub flash_intensity: f32,
 }
 
 impl BackgroundFrame {
@@ -133,6 +139,8 @@ impl BackgroundFrame {
             tod_saturation: 1.0,
             sky_amount: 0.0,
             glow_amount: 0.0,
+            event_firefly: 0.0,
+            flash_intensity: 0.0,
         }
     }
 
@@ -221,6 +229,18 @@ impl BackgroundFrame {
         self.glow_amount = amount.clamp(0.0, 1.0);
         self
     }
+
+    /// 设置萤火虫微事件包络 (夹 0..1; 0 = 无萤火虫, 逐像素零漂移)。
+    pub fn with_event_firefly(mut self, amount: f32) -> Self {
+        self.event_firefly = amount.clamp(0.0, 1.0);
+        self
+    }
+
+    /// 设置闪电亮度包络 (夹 0..1; 脉冲形状由产品侧算好, 本值只是强度)。
+    pub fn with_flash(mut self, intensity: f32) -> Self {
+        self.flash_intensity = intensity.clamp(0.0, 1.0);
+        self
+    }
 }
 
 /// 场景动效时间取模周期 (秒): 与 background.wgsl 雨/火/海效果频率的公共周期一致
@@ -294,8 +314,9 @@ impl BackgroundConfig {
     }
 }
 
-/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐，覆盖 24 字段 × 4B = 96B 有效数据)。
-pub(crate) const UNIFORM_BUFFER_BYTES: u64 = 96;
+/// 背景动效 uniform buffer 字节数 (WGSL 16B 对齐，26 字段 × 4B = 104B 有效数据,
+/// 上取 112B)。
+pub(crate) const UNIFORM_BUFFER_BYTES: u64 = 112;
 
 /// 单个已上传的背景纹理。
 #[allow(dead_code)]
@@ -363,8 +384,8 @@ pub struct BackgroundPipeline {
     frame: Option<BackgroundFrame>,
 }
 
-/// 时辰调色恒等值 (叠加层用): 原样色调/亮度/饱和度, 蒙版量 0。
-const TOD_IDENTITY: [f32; 7] = [1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0];
+/// 时辰调色恒等值 (叠加层用): 原样色调/亮度/饱和度, 蒙版量与事件包络 0。
+const TOD_IDENTITY: [f32; 9] = [1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0];
 
 /// 单个顶点：归一化位置 (0..1) + UV。
 #[repr(C)]
@@ -799,7 +820,8 @@ impl BackgroundPipeline {
             frame.nightmarket_intensity,
             frame.train_intensity,
         ];
-        // 时辰调色 + 双蒙版进度 (仅场景层取真值; 叠加层用恒等, 既有产品零漂移)。
+        // 时辰调色 + 双蒙版进度 + 微事件包络 (仅场景层取真值; 叠加层恒等,
+        // 既有产品零漂移)。
         let tod = [
             frame.tod_tint[0],
             frame.tod_tint[1],
@@ -808,6 +830,8 @@ impl BackgroundPipeline {
             frame.tod_saturation,
             frame.sky_amount,
             frame.glow_amount,
+            frame.event_firefly,
+            frame.flash_intensity,
         ];
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -884,7 +908,8 @@ impl BackgroundPipeline {
 
     /// 绘制单个叠加层：上传该层顶点与 uniform, 绑定资源后绘制。
     /// `motion` = [雨丝强度，取模后的动效时间，篝火强度，海强度，取模后的雨钟，山强度，森林强度，星夜强度(退役), 星野基础(退役), 铁匠铺强度，洞穴强度，夜市强度，火车强度], 仅场景层 (层 0) 非零。
-    /// `tod` = [时辰色调 RGB, 亮度, 饱和度, 天空蒙版量, 发光蒙版量], 仅场景层取真值。
+    /// `tod` = [时辰色调 RGB, 亮度, 饱和度, 天空蒙版量, 发光蒙版量, 萤火虫包络,
+    /// 闪电包络], 仅场景层取真值。
     #[allow(clippy::too_many_arguments)]
     fn draw_layer(
         &self,
@@ -898,7 +923,7 @@ impl BackgroundPipeline {
         opacity: f32,
         fade: f32,
         motion: [f32; 13],
-        tod: [f32; 7],
+        tod: [f32; 9],
     ) {
         // 淡化要求 from/to 同尺寸 (场景生成管线保证统一画布);
         // UV 按 from 纹理计算，尺寸不一致时退回只画 from。
@@ -933,7 +958,7 @@ impl BackgroundPipeline {
     /// uniform 布局 (96B 有效，恰 16B 对齐): [opacity, fade, 雨丝强度, 动效时间,
     /// 篝火强度, 海强度, 雨钟, 山强度, 森林强度, 星夜强度(退役), 星野基础(退役),
     /// 屏宽, 屏高, 铁匠铺强度, 洞穴强度, 夜市强度, 火车强度, 时辰色调 R, G, B,
-    /// 时辰亮度, 时辰饱和度, 天空蒙版量, 发光蒙版量]。
+    /// 时辰亮度, 时辰饱和度, 天空蒙版量, 发光蒙版量, 萤火虫包络, 闪电包络]。
     #[allow(clippy::too_many_arguments)]
     fn upload_quad(
         &self,
@@ -946,7 +971,7 @@ impl BackgroundPipeline {
         opacity: f32,
         fade: f32,
         motion: [f32; 13],
-        tod: [f32; 7],
+        tod: [f32; 9],
     ) {
         let screen_w = target.width;
         let screen_h = target.height;
@@ -1017,6 +1042,7 @@ impl BackgroundPipeline {
                 opacity, fade, motion[0], motion[1], motion[2], motion[3], motion[4], motion[5],
                 motion[6], motion[7], motion[8], screen_w, screen_h, motion[9], motion[10],
                 motion[11], motion[12], tod[0], tod[1], tod[2], tod[3], tod[4], tod[5], tod[6],
+                tod[7], tod[8],
             ]),
         );
     }
@@ -1407,8 +1433,9 @@ mod tests {
         // ≤ buffer 大小 (UNIFORM_BUFFER_BYTES),且 buffer 必须 16B 对齐
         // (WGSL uniform 规范)。这是 2026-07-30 山/森林动效漏改触发的护栏 —
         // 之前 buffer 留 32B 但 cast_slice 写 36B,wgpu 启动即 panic。
-        // 2026-08-30 时辰调色扩到 24 字段 × 4B = 96B (恰 16B 六倍, 零填充)。
-        const UNIFORM_FIELDS: usize = 24;
+        // 2026-08-30 时辰调色扩到 24 字段 (96B 恰对齐); 同日微事件
+        // (萤火虫/闪电) 再扩 2 字段 → 26 × 4B = 104B, 上取 112B。
+        const UNIFORM_FIELDS: usize = 26;
         let payload_bytes = UNIFORM_FIELDS * std::mem::size_of::<f32>();
         assert!(
             UNIFORM_BUFFER_BYTES as usize >= payload_bytes,
@@ -1457,6 +1484,21 @@ mod tests {
         assert_eq!(f.tod_tint, [1.0, 0.0, 0.5], "色调分量夹到 0..1");
         assert_eq!(f.tod_brightness, 2.0, "亮度夹到 0..2");
         assert_eq!(f.tod_saturation, 0.0, "饱和度夹到 0..2");
+    }
+
+    /// 微事件包络: 默认 0 (无萤火虫无闪电), builder 设置并夹 0..1。
+    #[test]
+    fn event_envelopes_default_zero_and_clamp() {
+        let c = crate::Color::BLACK;
+        let f = BackgroundFrame::new(0, 0, 0.0, c);
+        assert_eq!(f.event_firefly, 0.0);
+        assert_eq!(f.flash_intensity, 0.0);
+        let f = f.with_event_firefly(0.7).with_flash(1.4);
+        assert!((f.event_firefly - 0.7).abs() < f32::EPSILON);
+        assert_eq!(f.flash_intensity, 1.0, "闪电包络夹到 1");
+        let f = f.with_event_firefly(-0.3);
+        assert_eq!(f.event_firefly, 0.0);
+        assert_eq!(f.flash_intensity, 1.0, "链式设置互不覆盖");
     }
 
     /// 蒙版量设置与钳制 (0..1)。
