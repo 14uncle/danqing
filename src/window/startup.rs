@@ -44,8 +44,11 @@ pub fn set_enabled(app_name: &str, exe_path: &str, enabled: bool) -> Result<(), 
         if !path.is_absolute() {
             return Err(StartupError::InvalidPath(exe_path.to_string()));
         }
-        run_key.set_value(app_name, &exe_path)?;
-        log::info!("已设置开机启动：{app_name} = {exe_path}");
+        // 写 Run 值一律加引号: 含空格路径 (如 C:\Program Files\...) 不加引号
+        // 会被 Windows 按空格截断猜测执行路径 (经典 unquoted path 劫持面)。
+        let quoted = format!("\"{exe_path}\"");
+        run_key.set_value(app_name, &quoted)?;
+        log::info!("已设置开机启动：{app_name} = {quoted}");
     } else {
         // 删除：忽略 "值不存在" 的错误
         match run_key.delete_value(app_name) {
@@ -146,5 +149,21 @@ mod tests {
     fn reject_relative_path() {
         let result = set_enabled(TEST_APP_NAME, "relative\\path.exe", true);
         assert!(result.is_err(), "相对路径应被拒绝");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn set_enabled_writes_quoted_path() {
+        // 写入的 Run 值必须带引号 (含空格路径防截断劫持); 跑完自清。
+        let exe = std::env::current_exe().expect("获取当前 exe 路径失败");
+        let exe_str = exe.to_string_lossy().to_string();
+        set_enabled(TEST_APP_NAME, &exe_str, true).expect("设置启用失败");
+        let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+        let run_key = hkcu
+            .open_subkey_with_flags(RUN_KEY_PATH, winreg::enums::KEY_READ)
+            .expect("打开 Run 键失败");
+        let val: String = run_key.get_value(TEST_APP_NAME).expect("读回 Run 值失败");
+        set_enabled(TEST_APP_NAME, &exe_str, false).expect("清理失败");
+        assert_eq!(val, format!("\"{exe_str}\""), "Run 值应为带引号的完整路径");
     }
 }

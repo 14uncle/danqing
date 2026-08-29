@@ -840,9 +840,15 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             }
             WindowEvent::Moved(position) => {
                 // 位置记忆: 拖动后回报物理坐标 (产品侧防抖落盘)。
-                // 最大化时位置由系统管理, 不记 (否则记忆点位被最大化位污染)。
+                // 最大化/最小化位置由系统管理, 不记 —— 最大化位污染还原位;
+                // 最小化窗口被挪到幻影坐标 (-32000,-32000), 记忆会被冲掉。
                 if self.config.placement == super::ShowPlacement::Remember
-                    && self.window.as_ref().is_some_and(|w| !w.is_maximized())
+                    && self.window.as_ref().is_some_and(|w| {
+                        super::placement::should_remember_position(
+                            w.is_maximized(),
+                            w.is_minimized().unwrap_or(false),
+                        )
+                    })
                 {
                     self.app.save_window_position(position.x, position.y);
                 }
@@ -897,15 +903,18 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 tray_menu_dirty = true;
             }
         }
-        // 动作可能改了勾选态: 重建托盘菜单 (tray_menu 从 App 状态现查, 幂等)。
+        // 窗口事件通道轮询
+        while let Ok(event) = self.window_event_rx.try_recv() {
+            if self.apply_window_event(event, event_loop) {
+                tray_menu_dirty = true;
+            }
+        }
+        // 动作 (托盘点击/全局热键/经 sender 的状态变更) 可能改了勾选态:
+        // 重建托盘菜单 (tray_menu 从 App 状态现查, 幂等)。
         if tray_menu_dirty {
             if let Some(tray) = &self.tray {
                 tray.set_menu(self.app.tray_menu());
             }
-        }
-        // 窗口事件通道轮询
-        while let Ok(event) = self.window_event_rx.try_recv() {
-            self.apply_window_event(event, event_loop);
         }
         // 焦点事件流对账 (Windows): AttachThreadInput 抢前台后, Windows 的
         // 焦点消息投递可能整体失真 (WM_SETFOCUS / WM_NCACTIVATE / WM_KILLFOCUS
@@ -1038,7 +1047,8 @@ impl<A: App> Handler<'_, A> {
     }
 
     /// 处理 App 经 WindowEventSender 主动发来的事件。
-    fn apply_window_event(&mut self, event: WindowAppEvent, event_loop: &ActiveEventLoop) {
+    /// 返回 true = 该事件改了托盘菜单勾选项相关状态 (调用方据此刻意重建菜单)。
+    fn apply_window_event(&mut self, event: WindowAppEvent, event_loop: &ActiveEventLoop) -> bool {
         match event {
             WindowAppEvent::ToggleVisible => {
                 // Handler 是 is_visible 唯一事实源：翻转后立即应用到 winit 窗口。
@@ -1049,6 +1059,7 @@ impl<A: App> Handler<'_, A> {
                     self.hide_window();
                 }
                 self.app.visibility_changed(self.is_visible);
+                false
             }
             WindowAppEvent::ShowWindow => {
                 // 仅显示窗口 (不切换)。用于 focus_lost 等场景。
@@ -1057,6 +1068,7 @@ impl<A: App> Handler<'_, A> {
                     self.show_window();
                     self.app.visibility_changed(true);
                 }
+                false
             }
             WindowAppEvent::HideWindow => {
                 // 仅隐藏窗口 (不切换)。用于 focus_lost 和关闭按钮。
@@ -1065,8 +1077,12 @@ impl<A: App> Handler<'_, A> {
                     self.hide_window();
                     self.app.visibility_changed(false);
                 }
+                false
             }
-            WindowAppEvent::Quit => event_loop.exit(),
+            WindowAppEvent::Quit => {
+                event_loop.exit();
+                false
+            }
             WindowAppEvent::PhaseAdvanced => {
                 // 隐藏态时阶段流转 → 自动呼出 (用户可能没在电脑前，或在另一 app)，
                 // 默认最大化呼出 (沉浸主界面)。手动 ToggleVisible 不强制最大化。
@@ -1076,12 +1092,14 @@ impl<A: App> Handler<'_, A> {
                     self.show_window();
                     self.maximize_window();
                 }
+                false
             }
             WindowAppEvent::SetClearColor(color) => {
                 self.config.clear_color = color;
                 if let Some(ctx) = self.context.as_mut() {
                     ctx.set_clear_color(color);
                 }
+                false
             }
             WindowAppEvent::SetClickThrough(enabled) => {
                 // 穿透只改命中测试, 不动可见性与焦点; 底层实现幂等。
@@ -1090,6 +1108,7 @@ impl<A: App> Handler<'_, A> {
                 if let Some(window) = &self.window {
                     super::passthrough::set_click_through(window, enabled);
                 }
+                true
             }
             WindowAppEvent::SetTopmost(topmost) => {
                 self.config.topmost = topmost;
@@ -1100,17 +1119,42 @@ impl<A: App> Handler<'_, A> {
                         WindowLevel::Normal
                     });
                 }
+                true
             }
             WindowAppEvent::SetInnerSize(size) => {
-                // 与创建路径同约定: 逻辑像素。winit 异步生效 (Windows 上通常
-                // 返回 None), 实际尺寸以随后的 Resized 事件为准; 渲染表面经
-                // 既有 Resized 流程自动跟随。窗口未创建时丢弃。
-                if let Some(window) = &self.window {
+                let Some(window) = &self.window else {
+                    return true; // 窗口未创建时丢弃 (resumed 前)
+                };
+                if window.is_maximized() {
+                    // request_inner_size 会清最大化标志 (见 show_window 注释),
+                    // 最大化态的尺寸请求静默丢弃。
+                    log::info!("最大化态忽略尺寸请求 {}x{}", size.width, size.height);
+                } else if self.is_visible {
+                    // 与创建路径同约定: 逻辑像素。winit 异步生效 (Windows 上通常
+                    // 返回 None), 实际尺寸以随后的 Resized 事件为准; 渲染表面经
+                    // 既有 Resized 流程自动跟随。
                     let _ = window.request_inner_size(LogicalSize::new(
                         f64::from(size.width),
                         f64::from(size.height),
                     ));
+                } else {
+                    // 隐藏态不直接改窗口: Windows 会对隐藏窗口补发 WM_SIZE,
+                    // 但隐藏态 Resized 一律不信 (幻影 160x28 防护), 显示时
+                    // show_window 又以 last_real_size 自愈回滚 —— 窗口会弹回
+                    // 旧尺寸而产品配置已变更 (三态不一致, desk-window review
+                    // 实证)。只更新信标: 显示时自愈路径把窗口做到新尺寸并
+                    // 触发真实 WM_SIZE (表面经 Resized 流程跟随)。
+                    let logical = LogicalSize::new(f64::from(size.width), f64::from(size.height));
+                    let physical: PhysicalSize<f64> = logical.to_physical(window.scale_factor());
+                    self.last_real_size =
+                        PhysicalSize::new(physical.width as u32, physical.height as u32);
+                    log::info!(
+                        "隐藏态尺寸请求记入信标 {}x{}, 显示时落位",
+                        self.last_real_size.width,
+                        self.last_real_size.height
+                    );
                 }
+                true
             }
         }
     }

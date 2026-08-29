@@ -8,13 +8,16 @@ use crate::render::{RectBatch, TextBatch};
 use crate::widget::{EventResult, MsgQueue, Node, Widget};
 use crate::{Constraints, Rect, Size};
 
-/// 拖拽层容器: 恒占满可用空间, 左键按下命中即发起窗口拖拽
-/// (经 [`WindowAction::Drag`], Handler 调 winit `drag_window` 系统模态移动)。
+/// 拖拽层容器: 左键按下命中即发起窗口拖拽 (经 [`WindowAction::Drag`],
+/// Handler 调 winit `drag_window` 系统模态移动)。
 ///
 /// 无边框常驻窗 (桌景类) 没有标题栏, 本组件承担「背景拖动」语义:
 /// 按下先给子组件, 子组件消费则不拖 —— 交互元素 (按钮/场景交互点)
 /// 天然避让; 空背景按下才移动窗口。非按下事件 (移动/抬起/滚轮)
 /// 原样透传子组件, 不产拖拽。
+///
+/// 布局逐轴判定 (同 [`Center`](crate::widget::Center)): tight 轴占满
+/// (根用法下铺满窗口), loose 轴包裹子组件。
 pub struct DragArea {
     child: Node,
     /// layout 缓存: 子组件尺寸 (子组件从左上角摆放)。
@@ -42,11 +45,28 @@ impl Widget for DragArea {
     }
 
     fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
-        // 拖拽层恒占满: 保证窗口空白处处处可拖; 子组件按自然尺寸测量。
+        // 逐轴判定 (同 Center): tight 轴占满 —— 根用法下窗口约束是 tight,
+        // 拖拽层铺满窗口, 空白处处可拖; loose 轴包裹子组件 —— Scrollable
+        // 给子组件的滚动轴上限是 MAX_CONTENT_SIZE (1e6), 占满会把内容区
+        // 撑成百万像素空洞 (review Required #1 实证)。
+        let tight_w = constraints.min_width == constraints.max_width;
+        let tight_h = constraints.min_height == constraints.max_height;
         self.child_size = self
             .child
             .layout(Constraints::loose(constraints.max()), texts);
-        constraints.constrain(constraints.max())
+        let size = Size::new(
+            if tight_w {
+                constraints.max_width
+            } else {
+                self.child_size.width
+            },
+            if tight_h {
+                constraints.max_height
+            } else {
+                self.child_size.height
+            },
+        );
+        constraints.constrain(size)
     }
 
     fn paint(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
@@ -100,15 +120,27 @@ mod tests {
     /// 探针组件: 记录收到的事件, 按构造参数返回消费态。
     struct Spy {
         consume: bool,
-        seen: std::cell::RefCell<Vec<&'static str>>,
+        seen: std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>,
     }
 
     impl Spy {
         fn new(consume: bool) -> Self {
             Self {
                 consume,
-                seen: std::cell::RefCell::new(Vec::new()),
+                seen: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             }
+        }
+
+        /// 带外置记录器的构造: 测试经返回的 Rc 断言子组件实际收到的事件。
+        fn tracked(consume: bool) -> (Self, std::rc::Rc<std::cell::RefCell<Vec<&'static str>>>) {
+            let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            (
+                Self {
+                    consume,
+                    seen: seen.clone(),
+                },
+                seen,
+            )
         }
     }
 
@@ -167,18 +199,35 @@ mod tests {
     }
 
     #[test]
-    fn layout_fills_max_constraints() {
+    fn layout_tight_constraints_fill() {
+        // 根用法: 窗口约束 tight → 拖拽层铺满
         let mut area = DragArea::new(Spy::new(false));
         let mut texts = crate::render::TextBatch::new();
-        let size = area.layout(Constraints::loose(Size::new(320.0, 240.0)), &mut texts);
-        assert_eq!(size, Size::new(320.0, 240.0), "拖拽层恒占满可用空间");
+        let size = area.layout(Constraints::tight(Size::new(320.0, 240.0)), &mut texts);
+        assert_eq!(size, Size::new(320.0, 240.0), "tight 轴占满");
+    }
+
+    #[test]
+    fn layout_loose_constraints_wrap_child() {
+        // 嵌套用法 (Scrollable 等): loose 轴包裹子组件, 不占百万像素上限
+        let mut area = DragArea::new(Spy::new(false));
+        let mut texts = crate::render::TextBatch::new();
+        let size = area.layout(
+            Constraints::loose(Size::new(320.0, 1_000_000.0)),
+            &mut texts,
+        );
+        assert_eq!(
+            size,
+            Size::new(10.0, 10.0),
+            "loose 轴包裹子组件 (spy 自报 10x10)"
+        );
     }
 
     #[test]
     fn left_press_pushes_drag_action_and_consumes() {
         let mut area = DragArea::new(Spy::new(false));
         let mut texts = crate::render::TextBatch::new();
-        area.layout(Constraints::loose(Size::new(320.0, 240.0)), &mut texts);
+        area.layout(Constraints::tight(Size::new(320.0, 240.0)), &mut texts);
         let mut msgs = crate::widget::MsgQueue::new();
         let result = area.event(&press_at(100.0, 100.0), window_area(), &mut msgs);
         assert_eq!(result, EventResult::Consumed);
@@ -194,7 +243,7 @@ mod tests {
         // 交互子组件吃掉按下 → 不触发拖拽 (场景世界交互元素的避让语义)
         let mut area = DragArea::new(Spy::new(true));
         let mut texts = crate::render::TextBatch::new();
-        area.layout(Constraints::loose(Size::new(320.0, 240.0)), &mut texts);
+        area.layout(Constraints::tight(Size::new(320.0, 240.0)), &mut texts);
         let mut msgs = crate::widget::MsgQueue::new();
         let result = area.event(&press_at(5.0, 5.0), window_area(), &mut msgs);
         assert_eq!(result, EventResult::Consumed);
@@ -206,7 +255,7 @@ mod tests {
         // 嵌套用法: 命中落在 DragArea 矩形之外 → 不拖拽不消费
         let mut area = DragArea::new(Spy::new(false));
         let mut texts = crate::render::TextBatch::new();
-        area.layout(Constraints::loose(Size::new(320.0, 240.0)), &mut texts);
+        area.layout(Constraints::tight(Size::new(320.0, 240.0)), &mut texts);
         let mut msgs = crate::widget::MsgQueue::new();
         let small_area = Rect::new(Point::new(0.0, 0.0), Size::new(50.0, 50.0));
         let result = area.event(&press_at(200.0, 200.0), small_area, &mut msgs);
@@ -216,14 +265,15 @@ mod tests {
 
     #[test]
     fn non_press_events_forward_to_child_without_drag() {
-        let spy = Spy::new(false);
+        let (spy, seen) = Spy::tracked(false);
         let mut area = DragArea::new(spy);
         let mut texts = crate::render::TextBatch::new();
-        area.layout(Constraints::loose(Size::new(320.0, 240.0)), &mut texts);
+        area.layout(Constraints::tight(Size::new(320.0, 240.0)), &mut texts);
         let mut msgs = crate::widget::MsgQueue::new();
         let moved = Event::CursorMoved(Point::new(30.0, 30.0));
         let result = area.event(&moved, window_area(), &mut msgs);
         assert_eq!(result, EventResult::Ignored, "非按下事件不消费");
         assert!(msgs.is_empty(), "非按下事件不产拖拽");
+        assert_eq!(*seen.borrow(), vec!["move"], "事件实际透传到子组件");
     }
 }

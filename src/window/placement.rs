@@ -116,9 +116,17 @@ pub(crate) fn clamp_into_work_area(
     (x, y)
 }
 
+/// 位置记忆守卫 (纯函数): 该 Moved 事件的坐标是否值得记忆。
+/// 最大化/最小化时位置由系统管理, 不记 —— 最大化的还原位会被最大化位
+/// 污染; 最小化窗口被 Windows 挪到幻影坐标 (-32000, -32000) (review
+/// Required #2: winit 对 WM_WINDOWPOSCHANGED 无过滤直发 Moved)。
+pub(crate) fn should_remember_position(maximized: bool, minimized: bool) -> bool {
+    !maximized && !minimized
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ShowPlacement, clamp_into_work_area};
+    use super::{ShowPlacement, clamp_into_work_area, should_remember_position};
 
     /// 光标在工作区中部: 窗口左上角即光标。
     #[test]
@@ -190,5 +198,15 @@ mod tests {
     fn remember_variant_exists_and_default_stays_center() {
         assert_eq!(ShowPlacement::default(), ShowPlacement::Center);
         assert_ne!(ShowPlacement::default(), ShowPlacement::Remember);
+    }
+
+    /// 位置记忆守卫: 最大化/最小化 (幻影坐标 -32000,-32000) 都不记,
+    /// 只有常规态的 Moved 才上报。
+    #[test]
+    fn position_memory_guard_excludes_max_and_min() {
+        assert!(should_remember_position(false, false));
+        assert!(!should_remember_position(true, false));
+        assert!(!should_remember_position(false, true));
+        assert!(!should_remember_position(true, true));
     }
 }
