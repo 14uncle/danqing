@@ -53,6 +53,8 @@ app.rs
   - `src/window/placement.rs` — 显示落位 (Center/Cursor/Remember) + 工作区钳制
   - `src/window/passthrough.rs` — 点击穿透 (WS_EX_LAYERED|TRANSPARENT)
   - `src/window/startup.rs` — 开机启动 (HKCU Run 键)
+  - `src/window/frame_budget.rs` — Adaptive 帧率决策 (纯逻辑: 活动/降帧/暂停)
+  - `src/window/fullscreen.rs` — 前台全屏应用检测 (QUNS + 矩形覆盖双路线)
 - `src/render/rect.rs` + `rect.wgsl` — 矩形 SDF 渲染管线
 - `src/render/text.rs` + `text.wgsl` — 文本图集渲染管线
 - `src/render/background.rs` + `background.wgsl` — 多场景背景渲染(含程序化动效)

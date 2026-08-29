@@ -105,6 +105,17 @@ pub(super) struct Handler<'a, A: App> {
     swallow_hotkey_key: Option<KeyCode>,
     /// 图像纹理收集器 (每帧清空，paint 阶段填充)。
     images: ImageBatch,
+    /// ── Adaptive 帧率治理状态 (仅 WindowMode::Adaptive 使用) ──
+    /// 当前帧率档缓存 (decide 输出, 变化时记日志; render_frame 尾据此门控续链)。
+    frame_rate: super::frame_budget::FrameRate,
+    /// 上次活动时刻 (窗口输入/托盘热键动作/应用事件; Adaptive 帧率判定输入)。
+    last_activity: Instant,
+    /// 事件升帧截止时刻 (产品经 boost_frames 请求; None = 未升帧)。
+    boost_until: Option<Instant>,
+    /// 上次全屏检测轮询时刻 (500ms 一探, 纯查询系统调用不每帧跑)。
+    last_fullscreen_poll: Instant,
+    /// 前台全屏应用检测缓存 (true = 渲染暂停, 仅低频轮询)。
+    fullscreen_suspended: bool,
 }
 
 impl<'a, A: App> Handler<'a, A> {
@@ -150,6 +161,12 @@ impl<'a, A: App> Handler<'a, A> {
             last_real_size: PhysicalSize::new(0, 0),
             swallow_hotkey_key: None,
             images: ImageBatch::new(),
+            frame_rate: super::frame_budget::FrameRate::Full,
+            last_activity: boot,
+            boost_until: None,
+            // 首次轮询立即执行 (减 1s 使首个 about_to_wait 即检测全屏态)。
+            last_fullscreen_poll: boot - Duration::from_secs(1),
+            fullscreen_suspended: false,
         }
     }
 }
@@ -615,7 +632,13 @@ impl<A: App> Handler<'_, A> {
             log::info!("预渲染首帧耗时：{:?}", frame_start.elapsed());
         }
         if let Some(window) = &self.window {
-            window.request_redraw();
+            // Adaptive 降帧/暂停态不续渲染链 (由 about_to_wait 按档单驱),
+            // 否则自续链会把降帧架空回全速。
+            if self.config.mode != super::WindowMode::Adaptive
+                || super::frame_budget::should_continue_render_chain(self.frame_rate)
+            {
+                window.request_redraw();
+            }
         }
     }
 }
@@ -782,6 +805,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         ) {
             // 鼠标事件
             if let Some(internal) = convert_event(&event, self.cursor, self.modifiers) {
+                Self::note_activity(self.config.mode, &mut self.last_activity);
                 let result = self.tree.event(&internal, self.root_area, &mut self.msgs);
                 if let Event::MouseInput {
                     pressed: true,
@@ -801,6 +825,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             }
         } else if let Some(internal) = convert_event(&event, self.cursor, self.modifiers) {
             // 键盘 /IME 事件经焦点路由
+            Self::note_activity(self.config.mode, &mut self.last_activity);
             self.dispatch_focused_event(&internal);
         }
 
@@ -875,6 +900,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         let mut tray_menu_dirty = false;
         if let Some(rx) = &self.hotkey_rx {
             while let Ok(id) = rx.try_recv() {
+                Self::note_activity(self.config.mode, &mut self.last_activity);
                 // 记下热键主键: 按住热键时主键的按下事件会漏进刚唤起的窗口
                 // (见 hotkey_swallow_filter), 抬起前这些按下必须吞掉。
                 // 仅当主键此刻仍被物理按住才武装守卫 (见 vk_still_held)。
@@ -897,6 +923,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         let tray_rx = tray_icon::menu::MenuEvent::receiver();
         while let Ok(event) = tray_rx.try_recv() {
             if let Ok(id) = event.id.0.parse::<u8>() {
+                Self::note_activity(self.config.mode, &mut self.last_activity);
                 if let Some(msg) = self.app.tray_action(id) {
                     self.app.update(msg);
                 }
@@ -905,6 +932,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         }
         // 窗口事件通道轮询
         while let Ok(event) = self.window_event_rx.try_recv() {
+            Self::note_activity(self.config.mode, &mut self.last_activity);
             if self.apply_window_event(event, event_loop) {
                 tray_menu_dirty = true;
             }
@@ -937,12 +965,18 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         //     跑模态消息循环，期间 winit 事件循环被冻结; 菜单关闭后必须主动
         //     重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
         //     过滤/丢弃, UI 卡在旧值不更新 (读秒停止、按钮 label 不切)。
-        let control_flow = self.control_flow_for_current_state();
-        if self.is_visible {
-            if let Some(window) = &self.window {
-                window.request_redraw();
+        //   Adaptive (桌景等常驻氛围应用): 帧率治理接管 —— 全屏检测轮询 +
+        //     活动/升帧判定, 按帧率档驱动重绘与轮询间隔 (见 adaptive_frame_pacing)。
+        let control_flow = if self.config.mode == super::WindowMode::Adaptive {
+            self.adaptive_frame_pacing()
+        } else {
+            if self.is_visible {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
             }
-        }
+            self.control_flow_for_current_state()
+        };
         event_loop.set_control_flow(control_flow);
     }
 }
@@ -961,6 +995,58 @@ impl<A: App> Handler<'_, A> {
                 ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100))
             }
             _ => ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16)),
+        }
+    }
+
+    /// Adaptive 模式帧率驱动: 全屏检测低频轮询 → 帧率决策 → 按档发重绘。
+    /// 降帧/暂停态 render_frame 尾不续链 (门控见 render_frame), 由本函数
+    /// 按轮询间隔单驱 —— 降帧生效的关键。
+    fn adaptive_frame_pacing(&mut self) -> ControlFlow {
+        let now = Instant::now();
+        if !self.is_visible {
+            // 隐藏态: 与 OnDemand 隐藏同款低频轮询 (保热键响应),
+            // 零渲染零检测 (隐藏本就不渲染, 全屏检测无意义)。
+            return ControlFlow::WaitUntil(now + Duration::from_millis(100));
+        }
+        // 全屏检测 500ms 一探 (纯查询式系统调用, 不每帧跑)。
+        if now.duration_since(self.last_fullscreen_poll) >= Duration::from_millis(500) {
+            self.last_fullscreen_poll = now;
+            let fullscreen = super::fullscreen::fullscreen_app_foreground();
+            if fullscreen != self.fullscreen_suspended {
+                self.fullscreen_suspended = fullscreen;
+                log::info!(
+                    "前台全屏应用: {} → 渲染{}",
+                    if fullscreen { "检出" } else { "退出" },
+                    if fullscreen { "暂停" } else { "恢复" }
+                );
+            }
+        }
+        let rate = super::frame_budget::decide(
+            now.duration_since(self.last_activity),
+            self.boost_until
+                .map(|until| until.saturating_duration_since(now))
+                .unwrap_or(Duration::ZERO),
+            self.fullscreen_suspended,
+        );
+        if rate != self.frame_rate {
+            log::info!("帧率档 {:?} → {:?}", self.frame_rate, rate);
+            self.frame_rate = rate;
+        }
+        if rate != super::frame_budget::FrameRate::Suspended {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+        ControlFlow::WaitUntil(now + super::frame_budget::poll_interval(rate))
+    }
+
+    /// 活动戳记 (Adaptive 帧率判定输入): 窗口输入/托盘热键动作/应用事件
+    /// 都算活动。仅 Adaptive 模式戳 (其它模式零开销, 不读时钟)。
+    /// 关联函数形态 (不借整个 self): 调用点可能正持有其它字段的借用
+    /// (如 hotkey_rx 轮询循环), 字段级错位借用才能编译。
+    fn note_activity(mode: super::WindowMode, last_activity: &mut Instant) {
+        if mode == super::WindowMode::Adaptive {
+            *last_activity = Instant::now();
         }
     }
 
@@ -1099,6 +1185,12 @@ impl<A: App> Handler<'_, A> {
                 if let Some(ctx) = self.context.as_mut() {
                     ctx.set_clear_color(color);
                 }
+                false
+            }
+            WindowAppEvent::BoostFrames(secs) => {
+                // 事件升帧: 微事件播放期临时全帧率 (后发覆盖先到)。
+                // 帧率判定在 adaptive_frame_pacing 消费 boost_until, 到期自动回落。
+                self.boost_until = Some(Instant::now() + Duration::from_secs_f32(secs.max(0.0)));
                 false
             }
             WindowAppEvent::SetClickThrough(enabled) => {

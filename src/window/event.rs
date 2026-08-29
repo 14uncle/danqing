@@ -44,6 +44,9 @@ pub enum WindowAppEvent {
     /// 请求调整窗口内尺寸 (逻辑像素, 与 `WindowConfig.size` 同约定)。
     /// winit 异步生效, 实际结果以随后的 `Resized` 事件为准。
     SetInnerSize(Size),
+    /// 事件升帧 (仅 [`crate::WindowMode::Adaptive`] 生效): 微事件播放期
+    /// 临时恢复全帧率, 到期自动回落。`f32` = 升帧时长 (秒), 后发覆盖先到。
+    BoostFrames(f32),
 }
 
 /// 应用持有的窗口事件发送器 (轻量 clone, 内部是 mpsc Sender)。
@@ -100,6 +103,12 @@ impl WindowEventSender {
     /// 以随后的 `Resized` 事件为准; 窗口未创建时 Handler 丢弃该请求。
     pub fn request_inner_size(&self, size: Size) {
         let _ = self.sender.send(WindowAppEvent::SetInnerSize(size));
+    }
+
+    /// 事件升帧 (仅 [`crate::WindowMode::Adaptive`] 生效): 微事件播放期
+    /// 临时恢复全帧率, 到期自动回落降帧。`secs` 为升帧时长 (秒)。
+    pub fn boost_frames(&self, secs: f32) {
+        let _ = self.sender.send(WindowAppEvent::BoostFrames(secs));
     }
 }
 
@@ -205,6 +214,20 @@ mod tests {
                 assert_eq!(size, Size::new(480.0, 360.0));
             }
             other => panic!("期望 SetInnerSize, 实际 {other:?}"),
+        }
+    }
+
+    /// 事件升帧经通道完整送达 (变体 + 载荷)。
+    #[test]
+    fn boost_frames_sends_variant_with_payload() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sender = WindowEventSender { sender: tx };
+        sender.boost_frames(20.0);
+        match rx.try_recv() {
+            Ok(WindowAppEvent::BoostFrames(secs)) => {
+                assert_eq!(secs, 20.0);
+            }
+            other => panic!("期望 BoostFrames, 实际 {other:?}"),
         }
     }
 }

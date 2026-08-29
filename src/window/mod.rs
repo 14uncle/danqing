@@ -9,6 +9,8 @@
 //! 子模块：
 //! - `event`      应用 → Handler 事件通道 + winit → 内部事件适配
 //! - `foreground` 窗口抢前台 / 顶层 (Windows AttachThreadInput)
+//! - `frame_budget` Adaptive 帧率决策 (纯逻辑: 活动/降帧/全屏暂停)
+//! - `fullscreen`   前台全屏应用检测 (QUNS + 矩形覆盖双路线, Windows)
 //! - `icon`       窗口 / 托盘图标加载 + Windows 无边框样式
 //! - `hotkey`     全局热键 ID 常量 + Windows 注册线程
 //! - `placement`  窗口显示落位 (跟随鼠标光标) + 钳制数学
@@ -19,6 +21,8 @@
 mod event;
 #[cfg(target_os = "windows")]
 pub mod foreground;
+mod frame_budget;
+mod fullscreen;
 mod handler;
 mod hotkey;
 mod icon;
@@ -96,6 +100,12 @@ pub enum WindowMode {
     /// 持续渲染：隐藏态仍保持 `WaitUntil(16ms)` ≈ 60fps tick。
     /// 适用于需要持续动画/音频的应用 (番茄钟等)。
     Continuous,
+    /// 自适应帧率: 活动时 ~60fps, 无事件无交互 30s 后降至 5fps, 前台有
+    /// 其它应用的全屏窗口 (游戏/全屏视频) 时暂停渲染仅低频轮询。
+    /// 适用于桌面常驻氛围应用 (桌景) —— 常驻产品的电费税最低形态。
+    /// 微事件播放期产品可经 [`WindowEventSender::boost_frames`] 临时升帧。
+    /// 判定逻辑见 `frame_budget` (纯函数, 可单测), 全屏检测见 `fullscreen`。
+    Adaptive,
 }
 
 /// 窗口初始配置。
