@@ -75,6 +75,9 @@ struct Showcase {
     /// 时辰调色演示: None = 渐变背景原样; Some(hour) = 切到时辰演示场景
     /// 并按小时调色 (env DANQING_TOD_DEMO=19.0 可预置, 供脚本截图验证)。
     tod_hour: Option<f32>,
+    /// 音频演示: 懒初始化播放器 (首次点播放才开设备; 无音频设备环境
+    /// 静默降级不崩)。
+    audio_player: Option<danqing::audio::AudioPlayer>,
 }
 
 /// 应用消息。
@@ -109,6 +112,8 @@ enum Msg {
     TopmostToggle,
     /// 时辰调色演示: 设置演示小时 (None = 复位渐变背景)。
     SetTod(Option<f32>),
+    /// 音频演示: 播放 440Hz 正弦测试音 (2s)。
+    PlayTestTone,
 }
 
 impl App for Showcase {
@@ -163,6 +168,13 @@ impl App for Showcase {
                 }
             }
             Msg::SetTod(hour) => self.tod_hour = hour,
+            Msg::PlayTestTone => {
+                use rodio::Source;
+                let player = self.audio_player.get_or_insert_with(Default::default);
+                let tone = rodio::source::SineWave::new(440.0)
+                    .take_duration(std::time::Duration::from_secs(2));
+                player.play_source(tone, 0.5);
+            }
         }
     }
 
@@ -828,8 +840,20 @@ fn page_layout(t: &LightTheme) -> impl Widget + 'static {
             .cross_stretch()
             .child(card(t, "品牌色与圆角", palette_and_rounded_card(t)))
             .child(card(t, "DragArea 拖拽层", drag_area_card(t)))
-            .child(card(t, "时辰调色 + 双蒙版", tod_card(t))),
+            .child(card(t, "时辰调色 + 双蒙版", tod_card(t)))
+            .child(card(t, "音频 (audio)", audio_card(t))),
     )
+}
+
+/// 音频演示: danqing::audio 输出路径端到端 (440Hz 正弦 2s, 免资产)。
+fn audio_card(t: &LightTheme) -> impl Widget + 'static {
+    Button::themed(
+        t,
+        Text::new("播放测试音 (440Hz × 2s)")
+            .font_size(t.font_size_body())
+            .color(Color::WHITE),
+    )
+    .on_click(|| Msg::PlayTestTone)
 }
 
 /// 时辰演示迷你曲线 (演示级 6 帧线性插值; 产品级 8 帧 smoothstep
@@ -1203,6 +1227,7 @@ fn main() -> anyhow::Result<()> {
         tod_hour: std::env::var("DANQING_TOD_DEMO")
             .ok()
             .and_then(|v| v.parse::<f32>().ok()),
+        audio_player: None,
     };
 
     let t = theme();

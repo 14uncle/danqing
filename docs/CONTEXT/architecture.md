@@ -55,6 +55,9 @@ app.rs
   - `src/window/startup.rs` — 开机启动 (HKCU Run 键)
   - `src/window/frame_budget.rs` — Adaptive 帧率决策 (纯逻辑: 活动/降帧/暂停)
   - `src/window/fullscreen.rs` — 前台全屏应用检测 (QUNS + 矩形覆盖双路线)
+- `src/audio/` — N 声道混音 (mixer 纯逻辑: 300ms 包络续接) + rodio 输出
+  (player: 循环槽/一次性事件音/懒初始化/静默降级; LoopingDecoder 绕
+  rodio 0.22 repeat_infinite 秒空 bug, 移植自 pomodoro ambient.rs)
 - `src/render/rect.rs` + `rect.wgsl` — 矩形 SDF 渲染管线
 - `src/render/text.rs` + `text.wgsl` — 文本图集渲染管线
 - `src/render/background.rs` + `background.wgsl` — 多场景背景渲染(含程序化动效)
