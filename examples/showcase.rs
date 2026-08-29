@@ -15,8 +15,8 @@
 
 use danqing::widget::{
     self, Box as UiBox, Button, CloseButton, Column, DragArea, EventResult, IconInput, MsgQueue,
-    MultiPanel, Node, Padding, Row, Scrollable, Switch, Tabs, Text, TextArea, TextInput, TitleBar,
-    Widget,
+    MultiPanel, Node, Padding, ReachArea, Row, Scrollable, Switch, Tabs, Text, TextArea, TextInput,
+    TitleBar, Widget,
 };
 use danqing::{
     App, BackgroundConfig, Color, Event, GlobalHotkey, Key, LightTheme, NamedKey, Point, Rect,
@@ -84,6 +84,8 @@ struct Showcase {
     demo_flash_at: Option<std::time::Duration>,
     /// 最近 tick 的世界时钟 (包络计算基准)。
     last_elapsed: std::time::Duration,
+    /// 伸手仲裁演示: 最近一次手势协议消息 ("未按" / "已按住" / "已撤防")。
+    reach_state: String,
 }
 
 /// 应用消息。
@@ -124,6 +126,10 @@ enum Msg {
     DemoFirefly,
     /// 微事件演示: 闪电 (1.6s 双闪脉冲)。
     DemoFlash,
+    /// 伸手仲裁演示: 按下登记。
+    ReachArm,
+    /// 伸手仲裁演示: 撤防 (转拖拽/早抬起)。
+    ReachCancel,
 }
 
 impl App for Showcase {
@@ -193,6 +199,8 @@ impl App for Showcase {
                 self.tod_hour = Some(19.0);
                 self.demo_flash_at = Some(self.last_elapsed);
             }
+            Msg::ReachArm => self.reach_state = "已按住 (待产品长按判定)".into(),
+            Msg::ReachCancel => self.reach_state = "已撤防 (转拖拽/早抬起)".into(),
         }
     }
 
@@ -882,7 +890,8 @@ fn page_layout(t: &LightTheme) -> impl Widget + 'static {
             .child(card(t, "品牌色与圆角", palette_and_rounded_card(t)))
             .child(card(t, "DragArea 拖拽层", drag_area_card(t)))
             .child(card(t, "时辰调色 + 双蒙版", tod_card(t)))
-            .child(card(t, "音频 (audio)", audio_card(t))),
+            .child(card(t, "音频 (audio)", audio_card(t)))
+            .child(card(t, "伸手仲裁 ReachArea", reach_area_card(t))),
     )
 }
 
@@ -1008,6 +1017,27 @@ fn tod_card(t: &LightTheme) -> impl Widget + 'static {
                     .color(Color::WHITE),
             )
             .on_click(|| Msg::DemoFlash),
+        )
+}
+
+/// ReachArea 演示: 伸手手势的空间仲裁协议 (arm/cancel) ——
+/// 长按 600ms 的时间判定在产品 tick (引擎 widget 无周期消息通道)。
+fn reach_area_card(t: &LightTheme) -> impl Widget + 'static {
+    Column::new()
+        .gap(t.spacing_sm())
+        .child(
+            Text::bind(|s: &Showcase| format!("手势状态: {}", s.reach_state))
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+        .child(
+            ReachArea::new(
+                Text::new("按住我: 微抖=保持, 拖动=转拖拽移窗, 早抬=撤防")
+                    .font_size(t.font_size_body())
+                    .color(t.text_secondary()),
+            )
+            .on_arm(|_| Msg::ReachArm)
+            .on_cancel(|| Msg::ReachCancel),
         )
 }
 
@@ -1328,6 +1358,7 @@ fn main() -> anyhow::Result<()> {
             _ => None,
         },
         last_elapsed: std::time::Duration::ZERO,
+        reach_state: "未按".into(),
     };
 
     let t = theme();
