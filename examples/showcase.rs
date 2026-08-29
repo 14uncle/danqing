@@ -14,8 +14,9 @@
 )]
 
 use danqing::widget::{
-    self, Box as UiBox, Button, CloseButton, Column, EventResult, IconInput, MsgQueue, MultiPanel,
-    Node, Padding, Row, Scrollable, Switch, Tabs, Text, TextArea, TextInput, TitleBar, Widget,
+    self, Box as UiBox, Button, CloseButton, Column, DragArea, EventResult, IconInput, MsgQueue,
+    MultiPanel, Node, Padding, Row, Scrollable, Switch, Tabs, Text, TextArea, TextInput, TitleBar,
+    Widget,
 };
 use danqing::{
     App, BackgroundConfig, Color, Event, GlobalHotkey, Key, LightTheme, NamedKey, Point, Rect,
@@ -800,8 +801,23 @@ fn page_layout(t: &LightTheme) -> impl Widget + 'static {
     page(
         t,
         "布局 layout — 盒模型与流式排布",
-        card(t, "品牌色与圆角", palette_and_rounded_card(t)),
+        Column::new()
+            .gap(t.spacing_lg())
+            .cross_stretch()
+            .child(card(t, "品牌色与圆角", palette_and_rounded_card(t)))
+            .child(card(t, "DragArea 拖拽层", drag_area_card(t))),
     )
+}
+
+/// DragArea 演示: 无边框窗口的背景拖拽层 —— 按住卡片内容区空白
+/// 左键拖动即移动整个窗口 (消息经 WindowAction::Drag 到 Handler)。
+fn drag_area_card(t: &LightTheme) -> impl Widget + 'static {
+    DragArea::new(Padding::all(
+        t.spacing_md(),
+        Text::new("按住本卡片空白拖动 → 移动整个窗口")
+            .font_size(t.font_size_body())
+            .color(t.text_secondary()),
+    ))
 }
 
 /// 表单页：单行与多行文本输入。

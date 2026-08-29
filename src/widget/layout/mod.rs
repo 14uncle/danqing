@@ -8,6 +8,7 @@
 mod box_;
 mod center;
 mod column;
+mod drag_area;
 mod flow;
 mod padding;
 mod row;
@@ -16,6 +17,7 @@ mod stack;
 pub use box_::Box;
 pub use center::Center;
 pub use column::Column;
+pub use drag_area::DragArea;
 pub use flow::CrossAlign;
 pub use padding::Padding;
 pub use row::Row;

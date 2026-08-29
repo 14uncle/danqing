@@ -21,7 +21,7 @@ mod view;
 pub use base::{Button, CloseButton, Image, Text};
 pub use focus::FocusManager;
 pub use form::{IconInput, Switch, TextArea, TextInput};
-pub use layout::{Box, Center, Column, CrossAlign, Padding, Row, Stack};
+pub use layout::{Box, Center, Column, CrossAlign, DragArea, Padding, Row, Stack};
 pub use title_bar::{LogoKind, TitleBar, TitleBarStyle};
 pub use view::{MultiPanel, ScrollAxis, Scrollable, Tabs};
 
