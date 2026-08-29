@@ -1129,14 +1129,14 @@ impl<A: App> Handler<'_, A> {
                     // request_inner_size 会清最大化标志 (见 show_window 注释),
                     // 最大化态的尺寸请求静默丢弃。
                     log::info!("最大化态忽略尺寸请求 {}x{}", size.width, size.height);
-                } else if self.is_visible {
-                    // 与创建路径同约定: 逻辑像素。winit 异步生效 (Windows 上通常
-                    // 返回 None), 实际尺寸以随后的 Resized 事件为准; 渲染表面经
-                    // 既有 Resized 流程自动跟随。
-                    let _ = window.request_inner_size(LogicalSize::new(
-                        f64::from(size.width),
-                        f64::from(size.height),
-                    ));
+                    return true;
+                }
+                // 与创建路径同约定: 逻辑像素。
+                let logical = LogicalSize::new(f64::from(size.width), f64::from(size.height));
+                if self.is_visible {
+                    // winit 异步生效 (Windows 上通常返回 None), 实际尺寸以随后的
+                    // Resized 事件为准; 渲染表面经既有 Resized 流程自动跟随。
+                    let _ = window.request_inner_size(logical);
                 } else {
                     // 隐藏态不直接改窗口: Windows 会对隐藏窗口补发 WM_SIZE,
                     // 但隐藏态 Resized 一律不信 (幻影 160x28 防护), 显示时
@@ -1144,7 +1144,6 @@ impl<A: App> Handler<'_, A> {
                     // 旧尺寸而产品配置已变更 (三态不一致, desk-window review
                     // 实证)。只更新信标: 显示时自愈路径把窗口做到新尺寸并
                     // 触发真实 WM_SIZE (表面经 Resized 流程跟随)。
-                    let logical = LogicalSize::new(f64::from(size.width), f64::from(size.height));
                     let physical: PhysicalSize<f64> = logical.to_physical(window.scale_factor());
                     self.last_real_size =
                         PhysicalSize::new(physical.width as u32, physical.height as u32);
