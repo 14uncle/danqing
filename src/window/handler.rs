@@ -864,6 +864,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             self.app.tick(&ctx);
         }
         // 全局热键通道轮询
+        // 热键与托盘动作都可能改变勾选态 (穿透/置顶等): 任一通道有派发就在
+        // 本帧末尾重建托盘菜单, 保持勾选项与 App 状态一致。
+        let mut tray_menu_dirty = false;
         if let Some(rx) = &self.hotkey_rx {
             while let Ok(id) = rx.try_recv() {
                 // 记下热键主键: 按住热键时主键的按下事件会漏进刚唤起的窗口
@@ -879,6 +882,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 if let Some(msg) = self.app.hotkey(id) {
                     self.app.update(msg);
                 }
+                tray_menu_dirty = true;
             }
         }
         // 托盘菜单事件轮询 (muda 内部维护的全局通道)。每个 MenuId 是字符串
@@ -890,6 +894,13 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 if let Some(msg) = self.app.tray_action(id) {
                     self.app.update(msg);
                 }
+                tray_menu_dirty = true;
+            }
+        }
+        // 动作可能改了勾选态: 重建托盘菜单 (tray_menu 从 App 状态现查, 幂等)。
+        if tray_menu_dirty {
+            if let Some(tray) = &self.tray {
+                tray.set_menu(self.app.tray_menu());
             }
         }
         // 窗口事件通道轮询
@@ -1088,6 +1099,17 @@ impl<A: App> Handler<'_, A> {
                     } else {
                         WindowLevel::Normal
                     });
+                }
+            }
+            WindowAppEvent::SetInnerSize(size) => {
+                // 与创建路径同约定: 逻辑像素。winit 异步生效 (Windows 上通常
+                // 返回 None), 实际尺寸以随后的 Resized 事件为准; 渲染表面经
+                // 既有 Resized 流程自动跟随。窗口未创建时丢弃。
+                if let Some(window) = &self.window {
+                    let _ = window.request_inner_size(LogicalSize::new(
+                        f64::from(size.width),
+                        f64::from(size.height),
+                    ));
                 }
             }
         }

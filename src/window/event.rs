@@ -17,6 +17,7 @@ use winit::{
 
 use crate::Color;
 use crate::Point;
+use crate::Size;
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 
 /// 应用主动发给窗口的事件 (用于全局热键配套：显隐 / 退出等)。
@@ -40,6 +41,9 @@ pub enum WindowAppEvent {
     SetClickThrough(bool),
     /// 切换置顶层级: true = 恒在普通窗口之上; false = 普通层级。
     SetTopmost(bool),
+    /// 请求调整窗口内尺寸 (逻辑像素, 与 `WindowConfig.size` 同约定)。
+    /// winit 异步生效, 实际结果以随后的 `Resized` 事件为准。
+    SetInnerSize(Size),
 }
 
 /// 应用持有的窗口事件发送器 (轻量 clone, 内部是 mpsc Sender)。
@@ -90,6 +94,12 @@ impl WindowEventSender {
     /// 切换置顶层级 (true = 恒在普通窗口之上)。
     pub fn set_topmost(&self, topmost: bool) {
         let _ = self.sender.send(WindowAppEvent::SetTopmost(topmost));
+    }
+
+    /// 请求调整窗口内尺寸 (逻辑像素)。winit 异步生效, 实际尺寸
+    /// 以随后的 `Resized` 事件为准; 窗口未创建时 Handler 丢弃该请求。
+    pub fn request_inner_size(&self, size: Size) {
+        let _ = self.sender.send(WindowAppEvent::SetInnerSize(size));
     }
 }
 
@@ -176,5 +186,25 @@ pub(super) fn convert_event(
             })),
         },
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Size;
+
+    /// 尺寸切换事件经通道完整送达 (变体 + 载荷)。
+    #[test]
+    fn request_inner_size_sends_variant_with_payload() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sender = WindowEventSender { sender: tx };
+        sender.request_inner_size(Size::new(480.0, 360.0));
+        match rx.try_recv() {
+            Ok(WindowAppEvent::SetInnerSize(size)) => {
+                assert_eq!(size, Size::new(480.0, 360.0));
+            }
+            other => panic!("期望 SetInnerSize, 实际 {other:?}"),
+        }
     }
 }
