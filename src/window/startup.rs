@@ -155,15 +155,18 @@ mod tests {
     #[test]
     fn set_enabled_writes_quoted_path() {
         // 写入的 Run 值必须带引号 (含空格路径防截断劫持); 跑完自清。
+        // 独立键名: 与 set_and_query_enabled 并行跑, 共享键名会互相踩
+        // (测试线程并发读写同一注册表值, 2026-08-29 实测 flaky)。
+        const QUOTED_TEST_KEY: &str = "danqing_test_startup_quoted";
         let exe = std::env::current_exe().expect("获取当前 exe 路径失败");
         let exe_str = exe.to_string_lossy().to_string();
-        set_enabled(TEST_APP_NAME, &exe_str, true).expect("设置启用失败");
+        set_enabled(QUOTED_TEST_KEY, &exe_str, true).expect("设置启用失败");
         let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
         let run_key = hkcu
             .open_subkey_with_flags(RUN_KEY_PATH, winreg::enums::KEY_READ)
             .expect("打开 Run 键失败");
-        let val: String = run_key.get_value(TEST_APP_NAME).expect("读回 Run 值失败");
-        set_enabled(TEST_APP_NAME, &exe_str, false).expect("清理失败");
+        let val: String = run_key.get_value(QUOTED_TEST_KEY).expect("读回 Run 值失败");
+        set_enabled(QUOTED_TEST_KEY, &exe_str, false).expect("清理失败");
         assert_eq!(val, format!("\"{exe_str}\""), "Run 值应为带引号的完整路径");
     }
 }
