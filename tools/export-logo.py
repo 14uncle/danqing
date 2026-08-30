@@ -140,10 +140,14 @@ def save_ico(images: dict[int, Image.Image]) -> Path:
 
     Windows icons commonly include 16/32/48/256; we also keep 24 for Linux trays.
     Pillow stores 256x256 as PNG-compressed inside the ICO container.
+
+    The ICO plugin silently ignores append_images (Pillow 11.x writes only the
+    first frame), so all size frames are derived from the 256px master via
+    the `sizes=` parameter.
     """
     path = OUT_DIR / "logo.ico"
-    ordered = [images[size] for size in ICO_SIZES if size in images]
-    ordered[0].save(path, format="ICO", append_images=ordered[1:])
+    ico_sizes = [(size, size) for size in ICO_SIZES if size in images]
+    images[256].save(path, format="ICO", sizes=ico_sizes)
     return path
 
 
