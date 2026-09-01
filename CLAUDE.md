@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 丹青 (danqing) 是一个 Rust 跨平台自绘 UI 框架,使用 `winit` 0.30 处理窗口与事件,`wgpu` 30 自绘,保留模式组件树。基础里程碑 M1~M3 与阶段 1(设计系统 + 品牌视觉)、阶段 2(专注陪伴 POC:番茄钟 × 场景沉浸美学)及后续补完均已关闭并归档到 `tasks/archive/`。
 
 - **当前分支**: `dev`(主分支 `master`)
-- **战略**: 丹青-pomodoro 全部功能免费发布(2026-08-10),走通"代码→发布→社区反馈"完整闭环。十年战略见 `docs/intent/companion-flagship.md`(付费部分已废弃),免费决策见 `docs/intent/pomodoro-free-release.md`。里程碑 1 全部编码任务已完成。**剪贴板 POC(引擎复用验证)已于 2026-08-13 获用户指示启动**,意图见 `docs/intent/clipboard-poc.md`;打磨引擎寄生其中(缺口当场修进框架)。
+- **战略**: 丹青-pomodoro 全部功能免费发布(2026-08-10),走通"代码→发布→社区反馈"完整闭环。十年战略见 `docs/intent/companion-flagship.md`(付费部分已废弃),免费决策见 `docs/intent/pomodoro-free-release.md`。2026-09-01 渠道加法: pomodoro 微软商店 freemium 上架(GitHub 渠道维持全免费,双轨),见 `docs/intent/pomodoro-store-freemium.md`。里程碑 1 全部编码任务已完成。**剪贴板 POC(引擎复用验证)已于 2026-08-13 获用户指示启动**,意图见 `docs/intent/clipboard-poc.md`;打磨引擎寄生其中(缺口当场修进框架)。
 - **性能门槛**: 启动 ≤1s、常驻内存 WS ≤360MB(核显记账);测量用 `tools/benchmark.ps1`。
 
 > 详细架构见 `docs/CONTEXT/architecture.md`;场景动效开发范式见 `docs/CONTEXT/scenes-guidelines.md`。
