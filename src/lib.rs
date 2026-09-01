@@ -9,6 +9,7 @@
 //! 公开 API 一律经本模块 re-export，不允许使用者路径深穿。
 
 mod app;
+pub mod asset;
 pub mod audio;
 pub mod event;
 pub mod layout;

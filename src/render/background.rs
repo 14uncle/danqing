@@ -1076,7 +1076,7 @@ fn black_placeholder_view(device: &wgpu::Device, label: &str) -> wgpu::TextureVi
 /// 懒加载路径，避免启动期为 5 张图常驻 ~31MB 解码缓冲。
 /// 尺寸与字节同源 (单次文件读取), 不存在两次读文件之间被替换的不一致窗口。
 fn read_scene_bytes(path: &Path) -> Option<(Vec<u8>, (u32, u32))> {
-    let data = std::fs::read(path).ok()?;
+    let data = std::fs::read(crate::asset::resolve(path)).ok()?;
     let dims = image::ImageReader::new(std::io::Cursor::new(&data))
         .with_guessed_format()
         .ok()?
@@ -1093,7 +1093,7 @@ fn load_texture(
     path: &Path,
     label: &str,
 ) -> Option<BackgroundTexture> {
-    let data = match std::fs::read(path) {
+    let data = match std::fs::read(crate::asset::resolve(path)) {
         Ok(d) => d,
         Err(err) => {
             log::warn!("背景图加载失败 {}: {err}", path.display());
