@@ -5,7 +5,7 @@
 
 - @author 十四叔
 - @date 2026/09/05
-- 状态: **已确认开枪**（用户显式选定）；待建仓 + 待 spec（spec→plan→build→review→code-simplify 五阶段，用户发起 spec 技能后逐段推进）
+- 状态: **已转正，core-viewer 完成并通过 review**（2026-09-05 当日全链：POC 双前提判过 → spec 批准 → plan 批准 → /build auto 零 commit 连跑 T1–T7 全绿 → review 三处 Required 修复，门槛对照见「POC v0 实测」v1 列；用户裁决四项：地图+3 模块 spec / 行内子行嵌套展开 / 编码 UTF-8+UTF-16+GBK / v1 单二进制全功能）；余前提③ = 发布后首单外检
 
 ## 一句话
 
@@ -42,8 +42,8 @@ Windows 上的「原生快 + 现代 UI + JSONL 结构化」大文件日志查看
 
 ## 开枪前提（POC 入口判据，不达标不转正式开发）
 
-1. 真实 1GB+ 日志实测，搜索/滚动对 klogg 与 LogViewPlus 形成**可截图的碾压**
-2. JSONL 列化 demo 体验显著优于 daucloud 的 VS Code 扩展（独立窗口、秒开、不占编辑器）
+1. 真实 1GB+ 日志实测，搜索/滚动对 klogg 与 LogViewPlus 形成**可截图的碾压** —— ✅ **判过（2026-09-05，有修正）**：碾压仅对 LogViewPlus 成立；klogg 速度同档（mmap 同构），对其差异点转为「停更 4 年 + 无 JSONL」。详见文末「前提①判定」
+2. JSONL 列化 demo 体验显著优于 daucloud 的 VS Code 扩展（独立窗口、秒开、不占编辑器） —— ✅ **判过（2026-09-05）**：用户实测体感「极快」；字段过滤 1GB/483 万行 235ms。详见文末「前提②判定」
 3. 发布后首单外检
 
 ## 定价锚与渠道
@@ -57,7 +57,55 @@ Windows 上的「原生快 + 现代 UI + JSONL 结构化」大文件日志查看
 - **B「Hazel for Windows」文件自动整理**：开枪（有条件）未选。空位 = $29-35 买断 + 现代 UI + undo 信任三件套（Hazel 仅单文件 revert、File Juggler 无 undo）；对手 File Juggler $50 活跃维护（前置扫描「定时扫描」说法已被深潜修正为事件驱动实时）；MS Store 可行（runFullTrust 打包，Sortly 过审先例）；开枪前提 = 信任三件套 P0 + ≤1 周 MSIX 打包尖刺 + 只做下载夹/桌面单场景。不选原因：在场质检弱于 A、引擎渲染肌肉闲置、首要风险是外部审核不可控。
 - 枪毙归档：泛截图工具（两路独立验证红海）、AI 听写（空窗已关，三线挤压）、快速记录（入口被手机/微信掐死）、抓包（Fiddler 断供窗口诱人但团队赛道）、数字健康阻断器（潜力大但 MSIX 沙箱存在性风险未排除，护城河 70% 在 GUI 之外）。
 
+## POC v0 实测（2026-09-05，建仓当日）
+
+环境：本机（Iris Xe 核显），release 构建（lto=fat）；数据 = `genlog` 合成 1024.0 MiB（确定性，可复跑）。数字源 = `danqing-log --bin logbench`。
+
+**1GB 明文日志（635 万行）**：
+- mmap 建立 **134 µs**；行索引 **425 ms**（2406 MiB/s）
+- 搜索 `ERROR`：**69 ms**（14.6 GiB/s）；`ERROR|FATAL` 106 ms；`user_42\d{4}` 91 ms；结构时间戳正则 635 万全命中 1051 ms（974 MiB/s）
+- 随机访问 10 万行：**0.37 µs/行**
+- GUI 双击到窗口可见 1.26 s（其中 ~1.1 s 是 wgpu 管线初始化，danqing 全家共有成本；文件本身 0.43 s）
+
+**1GB JSONL（483 万行）**：索引 427 ms；`"level":"ERROR"` 82 ms；`"status":50[02]` 193 ms（74.3 万命中）。
+
+**前提①判定（2026-09-05 人工三方对比，同文件同机，用户实测体感）**：
+
+| 工具 | 打开 1GB | 滚动 | 搜索 | 备注 |
+|------|---------|------|------|------|
+| klogg 22.06 | **秒级**（用户体感，无精确读数；mmap 同构，速度不构成碾压点） | 流畅 | 快 | 截图留存：用户桌面 Snipaste_2026-09-05_19-35-42；行数 6,349,886 与我方索引一致（正确性旁证）；编码检出保守（报 ISO-8859-1） |
+| LogViewPlus 3.2.9 | **慢**（全量解析入表格） | — | — | 用户观察：表格化展示是慢的结构原因（解析换结构化） |
+| danqing-log POC | **极快**（0.43s） | 流畅 | 69ms（CLI 基准） | — |
+
+**碾压主张修正**：对 **LogViewPlus 成立**（其结构化表格 = 打开速度的结构性代价，恰是我方「快+结构化」楔子的受力面）；对 **klogg 不成立**（速度平手，差异在停更 4 年 / 273 open issue / 无 JSONL / 无 ANSI 颜色）。楔子收敛为一句话：**「klogg 的速度 × LogViewPlus 的结构化」**——这使**前提②（JSONL 列化 demo 优于 VS Code 扩展）升为决定性验证**：速度已证，结构化待证。
+
+**前提②判定（2026-09-05 落地 + 用户实测判过）**：
+
+demo 内容：打开自动检测 JSONL（64 行采样 ≥90% object）→ 列发现（512 行采样，首见顺序，≤16 列）→ 表格模式四区（过滤栏/表头/虚拟化行/状态栏；行号槽恒显文件真实行号，level 列级别着色）→ 字段过滤（`level=ERROR status=50*`：空格分词 AND、尾缀 `*` 前缀通配、裸词整行子串；Enter 应用走工作线程不冻界面，Esc 清除，Ctrl+T 原始/表格互切）。
+
+引擎数字（release，同机 1GB JSONL / 4,833,705 行，`logbench --filter`）：
+
+| 查询 | 命中行 | 耗时 | 吞吐 |
+|------|--------|------|------|
+| `level=ERROR` | 43,464 | **235 ms** | 4346 MiB/s |
+| `level=ERROR status=50*` | 6,742 | **234 ms** | 4364 MiB/s |
+
+正确性旁证：过滤命中行数与 regex 全文搜 `ERROR` 完全一致（43,464），memmem 字段提取无漏。
+
+实现要点：显示/过滤路径**零 JSON parse**（memmem 定位 `"key":` + 前缀 `{`/`,` 校验 + 值 token 切取）；serde_json 仅用于检测与列采样，且必须开 `preserve_order`（默认 Object 是 BTreeMap 字典序，「首见列序」会失真——单元测试当场抓住）；OnDemand 可见态 ~60fps tick 直接拾取工作线程结果（完成至显示 ≤16ms，原设计的 boost_frames 唤醒整段删除）。
+
+**用户判定：体感「极快」，「显著优于 daucloud VS Code 扩展」判过**（独立窗口、双击秒开 1GB、不占编辑器。扩展侧未同机复测——逐帧对比留待发布素材阶段）。
+
+demo 边界（正式版必解）：仅扁平顶层字段，嵌套展开未做（= MVP⑤ 正式版内容）；字符串值内含 `,"key":"` 形态可能误判（memmem 提取已知边界，正式版换真 parser）；表格无水平滚动/列重排/命中高亮。
+
+（底栏状态行即截图本体；klogg/LogViewPlus 对比截图用户已人工过目，未留档量级数字——重测随时可开，三方二进制均在 `D:\app`。）
+
+**POC 已知边界（正式版必解）**：编码 UTF-8/UTF-16(转码副本)/GBK(行级 CP936)/Latin-1 兜底（T2 落地）；~~mmap 期间外部截断会崩~~ **2026-09-05 T3 实测修正：Windows 上 OS 直接拒绝截断被映射的文件（ERROR_USER_MAPPED_FILE），Linux SIGBUS 假设不成立**；真正的过期通道是 rename/delete/append/overwrite（视图滞留或内容被换），防御 = FileStat 快照 + 轮询 + 重建换入（实测表见 `danqing-log/tasks/plan.md` 附录）；行偏移已改步进索引（T1，驻留 3.03MiB/GB）；GUI 有字段过滤（前提②）与正则搜索框/书签/水平滚动（T5–T7），暂无 tail（live-tail 模块）。
+
+**引擎缺口记录**（打磨寄生，修进 danqing 时不在这里绕）：~~NamedKey 缺 PageUp/PageDown~~（T4 已修进 danqing）；~~MouseWheel 无修饰键~~（T7 已修进 danqing：shift/ctrl/alt）；~~无焦点应用 IME 被关~~（review 阶段：`update_ime` 无焦点即 `set_ime_allowed(false)`，中文录不进 → 加 `App::wants_ime()` 钩子，默认 false 零波及）；~~App 层无剪贴板直连~~（review 阶段：加 `WindowEventSender::read_clipboard()` 回送 IME Commit 供粘贴）；等宽字体选择（日志场景心智，未动）。
+
 ## 悬而未决
 
-- 产品命名与仓库名（danqing-?）
-- spec 阶段细化（用户发起 spec 技能后启动，写完不立即编码）
+- **v1 任务：过滤/搜索栏重构成真 TextInput**（2026-09-05 review 后用户裁决）：现为 App 层手搓（无焦点、内联画、假光标），IME 候选窗位置 / 中途编辑 / 选中 / 粘贴全靠打补丁；正解 = 拆 `LogView` 成「栏（真 `TextInput`）+ 表头 + 虚拟列表 + 状态栏」子组件，键盘路由挪进焦点系统。届时 review 阶段为 IME/粘贴打的三个补丁（`LogApp::event` IME 分支 + `read_clipboard` + `wants_ime`）变死代码一并删，候选窗位置（`set_ime_cursor_area`）随之解决。
+- live-tail / jsonl-table 模块：spec 已备（`danqing-log/docs/specs/`），后续按需递归出 plan
+- 产品命名与仓库名（danqing-log = 工作名，公开发布前可改）
