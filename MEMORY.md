@@ -9,7 +9,7 @@
 - [shader step 门禁约定](shader-step-on-probability.md) — step(threshold,hash) 的 on 概率=1-threshold;比例须写 step(1-ratio,h);星野曾误写致实际 ~1280 颗、减量方向算反
 - [AI 场景 UV 位移选择偏好](ai-scene-uv-displacement-preference.md) — UV 位移适合大幅运动(海浪/火焰),additive 适合小幅氛围(雾气);与静态元素重叠时走 additive
 - [shader 常量重复定义检查](shader-duplicate-constant-check.md) — 修改 WGSL 时必须先 grep 同名常量,旧定义被替代须删除;shader 编译错误只在运行时暴露
-- [环境音工作流](ambient-audio-workflow.md) — Freesound CC0-only + 合成混音 + 许可台账;资产库 Desktop\danqing\环境音, rodio 先例在 pomodoro;deskscape 需分层 stems + 混音上引擎
+- [环境音工作流](ambient-audio-workflow.md) — Freesound CC0-only + 合成混音 + 许可台账;资产库 Desktop\danqing\环境音, rodio 先例在 pomodoro;xirang 需分层 stems + 混音上引擎
 
 ## 性能/内存
 
@@ -50,4 +50,4 @@
 - [丹青项目状态](danqing-project-state.md) — M1~M3 + 阶段 1/2 + 打磨三件套 + 五场景动效 全检关闭;2026-08-01 战略升级著作型旗舰, 里程碑 0 完成 + 里程碑 1 Task E 年度报告完成(07657e6)+ Box 布局 bug 修复(548322c), 剪贴板顺延
 - [丹青战略定位](danqing-strategic-positioning-efficiency-tools.md) — 专注陪伴工具+效率工具两族、潮汐式场景沉浸美学、首个 POC 番茄钟已关闭
 - [丹青旗舰十年战略](danqing-flagship-strategy.md) — 2026-08-01 确认著作型旗舰(专注陪伴系统×十年建造史);2026-08-10 pomodoro 全部免费发布(练手),付费部分废弃;变现留给下一个产品
-- [第三件产品方向: 桌景](third-product-desk-scene.md) — 2026-08-27 推演确认: 桌面常驻沉浸陪伴小世界,岗位=变现,本体低价+场景DLC+Steam;工具付费≠世界付费;未启动,intent 在 docs/intent/third-product-desk-scene.md
+- [第三件产品: 桌景→息壤 Xirang 待机世界](third-product-desk-scene.md) — 2026-08-27 桌景(常驻小窗)推演确认; 09-01 付费点证伪 → 09-03 换载体重生为息壤 Xirang·待机世界(idle/热键全屏接管, 免费本体+买断世界包, MS Store 首发) → 09-05 repo 改名 danqing-xirang + spec 重写启动; intent 在 docs/intent/xirang-idle-world.md (桌景原文 third-product-desk-scene.md 保留为历史); 决策细节见用户级记忆 xirang-idle-world-pivot
