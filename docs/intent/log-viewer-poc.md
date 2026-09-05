@@ -5,7 +5,7 @@
 
 - @author 十四叔
 - @date 2026/09/05
-- 状态: **已转正，core-viewer 完成并通过 review**（2026-09-05 当日全链：POC 双前提判过 → spec 批准 → plan 批准 → /build auto 零 commit 连跑 T1–T7 全绿 → review 三处 Required 修复，门槛对照见「POC v0 实测」v1 列；用户裁决四项：地图+3 模块 spec / 行内子行嵌套展开 / 编码 UTF-8+UTF-16+GBK / v1 单二进制全功能）；余前提③ = 发布后首单外检
+- 状态: **三模块全闭环**（core-viewer / jsonl-table / live-tail 均走完 spec → plan → build → review；2026-09-05 POC 双前提判过 → spec 批准 → plan 批准 → /build auto 零 commit 连跑 core-viewer T1–T7 → review 三处 Required 修复；2026-09-06 jsonl-table T1–T5 + live-tail T1–T5 全绿、性能三门槛达标、各 review 通过；用户裁决四项：地图+3 模块 spec / 行内子行嵌套展开 / 编码 UTF-8+UTF-16+GBK / v1 单二进制全功能）；余前提③ = 发布后首单外检
 
 ## 一句话
 
@@ -106,6 +106,8 @@ demo 边界（正式版必解）：仅扁平顶层字段，嵌套展开未做（
 
 ## 悬而未决
 
+- **LOGO 落地（2026-09-06）**：`assets/logo/log.svg`（设计源，家族语法：玉色 #0F766E 视窗框 + 玻璃白内填 + 四条日志行，**底部一条朱砂 #E34234 = live tail 正在写入的那一行**，区别于引擎破框/番茄钟轴心/剪贴板首行）+ `tools/export-logo.py`（Pillow 手工几何 + 4x 超采样，同三兄弟工艺）+ 已导出 `log_{16,24,32,48,128,256}.png` + `logo.ico`（build.rs 用，五帧）。运行时窗口/托盘读 `log_256/16.png`，exe 资源内嵌 `logo.ico`。**顺带修了重复资源**：danqing 库 build.rs 原默认 embed 自己的 logo.ico，与产品各自 embed 撞出 `.rsrc merge failure: GROUP_ICON/ICON/VERSION`（exe 图标二选一未定，属发布前必修）→ 库 build.rs 改为不再 embed（产品各自 embed，零副作用），danqing-log 重建零警告。两处改动均**未 commit**（跨仓：danqing build.rs + danqing-log assets/tools）。
+- 待定：in-app 标题栏 logo（danqing `title_bar.rs` `LogoKind` 只有 Default 破框/Pomodoro/Clipboard，danqing-log 未设；任务栏是日志 logo、标题栏仍是丹青破框，视觉不一致——需给 danqing 加一个 Log logo_kind 或产品自绘）。
 - **v1 任务：过滤/搜索栏重构成真 TextInput**（2026-09-05 review 后用户裁决）：现为 App 层手搓（无焦点、内联画、假光标），IME 候选窗位置 / 中途编辑 / 选中 / 粘贴全靠打补丁；正解 = 拆 `LogView` 成「栏（真 `TextInput`）+ 表头 + 虚拟列表 + 状态栏」子组件，键盘路由挪进焦点系统。届时 review 阶段为 IME/粘贴打的三个补丁（`LogApp::event` IME 分支 + `read_clipboard` + `wants_ime`）变死代码一并删，候选窗位置（`set_ime_cursor_area`）随之解决。
-- live-tail / jsonl-table 模块：spec 已备（`danqing-log/docs/specs/`），后续按需递归出 plan
+- ~~live-tail / jsonl-table 模块~~（2026-09-06 已各自走完 plan/build/review，三模块全闭环）
 - 产品命名与仓库名（danqing-log = 工作名，公开发布前可改）
