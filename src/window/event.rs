@@ -47,6 +47,9 @@ pub enum WindowAppEvent {
     /// 事件升帧 (仅 [`crate::WindowMode::Adaptive`] 生效): 微事件播放期
     /// 临时恢复全帧率, 到期自动回落。`f32` = 升帧时长 (秒), 后发覆盖先到。
     BoostFrames(f32),
+    /// 请求 Handler 读取剪贴板文本, 回送为 `Event::Ime(Commit)` 经 `app.event`
+    /// 送达 (App 层无剪贴板直连; 供无焦点应用支持粘贴)。
+    ReadClipboard,
 }
 
 /// 应用持有的窗口事件发送器 (轻量 clone, 内部是 mpsc Sender)。
@@ -110,6 +113,11 @@ impl WindowEventSender {
     pub fn boost_frames(&self, secs: f32) {
         let _ = self.sender.send(WindowAppEvent::BoostFrames(secs));
     }
+
+    /// 请求读取剪贴板文本 (Handler 回送 `Event::Ime(Commit)` 经 `app.event` 送达)。
+    pub fn read_clipboard(&self) {
+        let _ = self.sender.send(WindowAppEvent::ReadClipboard);
+    }
 }
 
 /// 把 winit 窗口事件转换为内部事件; 无关事件返回 None。
@@ -147,6 +155,9 @@ pub(super) fn convert_event(
             Some(Event::MouseWheel {
                 delta: d,
                 position: cursor,
+                shift: modifiers.shift_key(),
+                ctrl: modifiers.control_key(),
+                alt: modifiers.alt_key(),
             })
         }
         WindowEvent::KeyboardInput { event, .. } => {
@@ -166,6 +177,8 @@ pub(super) fn convert_event(
                         WinitNamedKey::Delete => NamedKey::Delete,
                         WinitNamedKey::Home => NamedKey::Home,
                         WinitNamedKey::End => NamedKey::End,
+                        WinitNamedKey::PageUp => NamedKey::PageUp,
+                        WinitNamedKey::PageDown => NamedKey::PageDown,
                         WinitNamedKey::Shift => NamedKey::Shift,
                         WinitNamedKey::Control => NamedKey::Control,
                         WinitNamedKey::Alt => NamedKey::Alt,

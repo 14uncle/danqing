@@ -48,6 +48,14 @@ pub trait App: Any {
     /// 未被组件树消费的鼠标事件也会到达这里。
     fn event(&mut self, _event: &Event) {}
 
+    /// 无焦点应用是否请求 IME (中文输入法合成)。焦点组件经
+    /// [`crate::widget::Widget::wants_ime`] 声明; 本钩子补上「无焦点直收键盘/IME」
+    /// 场景 (如日志查看器自建搜索框)。每帧查询。默认 false —— 无焦点即关 IME,
+    /// 与既有焦点应用行为一致, 零波及。
+    fn wants_ime(&self) -> bool {
+        false
+    }
+
     /// 键盘前置过滤: 在焦点组件分发**之前**调用, 给应用层拦截机会。
     ///
     /// 返回 `Some(msg)` 表示应用消费了该按键 (消息入队, 事件不再下发);

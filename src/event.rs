@@ -66,6 +66,10 @@ pub enum NamedKey {
     Home,
     /// End。
     End,
+    /// 向上翻页。
+    PageUp,
+    /// 向下翻页。
+    PageDown,
     /// Shift。
     Shift,
     /// Ctrl。
@@ -117,6 +121,12 @@ pub enum Event {
         delta: (f32, f32),
         /// 事件发生时光标位置。
         position: Point,
+        /// Shift 是否按下 (产品侧常用于横滚)。
+        shift: bool,
+        /// Ctrl 是否按下 (产品侧常用于缩放语义)。
+        ctrl: bool,
+        /// Alt 是否按下。
+        alt: bool,
     },
     /// 键盘按下 / 抬起。
     Key {

@@ -175,12 +175,21 @@ impl Scrollable {
                     position.y + self.scroll_offset.y,
                 ),
             }),
-            Event::MouseWheel { delta, position } => Some(Event::MouseWheel {
+            Event::MouseWheel {
+                delta,
+                position,
+                shift,
+                ctrl,
+                alt,
+            } => Some(Event::MouseWheel {
                 delta: *delta,
                 position: Point::new(
                     position.x + self.scroll_offset.x,
                     position.y + self.scroll_offset.y,
                 ),
+                shift: *shift,
+                ctrl: *ctrl,
+                alt: *alt,
             }),
             // 无位置事件直接转发。
             _ => Some(event.clone()),
@@ -448,6 +457,9 @@ mod tests {
         let event = Event::MouseWheel {
             delta: (0.0, -5.0),
             position: Point::new(200.0, 200.0),
+            shift: false,
+            ctrl: false,
+            alt: false,
         };
         let result = scroll.event(
             &event,

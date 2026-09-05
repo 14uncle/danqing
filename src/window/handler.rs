@@ -544,7 +544,9 @@ impl<A: App> Handler<'_, A> {
         let path = match self.focus.current() {
             Some(p) => p,
             None => {
-                window.set_ime_allowed(false);
+                // 无焦点: 应用层自行处理输入时经 App::wants_ime 声明 IME 需求
+                // (默认 false = 关 IME, 与既有焦点应用行为一致)。
+                window.set_ime_allowed(self.app.wants_ime());
                 return;
             }
         };
@@ -1193,6 +1195,14 @@ impl<A: App> Handler<'_, A> {
                 // 事件升帧: 微事件播放期临时全帧率 (后发覆盖先到)。
                 // 帧率判定在 adaptive_frame_pacing 消费 boost_until, 到期自动回落。
                 self.boost_until = Some(Instant::now() + Duration::from_secs_f32(secs.max(0.0)));
+                false
+            }
+            WindowAppEvent::ReadClipboard => {
+                // App 层无剪贴板直连: 读后回送 IME Commit (与聚焦组件粘贴路径同构,
+                // 见 handle_clipboard)。空剪贴板回送空串 = 无副作用。
+                let text = self.get_clipboard().unwrap_or_default();
+                self.app
+                    .event(&Event::Ime(ImeEvent::Commit { value: text }));
                 false
             }
             WindowAppEvent::SetClickThrough(enabled) => {
