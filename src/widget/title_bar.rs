@@ -28,6 +28,8 @@ pub enum LogoKind {
     Pomodoro,
     /// 剪贴板：深色圆角矩形 + 青色夹子 + 青色横线。
     Clipboard,
+    /// 日志：玉色宽幅视窗 (玻璃内填) + 四条水平日志行, 底部一条朱砂 = live tail。
+    Log,
 }
 
 /// 标题栏按钮布局样式。
@@ -852,6 +854,46 @@ impl Widget for TitleBar {
                 for i in 0..3 {
                     let ly = line_start_y + i as f32 * line_gap;
                     rects.push_rect(Rect::from_xywh(line_x, ly, line_w, line_h), accent, line_r);
+                }
+            }
+            LogoKind::Log => {
+                // ── 日志：宽幅视窗 (玉色框 + 玻璃内填) + 四条日志行, 底部一条朱砂 ──
+                let x = logo_rect.origin.x;
+                let y = logo_rect.origin.y;
+                let s = logo_size;
+                let accent = self.logo_frame_color;
+
+                // 外框窗口: accent 圆角矩形, 几何居中 (SVG 28..228 / 48..208)。
+                let wx0 = s * 0.109;
+                let wy0 = s * 0.1875;
+                let ww = s * 0.781;
+                let wh = s * 0.625;
+                let wr = s * 0.109;
+                rects.push_rect(Rect::from_xywh(x + wx0, y + wy0, ww, wh), accent, wr);
+
+                // 玻璃内填 (SVG inset 20/256): 形成描边环效果。
+                let gi = s * 0.078;
+                rects.push_rect(
+                    Rect::from_xywh(x + wx0 + gi, y + wy0 + gi, ww - gi * 2.0, wh - gi * 2.0),
+                    self.logo_fill_color,
+                    (wr - gi).max(0.0),
+                );
+
+                // 四条日志行: 前三玉色, 底部一条朱砂 (live tail, 几何 62..200)。
+                // 数组元素 = (版 y0, 版宽), 均为 256 设计空间值。
+                let bx = x + s * (62.0 / 256.0);
+                let bh = s * (16.0 / 256.0);
+                let br = bh / 2.0;
+                let rows: [(f32, f32, Color); 4] = [
+                    (72.0, 120.0, accent),
+                    (104.0, 82.0, accent),
+                    (136.0, 130.0, accent),
+                    (168.0, 138.0, self.logo_dot_color),
+                ];
+                for (y0, w0, color) in rows {
+                    let by = y + s * (y0 / 256.0);
+                    let bw = s * (w0 / 256.0);
+                    rects.push_rect(Rect::from_xywh(bx, by, bw, bh), color, br);
                 }
             }
         }
