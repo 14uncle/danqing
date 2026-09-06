@@ -1,16 +1,16 @@
 //! @author 十四叔
 //! @date 2026/07/17
 
-//! 字体加载:内嵌 OFL 黑体优先,系统字体兜底。
+//! 字体加载:内嵌 OFL 中文等宽字体(Sarasa Mono SC 子集)优先,系统字体兜底。
 //!
 //! 本模块为纯逻辑(CPU),不接触 GPU;字形栅格化由 fontdue 完成。
 //!
 //! 为何内嵌优先:系统 CJK 字体经 fontdue 展开后常驻内存极高
-//! (实测 Microsoft YaHei ~160 MB),内嵌 GB2312 子集仅 ~37 MB,
-//! 且加载耗时低一个数量级 (~30 ms vs ~220 ms)。
+//! (实测 Microsoft YaHei ~160 MB),内嵌 GB2312 子集仅 ~2 MB,
+//! 且加载耗时低一个数量级 (~30 ms vs ~220 ms)。等宽日志场景对齐/可辨皆优。
 
-/// 内嵌黑体字节(Noto Sans SC / 思源黑体 GB2312 子集, OFL, 位于 `assets/fonts/ofl-sans.ttf`)。
-const EMBEDDED_SANS_BYTES: &[u8] = include_bytes!("../../assets/fonts/ofl-sans.ttf");
+/// 内嵌等效字节(Sarasa Mono SC / 思源等宽 GB2312 子集, OFL, 位于 `assets/fonts/ofl-mono.ttf`)。
+const EMBEDDED_MONO_BYTES: &[u8] = include_bytes!("../../assets/fonts/ofl-mono.ttf");
 
 /// 中文系统字体候选(按优先级,覆盖 Windows/macOS/Linux)。
 const SYSTEM_CJK_CANDIDATES: &[&str] = &[
@@ -49,16 +49,16 @@ impl Font {
         })
     }
 
-    /// 解析内嵌黑体字节 (私有, 供 `load` 与 `embedded_sans` 共享)。
-    fn try_embedded_sans() -> Result<Self, FontError> {
-        Self::from_bytes(EMBEDDED_SANS_BYTES, "embedded Noto Sans SC subset (OFL)")
+    /// 解析内嵌等宽字节 (私有, 供 `load` 与 `embedded_mono` 共享)。
+    fn try_embedded_mono() -> Result<Self, FontError> {
+        Self::from_bytes(EMBEDDED_MONO_BYTES, "embedded Sarasa Mono SC subset (OFL)")
     }
 
-    /// 加载内嵌黑体(Noto Sans SC / 思源黑体 GB2312 子集, OFL)。
+    /// 加载内嵌中文等宽字体(Sarasa Mono SC GB2312 子集, OFL)。
     ///
-    /// 笔画规整的正文字体, 系统黑体不可用时的兜底。
-    pub fn embedded_sans() -> Self {
-        Self::try_embedded_sans().expect("内嵌黑体必须可解析")
+    /// 等宽网格 + 规整笔画, 日志/代码对齐与可辨皆优; 系统字体不可用时的兜底。
+    pub fn embedded_mono() -> Self {
+        Self::try_embedded_mono().expect("内嵌等宽字体必须可解析")
     }
 
     /// 尝试从系统加载中文字体;成功返回 Some。
@@ -101,7 +101,7 @@ impl Font {
     ///
     /// 内嵌子集常驻内存与加载耗时均远低于系统 CJK 字体 (见模块文档)。
     pub fn load() -> Self {
-        match Self::try_embedded_sans() {
+        match Self::try_embedded_mono() {
             Ok(font) => {
                 log::info!("字体加载:使用 {}", font.source);
                 font
@@ -137,22 +137,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn embedded_sans_parses_and_covers_cjk_latin_punctuation() {
-        let font = Font::embedded_sans();
+    fn embedded_mono_parses_and_covers_cjk_latin_punctuation() {
+        let font = Font::embedded_mono();
         for ch in [
             '你', '好', 'A', 'z', '0', '9', '，', '。', '：', '—', '·', '+',
         ] {
             assert_ne!(
                 font.inner.lookup_glyph_index(ch),
                 0,
-                "内嵌黑体必须覆盖 '{ch}'"
+                "内嵌等宽字体必须覆盖 '{ch}'"
             );
         }
     }
 
     #[test]
-    fn embedded_sans_rasterizes_cjk_glyph() {
-        let font = Font::embedded_sans();
+    fn embedded_mono_rasterizes_cjk_glyph() {
+        let font = Font::embedded_mono();
         let (metrics, bitmap) = font.inner.rasterize('你', 16.0);
         assert!(metrics.width > 0 && metrics.height > 0);
         assert!(bitmap.iter().any(|&a| a > 0), "位图必须非空");

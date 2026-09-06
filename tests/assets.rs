@@ -52,14 +52,14 @@ fn background_images_exist() {
 }
 
 #[test]
-fn ofl_sans_font_exists() {
-    let path = assets_dir().join("fonts").join("ofl-sans.ttf");
-    assert!(path.exists(), "内嵌黑体应存在: {}", path.display());
+fn ofl_mono_font_exists() {
+    let path = assets_dir().join("fonts").join("ofl-mono.ttf");
+    assert!(path.exists(), "内嵌等宽字体应存在: {}", path.display());
     let meta = std::fs::metadata(&path).unwrap();
-    assert!(meta.len() > 0, "内嵌黑体不应为空");
+    assert!(meta.len() > 0, "内嵌等宽字体不应为空");
     assert!(
         meta.len() <= 3 * 1024 * 1024,
-        "内嵌黑体应控制在 3 MB 以内, 实际 {} 字节",
+        "内嵌等宽字体应控制在 3 MB 以内, 实际 {} 字节",
         meta.len()
     );
 }

@@ -498,13 +498,23 @@ mod tests {
     }
 
     #[test]
-    fn descent_returns_fallback_when_no_metrics() {
+    fn descent_returns_loaded_font_descent() {
+        // TextBatch::new() 用 Font::load()，总带真实 metrics；descent 应返回加载字体的
+        // descent（px*0.2 只是无 metrics 时的防御回退，正常字体走不到）。
+        // 旧版断言硬编码 0.2*px=3.2，仅因 Noto 的 descent 恰为 3.2 而通过；换 mono 后
+        // 露馅(4.56)——改成与加载字体的真实 descent 比对，不再绑定字体巧合值。
         let batch = TextBatch::new();
         let d = batch.descent(16.0);
-        // 无字体 metrics 时应回退 px * 0.2
+        let expected = batch
+            .font
+            .inner()
+            .horizontal_line_metrics(16.0)
+            .unwrap()
+            .descent
+            .abs();
         assert!(
-            (d - 3.2).abs() < 0.01,
-            "descent 应为 16.0 * 0.2 = 3.2, 实际 {d}"
+            (d - expected).abs() < 0.01,
+            "descent 应为加载字体的 descent {expected}, 实际 {d}"
         );
     }
 }

@@ -1,4 +1,9 @@
+Sarasa Mono SC (subset, SIL OFL 1.1)
+  - https://github.com/be5invis/Sarasa-Gothic  (author: be5invis)
+  - Derived from Iosevka (Latin) + Source Han Sans / Noto (CJK), both SIL OFL.
+
 Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
+Copyright (c) 2015-2021 Belleve Invis, Reserved Font Name 'Sarasa'
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

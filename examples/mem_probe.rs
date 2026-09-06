@@ -36,8 +36,8 @@ fn main() {
     println!("Font::load 后:   {:.1} MB (来源: {})", mb(), font.source());
     drop(font);
     println!("drop 字体后:     {:.1} MB", mb());
-    let sans = danqing::Font::embedded_sans();
-    println!("内嵌黑体加载后:  {:.1} MB", mb());
-    drop(sans);
-    println!("drop 内嵌黑体后: {:.1} MB", mb());
+    let mono = danqing::Font::embedded_mono();
+    println!("内嵌等宽加载后:  {:.1} MB", mb());
+    drop(mono);
+    println!("drop 内嵌等宽后: {:.1} MB", mb());
 }
