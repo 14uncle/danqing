@@ -91,6 +91,8 @@ impl ButtonRole {
 
 /// 红绿灯 hover 符号颜色 (macOS 惯例：半透明深灰，不随主题变化)。
 const TRAFFIC_GLYPH_COLOR: Color = Color::rgba(0.0, 0.0, 0.0, 0.55);
+/// 内嵌槽与标题文字、窗口按钮之间的水平留白。
+const EMBED_SLOT_GAP: f32 = 8.0;
 
 /// 标题栏按钮。
 #[derive(Debug, Default, Clone, Copy)]
@@ -183,6 +185,9 @@ pub struct TitleBar {
     /// 内嵌栏槽：在标题文字与窗口按钮之间托管一个子节点 (如搜索/过滤输入)，可选。
     /// 未设置时 TitleBar 保持叶子行为 (children 为空)，完全向后兼容。
     embed: Option<Node>,
+    /// 内嵌槽的布局区域 (layout 计算, paint/event 用; 无 embed 为默认)。
+    /// 高度按子节点自身高度竖直居中于标题栏, 宽度取标题右三键左之间的余宽。
+    embed_area: Rect,
 }
 
 /// 品牌朱砂红 (#E34234)：仅用于 LOGO 颜料滴的品牌资产色，不属于 theme token 体系。
@@ -269,6 +274,7 @@ impl TitleBar {
             is_maximized: false,
             maximized_binding: None,
             embed: None,
+            embed_area: Rect::default(),
         }
     }
 
@@ -452,6 +458,29 @@ impl TitleBar {
             .into_iter()
             .filter(|role| self.is_button_visible(*role))
             .find(|role| self.button_rect(area, *role).contains(position))
+    }
+
+    /// 内嵌槽右界: Standard 取最左窗口按钮左缘, TrafficLights 取窗口右缘边距。
+    fn embed_slot_right(&self, area: Rect) -> f32 {
+        match self.style {
+            TitleBarStyle::Standard => self
+                .style
+                .placed_roles()
+                .iter()
+                .filter(|r| self.is_button_visible(**r))
+                .map(|r| self.button_rect(area, *r).origin.x)
+                .fold(area.origin.x + area.size.width, f32::min),
+            TitleBarStyle::TrafficLights => area.origin.x + area.size.width - self.margin,
+        }
+    }
+
+    /// 内嵌槽 x 范围: `[标题右缘 + 留白, 按钮区左缘]`。
+    fn embed_slot_span(&self, area: Rect, texts: &mut TextBatch) -> (f32, f32) {
+        let logo_r = self.logo_rect(area);
+        let title_w = texts.measure(&self.title, self.font_size);
+        let x0 = logo_r.origin.x + logo_r.size.width + self.logo_gap + title_w + EMBED_SLOT_GAP;
+        let x1 = self.embed_slot_right(area);
+        (x0.min(x1), x1.max(x0))
     }
 
     /// 指定角色按钮的图形符号颜色。
@@ -708,11 +737,33 @@ impl Widget for TitleBar {
         if let Some(binding) = &self.maximized_binding {
             self.is_maximized = binding(state);
         }
+        if let Some(child) = &mut self.embed {
+            child.sync(state);
+        }
     }
 
-    fn layout(&mut self, constraints: Constraints, _texts: &mut TextBatch) -> Size {
+    fn animate(&mut self, ctx: &crate::app::AnimationCtx) {
+        if let Some(child) = &mut self.embed {
+            child.animate(ctx);
+        }
+    }
+
+    fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
         let size = constraints.constrain(Size::new(constraints.max_width, self.height));
         self.area = Rect::new(Point::ZERO, size);
+        // 内嵌槽: 取标题右、三键左的余宽, 子节点按自然高度竖直居中于标题栏。
+        if self.embed.is_some() {
+            let (x0, x1) = self.embed_slot_span(self.area, texts);
+            let slot = Rect::from_xywh(x0, self.area.origin.y, (x1 - x0).max(1.0), size.height);
+            if let Some(child) = &mut self.embed {
+                let child_size = child.layout(Constraints::loose(slot.size), texts);
+                let y = slot.origin.y + (slot.size.height - child_size.height).max(0.0) / 2.0;
+                self.embed_area =
+                    Rect::from_xywh(slot.origin.x, y, slot.size.width, child_size.height);
+            }
+        } else {
+            self.embed_area = Rect::default();
+        }
         size
     }
 
@@ -954,6 +1005,13 @@ impl Widget for TitleBar {
                         self.paint_button_symbol(rects, role, circle, TRAFFIC_GLYPH_COLOR);
                     }
                 }
+            }
+        }
+
+        // 内嵌槽子节点: 绘制在其布局区域 (标题右、按钮左)。
+        if let Some(child) = &self.embed {
+            if self.embed_area.size.width > 0.0 && self.embed_area.size.height > 0.0 {
+                child.paint(self.embed_area, rects, texts);
             }
         }
     }
@@ -1713,6 +1771,34 @@ mod tests {
             bar.children_mut().len(),
             1,
             "children_mut 应同样含一个子节点"
+        );
+    }
+
+    // ── embed 槽布局 (T2) ──
+
+    #[test]
+    fn embed_slot_lies_between_title_and_buttons() {
+        let mut bar =
+            TitleBar::themed(&LightTheme, "丹青日志 POC").embed(crate::widget::Text::new("x"));
+        let mut texts = TextBatch::new();
+        let area = Rect::from_xywh(0.0, 0.0, 400.0, bar.height);
+        bar.layout(Constraints::tight(area.size), &mut texts);
+
+        let slot = bar.embed_area;
+        assert!(slot.size.width > 0.0, "槽应有正宽: {slot:?}");
+        // 槽左缘在 logo + 标题 之后 (不覆盖标题)
+        let logo_r = bar.logo_rect(area);
+        let title_w = texts.measure(&bar.title, bar.font_size);
+        assert!(
+            slot.origin.x >= logo_r.origin.x + logo_r.size.width + bar.logo_gap + title_w,
+            "槽左缘应越过标题: slot={slot:?} title_end={:.1}",
+            logo_r.origin.x + logo_r.size.width + bar.logo_gap + title_w
+        );
+        // 槽右缘不越过最左窗口按钮左缘 (三者皆可见时 = 最小化按钮)
+        let min_btn_x = bar.button_rect(area, ButtonRole::Minimize).origin.x;
+        assert!(
+            slot.origin.x + slot.size.width <= min_btn_x + f32::EPSILON,
+            "槽右缘应止于按钮区左: slot={slot:?} btn_left={min_btn_x:.1}"
         );
     }
 }

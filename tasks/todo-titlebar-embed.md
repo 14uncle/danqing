@@ -11,11 +11,13 @@
   - 实测: 照 box_.rs 范式(embed 字段 + `embed()` builder + children/children_mut);
     title_bar 26 测试绿(24 既有 + 2 新 embed), 全量 388 lib + 集成, clippy 0
 
-- [ ] **T2: 布局 — 槽占标题与三键之间中间余宽**
+- [x] **T2: 布局 — 槽占标题与三键之间中间余宽** ✅ 2026-09-06
   - Acceptance: logo/title 宽与三键区起点; 槽取其间余宽竖直撑满, `layout` 子节点; 无槽时 title 可延展;
     按钮区几何不变(仍最右)
   - Verify: `cargo test`(槽占中间 + 按钮最右断言)
   - Files: `src/widget/title_bar.rs`
+  - 实测: embed_slot_span/slot_right 算槽界(标题右+留白..按钮左/窗右缘); child 按 loose 自然高度竖直居中;
+    sync/animate 转发 child; embed_area 字段; 27 测试绿 + 集成, clippy 0
 
 - [ ] **T3: 事件/焦点/IME 路由(实测定)**
   - Acceptance: 命中槽→转发落焦/打字/IME; 命中按钮→触发; 命中标题区→拖拽/双击最大化; 若 child-node
