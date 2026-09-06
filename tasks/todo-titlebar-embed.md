@@ -35,5 +35,9 @@
   - 实测: page_base 加「TitleBar 内嵌输入槽」卡(独立 TitleBar + LogoKind::Log + embed TextInput,
     不动真实窗口 chrome); showcase 编译过 + 全量测试绿 + clippy 0
 
-- [ ] **Checkpoint: 模块验收**
-  - [ ] 三件套绿; 既有 TitleBar 测试全过; showcase 人工通过; 进 review(`/agent-skills:code-review-and-quality`)
+- [x] **Checkpoint: 模块验收** ✅ 2026-09-06
+  - [x] 三件套绿 (31 title_bar 测试)
+  - [x] 既有 TitleBar 测试全过 (向后兼容)
+  - [x] showcase 人工通过 (用户「通过」: 内嵌 TextInput 落位+打字正常)
+  - [x] 进 review, C1(坐标)/I1(覆盖按钮) 已修 (3543a0f)
+  - 剩余可选 (非阻塞): I2 运输测试 / O1 每帧锁分配 / 文件体量抽副模块
