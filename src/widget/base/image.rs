@@ -125,10 +125,21 @@ impl Widget for Image {
     }
 
     fn paint_image(&self, area: Rect, images: &mut ImageBatch) {
-        // 有数据时推送纹理实例
-        if !self.data.is_empty() && self.width > 0 && self.height > 0 {
-            images.push_image(&self.data, self.width, self.height, area);
+        // 有数据时推送纹理实例。
+        // 用 layout 的 aspect_fit 尺寸 (target_size), 在传入 area 内居中 ——
+        // 避免「拉伸填满传入区」: 此前直接用传入 area, 调用方传大区就把图拉变形。
+        if self.data.is_empty() || self.width == 0 || self.height == 0 {
+            return;
         }
+        let ts = self.target_size;
+        let x = area.origin.x + (area.size.width - ts.width) / 2.0;
+        let y = area.origin.y + (area.size.height - ts.height) / 2.0;
+        images.push_image(
+            &self.data,
+            self.width,
+            self.height,
+            Rect::from_xywh(x, y, ts.width, ts.height),
+        );
     }
 }
 
@@ -236,5 +247,32 @@ mod tests {
         let area = Rect::from_xywh(0.0, 0.0, 80.0, 40.0);
         img.paint_image(area, &mut images);
         assert_eq!(images.len(), 1);
+    }
+
+    #[test]
+    fn paint_image_centers_aspect_fit_in_area() {
+        // 200x100 图, layout 约束 100x80 → aspect_fit = (100, 50)。
+        // paint_image 传更大区 (400x300): 应居中画 aspect_fit 尺寸, 而非拉伸填满。
+        let (data, w, h) = solid_image(200, 100, [128, 128, 128, 255]);
+        let mut img = Image::new(data, w, h);
+        let mut texts = TextBatch::new();
+        img.layout(Constraints::tight(Size::new(100.0, 80.0)), &mut texts);
+
+        let mut images = ImageBatch::new();
+        img.paint_image(Rect::from_xywh(0.0, 0.0, 400.0, 300.0), &mut images);
+        let rects = images.instance_rects();
+        assert_eq!(rects.len(), 1);
+        let r = rects[0];
+        // aspect_fit=(100,50) 居中于 400x300 → x=150, y=125
+        assert!((r.origin.x - 150.0).abs() < 1e-3, "x 应居中: {r:?}");
+        assert!((r.origin.y - 125.0).abs() < 1e-3, "y 应居中: {r:?}");
+        assert!(
+            (r.size.width - 100.0).abs() < 1e-3,
+            "宽应为 aspect_fit: {r:?}"
+        );
+        assert!(
+            (r.size.height - 50.0).abs() < 1e-3,
+            "高应为 aspect_fit: {r:?}"
+        );
     }
 }
