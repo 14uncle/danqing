@@ -118,6 +118,8 @@ pub(super) struct Handler<'a, A: App> {
     fullscreen_suspended: bool,
     /// 上次同步到窗口的标题 (避免每帧 set_title 系统调用)。
     last_window_title: String,
+    /// 文件对话框后强制重设标题的剩余帧数 (Windows rfd 模态消息循环干扰)。
+    force_title_frames: u8,
 }
 
 impl<'a, A: App> Handler<'a, A> {
@@ -171,6 +173,7 @@ impl<'a, A: App> Handler<'a, A> {
             last_fullscreen_poll: boot - Duration::from_secs(1),
             fullscreen_suspended: false,
             last_window_title,
+            force_title_frames: 0,
         }
     }
 }
@@ -593,10 +596,17 @@ impl<A: App> Handler<'_, A> {
             // 每帧心跳先行：计时 / 过渡动画推进后，绑定闭包在 sync 中读到新状态。
             self.app.tick(&ctx);
             // 动态窗口标题: 应用层返回 Some 且与上次不同才 set_title (避系统调用开销)。
+            // Windows: rfd 原生文件对话框的模态消息循环可能干扰 winit 的 set_title,
+            // 首次变更后连续两帧强制重设 (第二帧兜底)。
             if let Some(title) = self.app.window_title() {
-                if title != self.last_window_title {
+                if title != self.last_window_title || self.force_title_frames > 0 {
                     if let Some(w) = self.window.as_ref() {
                         w.set_title(&title);
+                    }
+                    if title != self.last_window_title {
+                        self.force_title_frames = 2;
+                    } else {
+                        self.force_title_frames -= 1;
                     }
                     self.last_window_title = title;
                 }
