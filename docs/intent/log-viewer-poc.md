@@ -110,4 +110,4 @@ demo 边界（正式版必解）：仅扁平顶层字段，嵌套展开未做（
 - 待定：in-app 标题栏 logo（danqing `title_bar.rs` `LogoKind` 只有 Default 破框/Pomodoro/Clipboard，danqing-log 未设；任务栏是日志 logo、标题栏仍是丹青破框，视觉不一致——需给 danqing 加一个 Log logo_kind 或产品自绘）。
 - **~~v1 任务：过滤/搜索栏重构成真 TextInput~~** **已闭环（2026-09-06）**：`Bar` widget 托管真 `TextInput`（焦点路径落容器、转发 wants_ime/ime_area/selected_text/hit_area/reset_focus，参考 danqing-clipboard bottom_bar）；`App::view → Column[Bar, LogView]`；键盘路由进焦点系统（方案 A：默认无焦点→app 导航，栏聚焦→方向键移光标，进表格/开搜索自动聚焦）；三个 IME 补丁（App::event IME 分支 + read_clipboard 粘贴 + wants_ime）已删；IME 候选窗帖光标（用户实测过）。配套 danqing 打磨寄生：TextInput 加 `caret_color`/`selection_color` setter（深色栏光标可辨）。三件套绿 + GUI 人工验收通过。
 - ~~live-tail / jsonl-table 模块~~（2026-09-06 已各自走完 plan/build/review，三模块全闭环）
-- 产品命名与仓库名（danqing-log = 工作名，公开发布前可改）
+- ~~产品命名与仓库名~~ **已定：丹青日志 LogLens**（2026-09-06）；仓库名 `danqing-log` 不改，二进制名不动
