@@ -19,11 +19,14 @@
   - 实测: embed_slot_span/slot_right 算槽界(标题右+留白..按钮左/窗右缘); child 按 loose 自然高度竖直居中;
     sync/animate 转发 child; embed_area 字段; 27 测试绿 + 集成, clippy 0
 
-- [ ] **T3: 事件/焦点/IME 路由(实测定)**
+- [x] **T3: 事件/焦点/IME 路由(实测定)** ✅ 2026-09-06
   - Acceptance: 命中槽→转发落焦/打字/IME; 命中按钮→触发; 命中标题区→拖拽/双击最大化; 若 child-node
     已覆盖则零转发, 否则补 wants_ime/ime_area/selected_text/hit_area/reset_focus
   - Verify: `cargo test`(embed TextInput 点击落焦/输入/按钮不误触)
   - Files: `src/widget/title_bar.rs`
+  - 实测: 键盘/IME/剪贴板走焦点路径 event_at_path(children_mut 自动钻到 child) → 零转发;
+    鼠标才需 TitleBar.event 转发(槽内→child, 按钮/标题区不转). hit_area 已由 paint 缓存 absolute 坐标
+    (focus.rs「必须 paint 缓存绝对矩形」), 点击落焦自动. 2 新单测 + 29 title_bar 绿
 
 - [ ] **T4: showcase demo + 回归**
   - Acceptance: showcase 标题栏卡片加「嵌入输入槽」demo; 全部既有 TitleBar 单测仍绿

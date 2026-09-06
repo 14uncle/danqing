@@ -351,6 +351,19 @@ impl TitleBar {
         self
     }
 
+    /// 位置是否落在内嵌槽内 (槽有正宽才转发, 否则视为无槽)。
+    fn in_embed(&self, pos: Point) -> bool {
+        self.embed_area.size.width > 0.0 && self.embed_area.contains(pos)
+    }
+
+    /// 把事件转发给内嵌子节点 (以槽的布局区为其 area), 返回其处理结果;
+    /// 无 embed 返回 None。
+    fn forward_embed(&mut self, event: &Event, msgs: &mut MsgQueue) -> Option<EventResult> {
+        self.embed
+            .as_mut()
+            .map(|child| child.event(event, self.embed_area, msgs))
+    }
+
     fn set_action<M: 'static>(slot: &mut Option<ActionFactory>, f: impl Fn() -> M + 'static) {
         *slot = Some(Box::new(move || Box::new(f()) as Box<dyn Any>));
     }
@@ -1026,6 +1039,10 @@ impl Widget for TitleBar {
                 }
                 if hit.is_some() {
                     EventResult::Consumed
+                } else if self.in_embed(*p) {
+                    // 槽内悬停: 转发给内嵌子节点 (如输入框 hover/指针状态)。
+                    self.forward_embed(event, msgs)
+                        .unwrap_or(EventResult::Ignored)
                 } else {
                     EventResult::Ignored
                 }
@@ -1036,6 +1053,8 @@ impl Widget for TitleBar {
                     btn.pressed = false;
                 }
                 self.last_left_press = None;
+                // 子节点仍在: 补发 CursorLeft 复位其 hover 状态。
+                self.forward_embed(event, msgs);
                 EventResult::Ignored
             }
             Event::MouseInput {
@@ -1049,8 +1068,12 @@ impl Widget for TitleBar {
                         self.buttons[r.index()].pressed = r == role;
                     }
                     EventResult::Consumed
+                } else if self.in_embed(*position) {
+                    // 槽内按下: 转发给子节点 (输入框落焦/光标定位), 不触发拖拽。
+                    self.forward_embed(event, msgs)
+                        .unwrap_or(EventResult::Consumed)
                 } else {
-                    // 非按钮区：拖拽或双击最大化
+                    // 非按钮、非槽 (标题/logo 区): 拖拽或双击最大化
                     self.handle_drag_or_double_click(*position, msgs);
                     EventResult::Consumed
                 }
@@ -1074,7 +1097,15 @@ impl Widget for TitleBar {
                         self.emit_button_action(role, msgs);
                     }
                 }
-                EventResult::Consumed
+                if hit.is_some() {
+                    EventResult::Consumed
+                } else if self.in_embed(*position) {
+                    // 槽内松开: 转发给子节点 (文本选区收尾)。
+                    self.forward_embed(event, msgs)
+                        .unwrap_or(EventResult::Consumed)
+                } else {
+                    EventResult::Consumed
+                }
             }
             _ => EventResult::Ignored,
         }
@@ -1800,5 +1831,114 @@ mod tests {
             slot.origin.x + slot.size.width <= min_btn_x + f32::EPSILON,
             "槽右缘应止于按钮区左: slot={slot:?} btn_left={min_btn_x:.1}"
         );
+    }
+
+    // ── embed 槽鼠标转发 (T3) ──
+
+    /// 记录收到的鼠标事件 (供 embed 转发测试)。
+    struct MouseRecorder {
+        got: std::rc::Rc<std::cell::Cell<usize>>,
+        pressed_center: std::rc::Rc<std::cell::Cell<bool>>,
+    }
+
+    impl Widget for MouseRecorder {
+        fn sync(&mut self, _: &dyn Any) {}
+        fn layout(&mut self, c: Constraints, _: &mut TextBatch) -> Size {
+            c.constrain(Size::new(120.0, 32.0))
+        }
+        fn paint(&self, _: Rect, _: &mut RectBatch, _: &mut TextBatch) {}
+        fn event(&mut self, event: &Event, _: Rect, _: &mut MsgQueue) -> EventResult {
+            self.got.set(self.got.get() + 1);
+            if let Event::MouseInput { pressed: true, .. } = event {
+                self.pressed_center.set(true);
+            }
+            EventResult::Consumed
+        }
+        fn children(&self) -> &[Node] {
+            &[]
+        }
+        fn children_mut(&mut self) -> &mut [Node] {
+            &mut []
+        }
+    }
+
+    fn recorder_bar(got: std::rc::Rc<std::cell::Cell<usize>>) -> (TitleBar, Rect) {
+        let mut bar = TitleBar::themed(&LightTheme, "丹青日志 POC").embed(MouseRecorder {
+            got,
+            pressed_center: std::rc::Rc::new(std::cell::Cell::new(false)),
+        });
+        let mut texts = TextBatch::new();
+        let area = Rect::from_xywh(0.0, 0.0, 400.0, bar.height);
+        bar.layout(Constraints::tight(area.size), &mut texts);
+        (bar, area)
+    }
+
+    #[test]
+    fn embed_forwards_mouse_press_inside_slot() {
+        let got = std::rc::Rc::new(std::cell::Cell::new(0));
+        let (mut bar, area) = recorder_bar(std::rc::Rc::clone(&got));
+        let slot = bar.embed_area;
+        let center = Point::new(
+            slot.origin.x + slot.size.width / 2.0,
+            slot.origin.y + slot.size.height / 2.0,
+        );
+        let mut msgs = MsgQueue::new();
+        let result = bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: center,
+            },
+            area,
+            &mut msgs,
+        );
+        assert!(got.get() > 0, "槽内按下应转发到子节点");
+        assert_eq!(
+            result,
+            EventResult::Consumed,
+            "子节点消费则 TitleBar 应消费"
+        );
+    }
+
+    #[test]
+    fn embed_does_not_forward_button_or_title_press() {
+        let got = std::rc::Rc::new(std::cell::Cell::new(0));
+        let (mut bar, area) = recorder_bar(std::rc::Rc::clone(&got));
+
+        // 最小化按钮中心: 不转发到子节点
+        let btn = bar.button_rect(area, ButtonRole::Minimize);
+        let btn_center = Point::new(
+            btn.origin.x + btn.size.width / 2.0,
+            btn.origin.y + btn.size.height / 2.0,
+        );
+        let mut msgs = MsgQueue::new();
+        bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: btn_center,
+            },
+            area,
+            &mut msgs,
+        );
+        assert_eq!(got.get(), 0, "按钮按下不应转发到子节点");
+
+        // 标题区 (logo 右侧、槽左侧): 不转发到子节点
+        let logo_r = bar.logo_rect(area);
+        let title_pt = Point::new(
+            logo_r.origin.x + logo_r.size.width + 4.0,
+            logo_r.origin.y + logo_r.size.height / 2.0,
+        );
+        let mut msgs2 = MsgQueue::new();
+        bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: title_pt,
+            },
+            area,
+            &mut msgs2,
+        );
+        assert_eq!(got.get(), 0, "标题区按下不应转发到子节点");
     }
 }
