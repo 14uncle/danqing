@@ -738,7 +738,19 @@ fn page_base(t: &LightTheme) -> impl Widget + 'static {
             .gap(t.spacing_lg())
             .cross_stretch()
             .child(card(t, "按钮与计数", counter_row(t)))
-            .child(card(t, "Image 组件", ImageDemo::new())),
+            .child(card(t, "Image 组件", ImageDemo::new()))
+            .child(card(
+                t,
+                "TitleBar 内嵌输入槽",
+                TitleBar::themed(t, "搜索/过滤进标题栏")
+                    .logo_kind(widget::LogoKind::Log)
+                    .embed(
+                        TextInput::themed(t)
+                            .font_size(t.font_size_body())
+                            .chromeless()
+                            .placeholder("在标题栏内输入...", t.text_secondary()),
+                    ),
+            )),
     )
 }
 

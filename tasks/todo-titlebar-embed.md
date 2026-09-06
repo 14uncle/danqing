@@ -28,10 +28,12 @@
     鼠标才需 TitleBar.event 转发(槽内→child, 按钮/标题区不转). hit_area 已由 paint 缓存 absolute 坐标
     (focus.rs「必须 paint 缓存绝对矩形」), 点击落焦自动. 2 新单测 + 29 title_bar 绿
 
-- [ ] **T4: showcase demo + 回归**
+- [x] **T4: showcase demo + 回归** ✅ 2026-09-06
   - Acceptance: showcase 标题栏卡片加「嵌入输入槽」demo; 全部既有 TitleBar 单测仍绿
   - Verify: `cargo run --example danqing-showcase` + `cargo test --lib --tests`
   - Files: `examples/showcase.rs`, `src/widget/title_bar.rs`
+  - 实测: page_base 加「TitleBar 内嵌输入槽」卡(独立 TitleBar + LogoKind::Log + embed TextInput,
+    不动真实窗口 chrome); showcase 编译过 + 全量测试绿 + clippy 0
 
 - [ ] **Checkpoint: 模块验收**
   - [ ] 三件套绿; 既有 TitleBar 测试全过; showcase 人工通过; 进 review(`/agent-skills:code-review-and-quality`)
