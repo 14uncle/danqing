@@ -376,19 +376,20 @@ impl<A: App> Handler<'_, A> {
             return;
         }
 
-        let Some(path) = self.focus.current().map(|p| p.to_vec()) else {
-            // 无焦点时回退到应用层
-            self.app.event(event);
-            return;
-        };
-
-        // 键盘前置过滤: 应用层在焦点分发前拦截 (如无修饰字母键触发收藏)
+        // 键盘前置过滤: 应用层在焦点分发前拦截 (如 Ctrl+O 打开文件, Ctrl+T 切模式)
+        // 无论有无焦点均执行, 保证全局快捷键在任何状态下生效。
         if let Event::Key { pressed: true, .. } = event {
             if let Some(msg) = self.app.app_key_filter(event) {
                 self.msgs.push(Box::new(msg));
                 return;
             }
         }
+
+        let Some(path) = self.focus.current().map(|p| p.to_vec()) else {
+            // 无焦点时回退到应用层
+            self.app.event(event);
+            return;
+        };
 
         match event {
             Event::Key { key, pressed, .. } if *pressed => {
