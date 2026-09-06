@@ -17,6 +17,10 @@ pub mod log;
 mod render;
 mod text;
 pub mod theme;
+/// 应用内更新检查核心 (版本对比/缓存/后台检查/GitHub 运输)。
+/// 仅 `update` feature 启用: 默认关闭不拉网络栈, 产品显式开启。
+#[cfg(feature = "update")]
+pub mod update;
 pub mod widget;
 mod window;
 
