@@ -743,7 +743,6 @@ fn page_base(t: &LightTheme) -> impl Widget + 'static {
                 t,
                 "TitleBar 内嵌输入槽",
                 TitleBar::themed(t, "搜索/过滤进标题栏")
-                    .logo_kind(widget::LogoKind::Log)
                     .embed(
                         TextInput::themed(t)
                             .font_size(t.font_size_body())
