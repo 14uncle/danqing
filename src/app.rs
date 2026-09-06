@@ -168,4 +168,12 @@ pub trait App: Any {
     /// 用于跟踪焦点状态 (如剪贴板管理器的首次焦点守卫)。默认空实现。
     /// 调用时机：`WindowEvent::Focused(true)` 到达时。
     fn focus_gained(&mut self) {}
+
+    /// 动态窗口标题: 每帧查询, 与上次不同则更新窗口标题栏与任务栏显示。
+    ///
+    /// 返回 `Some(title)` 时框架调用 `window.set_title(title)`; 返回 `None` (默认)
+    /// 不更新。适用于标题随模式/文件变化的应用 (如日志查看器 JSONL/原始模式切换)。
+    fn window_title(&self) -> Option<String> {
+        None
+    }
 }

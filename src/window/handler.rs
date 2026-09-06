@@ -116,6 +116,8 @@ pub(super) struct Handler<'a, A: App> {
     last_fullscreen_poll: Instant,
     /// 前台全屏应用检测缓存 (true = 渲染暂停, 仅低频轮询)。
     fullscreen_suspended: bool,
+    /// 上次同步到窗口的标题 (避免每帧 set_title 系统调用)。
+    last_window_title: String,
 }
 
 impl<'a, A: App> Handler<'a, A> {
@@ -137,6 +139,7 @@ impl<'a, A: App> Handler<'a, A> {
         window_event_rx: Receiver<WindowAppEvent>,
         boot: Instant,
     ) -> Self {
+        let last_window_title = config.title.clone();
         Self {
             config,
             window: None,
@@ -167,6 +170,7 @@ impl<'a, A: App> Handler<'a, A> {
             // 首次轮询立即执行 (减 1s 使首个 about_to_wait 即检测全屏态)。
             last_fullscreen_poll: boot - Duration::from_secs(1),
             fullscreen_suspended: false,
+            last_window_title,
         }
     }
 }
@@ -533,6 +537,10 @@ impl<A: App> Handler<'_, A> {
                     log::warn!("拖拽窗口失败：{err}");
                 }
             }
+            WindowAction::SetTitle(title) => {
+                window.set_title(&title);
+                self.config.title = title;
+            }
         }
     }
 
@@ -583,6 +591,15 @@ impl<A: App> Handler<'_, A> {
             let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
             // 每帧心跳先行：计时 / 过渡动画推进后，绑定闭包在 sync 中读到新状态。
             self.app.tick(&ctx);
+            // 动态窗口标题: 应用层返回 Some 且与上次不同才 set_title (避系统调用开销)。
+            if let Some(title) = self.app.window_title() {
+                if title != self.last_window_title {
+                    if let Some(w) = self.window.as_ref() {
+                        w.set_title(&title);
+                    }
+                    self.last_window_title = title;
+                }
+            }
             self.tree.sync(self.app);
             self.tree.animate(&ctx);
             self.focus.rebuild(&self.tree);

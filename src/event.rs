@@ -171,7 +171,7 @@ impl Event {
 ///
 /// 由自绘标题栏等组件产出，经 `window.rs` 的 `Handler` 识别后调用 OS 窗口 API。
 /// 保持纯逻辑，不依赖 `winit`。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WindowAction {
     /// 关闭窗口。
     Close,
@@ -181,4 +181,6 @@ pub enum WindowAction {
     MaximizeOrRestore,
     /// 开始拖拽移动窗口。
     Drag,
+    /// 设置窗口标题 (同步任务栏/Alt-Tab 显示)。
+    SetTitle(String),
 }
