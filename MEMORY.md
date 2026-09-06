@@ -16,6 +16,7 @@
 - [wgpu 30 内存双杠杆](wgpu-30-memory-lever.md) — Backends::PRIMARY Windows 同时拉起 Vulkan+DX12、MemoryHints::Performance 默认留 slack,改 DX12 + MemoryUsage 砍 100+ MB
 - [minidbg 符号保留偏好](minidbg-symbol-preference.md) — strip=debuginfo 而非 symbols,~1MB 换崩溃诊断可用性,体积优化不可牺牲
 - [wgpu 实例预建无收益](wgpu-instance-prebuild-no-gain.md) — 后台线程预建 Instance 省下的时间 request_adapter 等额变贵,已撤回勿再试
+- [字体内嵌 mono + 字重而非超采样](font-cjk-mono.md) — Sarasa Mono SC SemiBold(子集 2MB)退役 Noto;fontdue 解析式 AA 封顶目标 px,超采样不锐化小字,字重才是杠杆;DPI 栅格(v1.x)未处理
 
 ## 视觉排障
 
