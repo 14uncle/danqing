@@ -10,6 +10,12 @@ rust-version = "1.85"
 description = "丹青 —— 跨平台自绘 UI 框架"
 license = "MIT OR Apache-2.0"
 
+[features]
+# 应用内更新检查核心 (版本对比/缓存/后台检查/GitHub 运输)。默认关闭:
+# 不启用则不拉网络/序列化栈 (`update` 全 optional)。产品显式开启。
+default = []
+update = ["dep:ureq", "dep:serde", "dep:serde_json", "dep:dirs", "dep:open"]
+
 [dependencies]
 winit = "0.30.13"
 # 与 winit 0.30 共享同一 raw-window-handle 版本 (0.6), 用于取原生窗口句柄 (HWND)。
@@ -30,6 +36,12 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 rodio = { version = "0.22", default-features = false, features = ["playback", "symphonia-ogg", "symphonia-vorbis"] }
 tray-icon = "0.19"
 windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_UI_Shell"] }
+# 更新检查核心 (仅 `update` feature 启用): GitHub Releases + 序列化缓存 + 系统打开链接。
+ureq = { version = "3.4", default-features = false, features = ["rustls", "json"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+dirs = { version = "5", optional = true }
+open = { version = "5", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
