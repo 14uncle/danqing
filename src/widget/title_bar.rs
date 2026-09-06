@@ -352,16 +352,23 @@ impl TitleBar {
     }
 
     /// 位置是否落在内嵌槽内 (槽有正宽才转发, 否则视为无槽)。
-    fn in_embed(&self, pos: Point) -> bool {
-        self.embed_area.size.width > 0.0 && self.embed_area.contains(pos)
+    /// `area` 为组件绝对矩形, 槽须平移后与绝对 pointer 比较。
+    fn in_embed(&self, area: Rect, pos: Point) -> bool {
+        self.embed_area.size.width > 0.0 && self.embed_abs(area).contains(pos)
     }
 
-    /// 把事件转发给内嵌子节点 (以槽的布局区为其 area), 返回其处理结果;
+    /// 把事件转发给内嵌子节点 (以槽的绝对矩形为其实 area), 返回其处理结果;
     /// 无 embed 返回 None。
-    fn forward_embed(&mut self, event: &Event, msgs: &mut MsgQueue) -> Option<EventResult> {
+    fn forward_embed(
+        &mut self,
+        event: &Event,
+        area: Rect,
+        msgs: &mut MsgQueue,
+    ) -> Option<EventResult> {
+        let abs = self.embed_abs(area);
         self.embed
             .as_mut()
-            .map(|child| child.event(event, self.embed_area, msgs))
+            .map(|child| child.event(event, abs, msgs))
     }
 
     fn set_action<M: 'static>(slot: &mut Option<ActionFactory>, f: impl Fn() -> M + 'static) {
@@ -488,12 +495,24 @@ impl TitleBar {
     }
 
     /// 内嵌槽 x 范围: `[标题右缘 + 留白, 按钮区左缘]`。
+    /// 标题碰到按钮区 (`x0 >= x1`) 时返回零宽 —— 槽消失, 不覆盖窗口按钮。
     fn embed_slot_span(&self, area: Rect, texts: &mut TextBatch) -> (f32, f32) {
         let logo_r = self.logo_rect(area);
         let title_w = texts.measure(&self.title, self.font_size);
         let x0 = logo_r.origin.x + logo_r.size.width + self.logo_gap + title_w + EMBED_SLOT_GAP;
         let x1 = self.embed_slot_right(area);
-        (x0.min(x1), x1.max(x0))
+        if x0 >= x1 { (x0, x0) } else { (x0, x1) }
+    }
+
+    /// 内嵌槽的绝对矩形: 由 layout 的槽 (相对本组件原点 0) 平移组件实际原点。
+    /// `area` 为 paint/event 收到的组件绝对矩形。
+    fn embed_abs(&self, area: Rect) -> Rect {
+        Rect::from_xywh(
+            self.embed_area.origin.x + area.origin.x,
+            self.embed_area.origin.y + area.origin.y,
+            self.embed_area.size.width,
+            self.embed_area.size.height,
+        )
     }
 
     /// 指定角色按钮的图形符号颜色。
@@ -765,14 +784,20 @@ impl Widget for TitleBar {
         let size = constraints.constrain(Size::new(constraints.max_width, self.height));
         self.area = Rect::new(Point::ZERO, size);
         // 内嵌槽: 取标题右、三键左的余宽, 子节点按自然高度竖直居中于标题栏。
+        // 标题碰到按钮区时槽零宽 (embed_area 为默认), 不覆盖按钮。
         if self.embed.is_some() {
             let (x0, x1) = self.embed_slot_span(self.area, texts);
-            let slot = Rect::from_xywh(x0, self.area.origin.y, (x1 - x0).max(1.0), size.height);
-            if let Some(child) = &mut self.embed {
-                let child_size = child.layout(Constraints::loose(slot.size), texts);
-                let y = slot.origin.y + (slot.size.height - child_size.height).max(0.0) / 2.0;
-                self.embed_area =
-                    Rect::from_xywh(slot.origin.x, y, slot.size.width, child_size.height);
+            let slot_w = (x1 - x0).max(0.0);
+            if slot_w > 0.0 {
+                let slot = Rect::from_xywh(x0, self.area.origin.y, slot_w, size.height);
+                if let Some(child) = &mut self.embed {
+                    let child_size = child.layout(Constraints::loose(slot.size), texts);
+                    let y = slot.origin.y + (slot.size.height - child_size.height).max(0.0) / 2.0;
+                    self.embed_area =
+                        Rect::from_xywh(slot.origin.x, y, slot.size.width, child_size.height);
+                }
+            } else {
+                self.embed_area = Rect::default();
             }
         } else {
             self.embed_area = Rect::default();
@@ -1021,10 +1046,10 @@ impl Widget for TitleBar {
             }
         }
 
-        // 内嵌槽子节点: 绘制在其布局区域 (标题右、按钮左)。
+        // 内嵌槽子节点: 绘制在其布局区域 (标题右、按钮左), 须平移组件实际原点。
         if let Some(child) = &self.embed {
             if self.embed_area.size.width > 0.0 && self.embed_area.size.height > 0.0 {
-                child.paint(self.embed_area, rects, texts);
+                child.paint(self.embed_abs(area), rects, texts);
             }
         }
     }
@@ -1039,9 +1064,9 @@ impl Widget for TitleBar {
                 }
                 if hit.is_some() {
                     EventResult::Consumed
-                } else if self.in_embed(*p) {
+                } else if self.in_embed(area, *p) {
                     // 槽内悬停: 转发给内嵌子节点 (如输入框 hover/指针状态)。
-                    self.forward_embed(event, msgs)
+                    self.forward_embed(event, area, msgs)
                         .unwrap_or(EventResult::Ignored)
                 } else {
                     EventResult::Ignored
@@ -1054,7 +1079,7 @@ impl Widget for TitleBar {
                 }
                 self.last_left_press = None;
                 // 子节点仍在: 补发 CursorLeft 复位其 hover 状态。
-                self.forward_embed(event, msgs);
+                self.forward_embed(event, area, msgs);
                 EventResult::Ignored
             }
             Event::MouseInput {
@@ -1068,9 +1093,9 @@ impl Widget for TitleBar {
                         self.buttons[r.index()].pressed = r == role;
                     }
                     EventResult::Consumed
-                } else if self.in_embed(*position) {
+                } else if self.in_embed(area, *position) {
                     // 槽内按下: 转发给子节点 (输入框落焦/光标定位), 不触发拖拽。
-                    self.forward_embed(event, msgs)
+                    self.forward_embed(event, area, msgs)
                         .unwrap_or(EventResult::Consumed)
                 } else {
                     // 非按钮、非槽 (标题/logo 区): 拖拽或双击最大化
@@ -1099,9 +1124,9 @@ impl Widget for TitleBar {
                 }
                 if hit.is_some() {
                     EventResult::Consumed
-                } else if self.in_embed(*position) {
+                } else if self.in_embed(area, *position) {
                     // 槽内松开: 转发给子节点 (文本选区收尾)。
-                    self.forward_embed(event, msgs)
+                    self.forward_embed(event, area, msgs)
                         .unwrap_or(EventResult::Consumed)
                 } else {
                     EventResult::Consumed
@@ -1940,5 +1965,48 @@ mod tests {
             &mut msgs2,
         );
         assert_eq!(got.get(), 0, "标题区按下不应转发到子节点");
+    }
+
+    #[test]
+    fn embed_forwards_on_non_zero_origin() {
+        // C1 回归: TitleBar 在非零原点 (经 Padding/Column 嵌套), 槽内按下应命中子节点。
+        let got = std::rc::Rc::new(std::cell::Cell::new(0));
+        let (mut bar, _) = recorder_bar(std::rc::Rc::clone(&got));
+        // layout 时槽为相对 (原点 0); 事件区给非零 origin。
+        let origin_area = Rect::from_xywh(120.0, 60.0, 400.0, bar.height);
+        let slot = bar.embed_area;
+        let abs_center = Point::new(
+            origin_area.origin.x + slot.origin.x + slot.size.width / 2.0,
+            origin_area.origin.y + slot.origin.y + slot.size.height / 2.0,
+        );
+        let mut msgs = MsgQueue::new();
+        bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: abs_center,
+            },
+            origin_area,
+            &mut msgs,
+        );
+        assert!(got.get() > 0, "非零原点下槽内按下应命中子节点");
+    }
+
+    #[test]
+    fn embed_slot_zero_width_when_title_overlaps_buttons() {
+        // I1 回归: 长标题 + 窄窗, 标题碰到按钮区 → 槽零宽, 不覆盖按钮。
+        let mut bar = TitleBar::themed(
+            &LightTheme,
+            "一个非常非常长的窗口标题会一路延伸到碰到按钮才停",
+        )
+        .embed(crate::widget::Text::new("x"));
+        let mut texts = TextBatch::new();
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, bar.height);
+        bar.layout(Constraints::tight(area.size), &mut texts);
+        assert!(
+            bar.embed_area.size.width <= 0.0,
+            "标题碰按钮时应零宽槽: {:?}",
+            bar.embed_area
+        );
     }
 }
