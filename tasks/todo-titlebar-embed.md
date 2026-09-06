@@ -3,11 +3,13 @@
 > plan: `tasks/plan-titlebar-embed.md` | spec: `docs/specs/SPEC-titlebar-embed.md`
 > 逐条勾选; 每任务后跑三件套 (fmt + clippy -D warnings + test)。向后兼容: 未 embed 零变化。
 
-- [ ] **T1: TitleBar 容器化 + embed 槽**
+- [x] **T1: TitleBar 容器化 + embed 槽** ✅ 2026-09-06
   - Acceptance: `embed(impl Widget)` 存 `Option<Node>`; `children()/children_mut()` 默认空/embed 后 1;
     未 embed 行为不变(既有单测全绿)
   - Verify: `cargo test widget::title_bar::tests`
   - Files: `src/widget/title_bar.rs`
+  - 实测: 照 box_.rs 范式(embed 字段 + `embed()` builder + children/children_mut);
+    title_bar 26 测试绿(24 既有 + 2 新 embed), 全量 388 lib + 集成, clippy 0
 
 - [ ] **T2: 布局 — 槽占标题与三键之间中间余宽**
   - Acceptance: logo/title 宽与三键区起点; 槽取其间余宽竖直撑满, `layout` 子节点; 无槽时 title 可延展;

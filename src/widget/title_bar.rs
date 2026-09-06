@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use crate::event::{Event, MouseButton};
 use crate::render::{RectBatch, TextBatch};
-use crate::widget::{EventResult, MsgQueue, Widget};
+use crate::widget::{EventResult, MsgQueue, Node, Widget};
 use crate::{Color, Constraints, LightTheme, Point, Rect, Size, Theme};
 
 /// LOGO 变体 — 标题栏程序化绘制。
@@ -180,6 +180,9 @@ pub struct TitleBar {
     is_maximized: bool,
     /// 最大化状态绑定：每帧从应用状态读取，覆盖 `is_maximized`。
     maximized_binding: Option<MaximizedBinding>,
+    /// 内嵌栏槽：在标题文字与窗口按钮之间托管一个子节点 (如搜索/过滤输入)，可选。
+    /// 未设置时 TitleBar 保持叶子行为 (children 为空)，完全向后兼容。
+    embed: Option<Node>,
 }
 
 /// 品牌朱砂红 (#E34234)：仅用于 LOGO 颜料滴的品牌资产色，不属于 theme token 体系。
@@ -265,6 +268,7 @@ impl TitleBar {
             theme_binding: None,
             is_maximized: false,
             maximized_binding: None,
+            embed: None,
         }
     }
 
@@ -329,6 +333,15 @@ impl TitleBar {
     /// 设置 LOGO 变体，覆盖默认母 logo。
     pub fn logo_kind(mut self, kind: LogoKind) -> Self {
         self.logo_kind = kind;
+        self
+    }
+
+    /// 设置内嵌栏槽：在标题文字与窗口按钮之间托管一个子节点 (如搜索/过滤输入)。
+    ///
+    /// 未设置时 TitleBar 保持叶子行为 (children 为空)，完全向后兼容。
+    /// 单槽位：多个输入由产品包成一个子组件传入 (如一个含两个 TextInput 的条)。
+    pub fn embed(mut self, widget: impl Widget + 'static) -> Self {
+        self.embed = Some(Box::new(widget));
         self
     }
 
@@ -1012,6 +1025,20 @@ impl Widget for TitleBar {
     fn hit_area(&self) -> Option<Rect> {
         Some(self.area)
     }
+
+    fn children(&self) -> &[Node] {
+        match &self.embed {
+            Some(child) => std::slice::from_ref(child),
+            None => &[],
+        }
+    }
+
+    fn children_mut(&mut self) -> &mut [Node] {
+        match &mut self.embed {
+            Some(child) => std::slice::from_mut(child),
+            None => &mut [],
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1662,5 +1689,30 @@ mod tests {
             "红绿灯 + 形符号数不受 is_maximized 影响"
         );
         assert!(count_normal > 0, "hover 态应至少绘制一个符号矩形");
+    }
+
+    // ── embed 内嵌栏槽 (titlebar-embed) ──
+
+    #[test]
+    fn embed_default_has_no_child() {
+        let bar = TitleBar::new("丹青");
+        assert!(bar.children().is_empty(), "未 embed 时 children 应为空");
+        let mut bar = TitleBar::new("丹青");
+        assert!(
+            bar.children_mut().is_empty(),
+            "未 embed 时 children_mut 应为空"
+        );
+    }
+
+    #[test]
+    fn embed_gains_exactly_one_child() {
+        let bar = TitleBar::new("丹青").embed(crate::widget::Text::new("x"));
+        assert_eq!(bar.children().len(), 1, "embed 后应恰好一个子节点");
+        let mut bar = TitleBar::new("丹青").embed(crate::widget::Text::new("x"));
+        assert_eq!(
+            bar.children_mut().len(),
+            1,
+            "children_mut 应同样含一个子节点"
+        );
     }
 }
