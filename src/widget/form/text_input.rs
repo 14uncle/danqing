@@ -133,6 +133,18 @@ impl TextInput {
         self
     }
 
+    /// 设置光标颜色 (深色主题下 theme.caret() 对比度不足时显式指定)。
+    pub fn caret_color(mut self, color: Color) -> Self {
+        self.caret_color = color;
+        self
+    }
+
+    /// 设置选中背景色 (深色主题下 theme.selection() 偏暗时显式指定)。
+    pub fn selection_color(mut self, color: Color) -> Self {
+        self.selection_color = color;
+        self
+    }
+
     /// 设置背景圆角半径。
     pub fn radius(mut self, radius: f32) -> Self {
         self.radius = radius;
@@ -705,6 +717,21 @@ mod tests {
         let input = TextInput::new().background(custom_bg).radius(8.0);
         assert_eq!(input.background_color(), custom_bg);
         assert_eq!(input.radius_value(), 8.0);
+    }
+
+    #[test]
+    fn caret_and_selection_color_overrides() {
+        let caret = Color::from_srgb8(200, 200, 230);
+        let sel = Color::rgba(1.0, 1.0, 1.0, 0.3);
+        let input = TextInput::new().caret_color(caret).selection_color(sel);
+        assert_eq!(input.caret_color, caret, "光标色应显式覆盖");
+        assert_eq!(input.selection_color, sel, "选中色应显式覆盖");
+        // chromeless + 覆盖后仍不画外壳
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, 36.0);
+        let mut texts = TextBatch::new();
+        let mut rects = RectBatch::new();
+        input.chromeless().paint(area, &mut rects, &mut texts);
+        assert!(rects.is_empty(), "chromeless 配覆盖色仍不画外壳");
     }
 
     fn input() -> TextInput {
