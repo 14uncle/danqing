@@ -193,6 +193,15 @@ pub struct TitleBar {
 /// 品牌朱砂红 (#E34234)：仅用于 LOGO 颜料滴的品牌资产色，不属于 theme token 体系。
 const BRAND_CINNABAR: Color = Color::rgb(227.0 / 255.0, 66.0 / 255.0, 52.0 / 255.0);
 
+/// 品牌玉色 (#0F766E)：LOGO 主体品牌资产色 (与任务栏 PNG/SVG 设计稿一致),
+/// 不随产品主题 accent 流动 —— danqing-log 的 accent 是蓝, 直接走 token 会与
+/// 任务栏图标颜色分裂。
+const BRAND_JADE: Color = Color::rgb(15.0 / 255.0, 118.0 / 255.0, 110.0 / 255.0);
+
+/// LOGO 玻璃内填 (白 0.85)：与 SVG/PNG 一致; 走 surface_input token 会在浅色
+/// 底上几乎隐形 (6% 黑), 「玻璃」感丢失。
+const LOGO_GLASS_FILL: Color = Color::rgba(1.0, 1.0, 1.0, 0.85);
+
 /// 随主题流动的标题栏颜色子集 (构建后仍可经 [`TitleBar::bind_theme`] 每帧刷新)。
 #[derive(Debug, Clone, Copy)]
 struct FlowingColors {
@@ -960,10 +969,13 @@ impl Widget for TitleBar {
             }
             LogoKind::Log => {
                 // ── 日志：宽幅视窗 (玉色框 + 玻璃内填) + 四条日志行, 底部一条朱砂 ──
+                // 框/行/内填用品牌资产色 (BRAND_JADE + LOGO_GLASS_FILL), 与任务栏
+                // PNG/SVG 设计稿严格一致; 不走主题 token (danqing-log accent 是蓝,
+                // surface_input 是 6% 透明黑, 走 token 会变色+内填隐形)。
                 let x = logo_rect.origin.x;
                 let y = logo_rect.origin.y;
                 let s = logo_size;
-                let accent = self.logo_frame_color;
+                let accent = BRAND_JADE;
 
                 // 外框窗口: accent 圆角矩形, 几何居中 (SVG 28..228 / 48..208)。
                 let wx0 = s * 0.109;
@@ -977,7 +989,7 @@ impl Widget for TitleBar {
                 let gi = s * 0.078;
                 rects.push_rect(
                     Rect::from_xywh(x + wx0 + gi, y + wy0 + gi, ww - gi * 2.0, wh - gi * 2.0),
-                    self.logo_fill_color,
+                    LOGO_GLASS_FILL,
                     (wr - gi).max(0.0),
                 );
 
