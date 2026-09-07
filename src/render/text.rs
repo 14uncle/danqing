@@ -6,6 +6,8 @@
 //! [`TextBatch`] 是 CPU 侧：持有字体与图集，负责按字排版并收集实例;
 //! [`TextPipeline`] 是 GPU 侧：负责把图集脏区域上传纹理并绘制实例。
 
+use std::ops::Range;
+
 use crate::Color;
 use crate::render::DrawTarget;
 use crate::text::{Font, GlyphAtlas};
@@ -43,6 +45,9 @@ pub struct TextBatch {
     instances: Vec<GlyphInstance>,
     /// 裁剪矩形栈;`None` 表示当前裁剪区为空 (完全裁剪)。
     clip_stack: Vec<Option<crate::Rect>>,
+    /// 层边界: 与 RectBatch::push_layer 配套; 渲染按层分段交替,
+    /// 本层的矩形先画 (可盖低层文本), 本层文本后画。
+    layer_marks: Vec<usize>,
 }
 
 impl TextBatch {
@@ -53,6 +58,7 @@ impl TextBatch {
             atlas: GlyphAtlas::new(),
             instances: Vec::new(),
             clip_stack: Vec::new(),
+            layer_marks: Vec::new(),
         }
     }
 
@@ -169,9 +175,27 @@ impl TextBatch {
         }
     }
 
-    /// 清空本帧实例 (字体与图集保留)。
+    /// 清空本帧实例与层标记 (字体与图集保留)。
     pub fn clear(&mut self) {
         self.instances.clear();
+        self.layer_marks.clear();
+    }
+
+    /// 开新层：之后 push 的文本属于新层 (与 RectBatch::push_layer 配对调用)。
+    pub fn push_layer(&mut self) {
+        self.layer_marks.push(self.instances.len());
+    }
+
+    /// 逐层实例区间 (恒 ≥1 段; 未 push_layer 时为单层全量)。
+    pub fn layer_spans(&self) -> Vec<Range<usize>> {
+        let mut spans = Vec::with_capacity(self.layer_marks.len() + 1);
+        let mut start = 0;
+        for &mark in &self.layer_marks {
+            spans.push(start..mark);
+            start = mark;
+        }
+        spans.push(start..self.instances.len());
+        spans
     }
 
     /// 实例数量。
@@ -416,7 +440,8 @@ impl TextPipeline {
         self.capacity = new_capacity;
     }
 
-    /// 在已有内容的画面上叠加绘制文本 (LoadOp::Load, 不清屏)。
+    /// 在已有内容的画面上叠加绘制文本区间 (LoadOp::Load, 不清屏)。
+    /// 空区间只同步图集, 不开 pass。
     pub fn draw(
         &mut self,
         device: &wgpu::Device,
@@ -424,18 +449,19 @@ impl TextPipeline {
         encoder: &mut wgpu::CommandEncoder,
         target: &DrawTarget,
         batch: &mut TextBatch,
+        span: Range<usize>,
     ) {
         self.sync_atlas(queue, batch);
-        if batch.is_empty() {
+        if span.is_empty() {
             return;
         }
         let data = [target.width, target.height, 0.0, 0.0];
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::cast_slice(&data));
-        self.ensure_capacity(device, batch.len());
+        self.ensure_capacity(device, span.len());
         queue.write_buffer(
             &self.instance_buf,
             0,
-            bytemuck::cast_slice(&batch.instances),
+            bytemuck::cast_slice(&batch.instances[span.clone()]),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -458,7 +484,7 @@ impl TextPipeline {
         pass.set_bind_group(0, &self.uniform_bind, &[]);
         pass.set_bind_group(1, &self.atlas_bind, &[]);
         pass.set_vertex_buffer(0, self.instance_buf.slice(..));
-        pass.draw(0..6, 0..batch.len() as u32);
+        pass.draw(0..6, 0..span.len() as u32);
     }
 }
 
@@ -482,6 +508,19 @@ mod tests {
         batch.push_clip(Rect::from_xywh(0.0, 0.0, 100.0, 100.0));
         batch.push_text("A", 0.0, 20.0, 16, Color::BLACK);
         assert!(!batch.is_empty());
+    }
+
+    #[test]
+    fn layer_spans_and_clear_resets() {
+        let mut batch = TextBatch::new();
+        batch.push_text("A", 0.0, 20.0, 16, Color::BLACK);
+        let n1 = batch.len();
+        batch.push_layer();
+        batch.push_text("B", 0.0, 20.0, 16, Color::BLACK);
+        let n2 = batch.len();
+        assert_eq!(batch.layer_spans(), vec![0..n1, n1..n2], "两层分段");
+        batch.clear();
+        assert_eq!(batch.layer_spans(), vec![0..0], "clear 后回归单层空段");
     }
 
     #[test]

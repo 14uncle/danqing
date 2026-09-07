@@ -226,7 +226,8 @@ impl Context {
         }
     }
 
-    /// 渲染一帧：背景图 (如有) → 矩形 pass → 文本 pass → 图像 pass。
+    /// 渲染一帧：背景图 (如有) → 逐层交替 (矩形 pass → 文本 pass) → 图像 pass。
+    /// 批次内经 push_layer 分层的部分, 高层矩形盖住低层文本 (弹层/卡片场景)。
     /// 返回 false 表示出现致命错误，应退出。
     pub fn render(
         &mut self,
@@ -279,16 +280,33 @@ impl Context {
                 bg.draw(&self.queue, &mut encoder, &target);
             }
         }
-        self.rect_pipeline.draw(
-            &self.device,
-            &self.queue,
-            &mut encoder,
-            &target,
-            rects,
-            !has_background,
-        );
-        self.text_pipeline
-            .draw(&self.device, &self.queue, &mut encoder, &target, texts);
+        // 逐层交替: 每层 矩形→文本, 高层盖低层; 清屏只在第一层
+        let rect_spans = rects.layer_spans();
+        let text_spans = texts.layer_spans();
+        let layers = rect_spans.len().max(text_spans.len());
+        for layer in 0..layers {
+            let clear = layer == 0 && !has_background;
+            let rect_span = rect_spans.get(layer).cloned().unwrap_or(0..0);
+            self.rect_pipeline.draw(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &target,
+                rects,
+                rect_span,
+                clear,
+            );
+            if let Some(text_span) = text_spans.get(layer) {
+                self.text_pipeline.draw(
+                    &self.device,
+                    &self.queue,
+                    &mut encoder,
+                    &target,
+                    texts,
+                    text_span.clone(),
+                );
+            }
+        }
         // 图像纹理 pass
         if !images.is_empty() {
             self.image_pipeline

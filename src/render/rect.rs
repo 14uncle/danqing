@@ -6,6 +6,8 @@
 //! 每帧用法：先经 [`RectBatch`] 收集矩形，再由管线一次绘制。
 //! 绘制同时负责以清屏色开始 render pass(每帧第一个 pass)。
 
+use std::ops::Range;
+
 use crate::{Color, Rect};
 
 /// 无裁剪时使用的极大安全矩形 (像素坐标)。
@@ -41,6 +43,9 @@ pub struct RectBatch {
     instances: Vec<RectInstance>,
     /// 裁剪矩形栈;`None` 表示当前裁剪区为空 (完全裁剪)。
     clip_stack: Vec<Option<Rect>>,
+    /// 层边界: 每次 push_layer 记录当时实例数; 渲染按层分段交替
+    /// (每层 矩形→文本), 高层矩形得以盖住低层文本 (弹层/卡片场景)。
+    layer_marks: Vec<usize>,
 }
 
 impl RectBatch {
@@ -101,6 +106,27 @@ impl RectBatch {
             clip_min,
             clip_max,
         });
+    }
+
+    /// 开新层：之后 push 的矩形属于新层。
+    ///
+    /// 渲染按层序交替 (每层 矩形 pass → 文本 pass), 层号大者后画——
+    /// 弹层/卡片的底矩形因此能盖住底层组件的文本 (同层内文本恒在矩形上,
+    /// 跨层才能打破)。每帧批次重建, 层标记随之清零, 无需配对 pop。
+    pub fn push_layer(&mut self) {
+        self.layer_marks.push(self.instances.len());
+    }
+
+    /// 逐层实例区间 (恒 ≥1 段; 未 push_layer 时为单层全量)。
+    pub fn layer_spans(&self) -> Vec<Range<usize>> {
+        let mut spans = Vec::with_capacity(self.layer_marks.len() + 1);
+        let mut start = 0;
+        for &mark in &self.layer_marks {
+            spans.push(start..mark);
+            start = mark;
+        }
+        spans.push(start..self.instances.len());
+        spans
     }
 
     /// 添加一条沿圆角矩形边框的虚线 (划线 - 空隙式)。
@@ -714,10 +740,11 @@ impl RectPipeline {
         self.capacity = new_capacity;
     }
 
-    /// 开始 render pass 并绘制收集到的全部矩形。
+    /// 开始 render pass 并绘制收集到的矩形区间 (分层渲染的一段)。
     ///
     /// `clear` 为 true 时以 `target.clear_color` 清屏; 为 false 时保留已有内容，
-    /// 用于背景图已绘制的情况。
+    /// 用于背景图已绘制或后续层叠加的情况。空区间且不清屏时整个 pass 跳过。
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         device: &wgpu::Device,
@@ -725,15 +752,19 @@ impl RectPipeline {
         encoder: &mut wgpu::CommandEncoder,
         target: &DrawTarget,
         batch: &RectBatch,
+        span: Range<usize>,
         clear: bool,
     ) {
+        if span.is_empty() && !clear {
+            return;
+        }
         self.write_screen_uniform(queue, target.width, target.height);
-        self.ensure_capacity(device, batch.len());
-        if !batch.is_empty() {
+        self.ensure_capacity(device, span.len());
+        if !span.is_empty() {
             queue.write_buffer(
                 &self.instance_buf,
                 0,
-                bytemuck::cast_slice(&batch.instances),
+                bytemuck::cast_slice(&batch.instances[span.clone()]),
             );
         }
 
@@ -764,11 +795,11 @@ impl RectPipeline {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        if !batch.is_empty() {
+        if !span.is_empty() {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_vertex_buffer(0, self.instance_buf.slice(..));
-            pass.draw(0..6, 0..batch.len() as u32);
+            pass.draw(0..6, 0..span.len() as u32);
         }
     }
 }
@@ -794,6 +825,22 @@ mod tests {
         let mut batch = RectBatch::new();
         batch.push_rect(Rect::from_xywh(0.0, 0.0, 10.0, 10.0), Color::BLACK, 3.0);
         assert_eq!(batch.instance_radii(), vec![[3.0; 4]]);
+    }
+
+    #[test]
+    fn layer_spans_segment_by_push_layer() {
+        // 未分层: 单层全量
+        let mut batch = RectBatch::new();
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 1.0, 1.0), Color::BLACK, 0.0);
+        assert_eq!(batch.layer_spans(), vec![0..1]);
+        // 两层: 层 0 两个实例, 层 1 一个
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 1.0, 1.0), Color::BLACK, 0.0);
+        batch.push_layer();
+        batch.push_rect(Rect::from_xywh(0.0, 0.0, 1.0, 1.0), Color::BLACK, 0.0);
+        assert_eq!(batch.layer_spans(), vec![0..2, 2..3]);
+        // 连续空层保留 (层序对齐文本批次, 空段渲染侧跳过)
+        batch.push_layer();
+        assert_eq!(batch.layer_spans(), vec![0..2, 2..3, 3..3]);
     }
 
     #[test]
