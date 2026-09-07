@@ -742,13 +742,12 @@ fn page_base(t: &LightTheme) -> impl Widget + 'static {
             .child(card(
                 t,
                 "TitleBar 内嵌输入槽",
-                TitleBar::themed(t, "搜索/过滤进标题栏")
-                    .embed(
-                        TextInput::themed(t)
-                            .font_size(t.font_size_body())
-                            .chromeless()
-                            .placeholder("在标题栏内输入...", t.text_secondary()),
-                    ),
+                TitleBar::themed(t, "搜索/过滤进标题栏").embed(
+                    TextInput::themed(t)
+                        .font_size(t.font_size_body())
+                        .chromeless()
+                        .placeholder("在标题栏内输入...", t.text_secondary()),
+                ),
             )),
     )
 }
