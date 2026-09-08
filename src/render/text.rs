@@ -135,8 +135,12 @@ impl TextBatch {
                 continue;
             };
             if info.width > 0 {
-                let gx = pen_x + info.bearing_x as f32;
-                let gy = baseline - info.bearing_y as f32;
+                // 字形落点吸附整数像素: dst 矩形与物理像素格对齐后, 线性采样
+                // 退化为逐纹素取值 —— 分数位置会让每个字形向邻像素渗色,
+                // 小字号正文整片发灰发虚 (与竞品 ClearType 观感的差距主因)。
+                // pen_x 仍按真实 advance 累加, 只吸附落点, 行间/词间距离不变。
+                let gx = (pen_x + info.bearing_x as f32).round();
+                let gy = (baseline - info.bearing_y as f32).round();
                 let glyph_rect =
                     crate::Rect::from_xywh(gx, gy, info.width as f32, info.height as f32);
                 let (clip_min, clip_max) = match self.current_clip() {
@@ -440,30 +444,41 @@ impl TextPipeline {
         self.capacity = new_capacity;
     }
 
-    /// 在已有内容的画面上叠加绘制文本区间 (LoadOp::Load, 不清屏)。
-    /// 空区间只同步图集, 不开 pass。
-    pub fn draw(
+    /// 上传图集脏区 + 整批字形实例 + 屏幕 uniform (每帧一次, 须在 [`Self::draw_span`] 之前)。
+    ///
+    /// 与 RectPipeline::upload 同理: wgpu 的 write_buffer 统一在 submit 的全部
+    /// pass 之前执行, 分层渲染必须整批一次上传、各层只按区间绘制。
+    pub fn upload(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &DrawTarget,
         batch: &mut TextBatch,
-        span: Range<usize>,
+        target: &DrawTarget,
     ) {
         self.sync_atlas(queue, batch);
+        let data = [target.width, target.height, 0.0, 0.0];
+        queue.write_buffer(&self.uniform_buf, 0, bytemuck::cast_slice(&data));
+        self.ensure_capacity(device, batch.instances.len());
+        if !batch.instances.is_empty() {
+            queue.write_buffer(
+                &self.instance_buf,
+                0,
+                bytemuck::cast_slice(&batch.instances),
+            );
+        }
+    }
+
+    /// 在已有内容的画面上叠加绘制批次中的一个字形区间 (LoadOp::Load, 不清屏),
+    /// 须先调用 [`Self::upload`]。空区间直接跳过, 不开 pass。
+    pub fn draw_span(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &DrawTarget,
+        span: Range<usize>,
+    ) {
         if span.is_empty() {
             return;
         }
-        let data = [target.width, target.height, 0.0, 0.0];
-        queue.write_buffer(&self.uniform_buf, 0, bytemuck::cast_slice(&data));
-        self.ensure_capacity(device, span.len());
-        queue.write_buffer(
-            &self.instance_buf,
-            0,
-            bytemuck::cast_slice(&batch.instances[span.clone()]),
-        );
-
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("text pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -484,7 +499,8 @@ impl TextPipeline {
         pass.set_bind_group(0, &self.uniform_bind, &[]);
         pass.set_bind_group(1, &self.atlas_bind, &[]);
         pass.set_vertex_buffer(0, self.instance_buf.slice(..));
-        pass.draw(0..6, 0..span.len() as u32);
+        // 实例顶点属性按 first_instance 偏移取值: 以区间端点为实例范围。
+        pass.draw(0..6, span.start as u32..span.end as u32);
     }
 }
 

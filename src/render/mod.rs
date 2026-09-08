@@ -280,31 +280,30 @@ impl Context {
                 bg.draw(&self.queue, &mut encoder, &target);
             }
         }
-        // 逐层交替: 每层 矩形→文本, 高层盖低层; 清屏只在第一层
+        // 逐层交替: 每层 矩形→文本, 高层盖低层; 清屏只在第一层。
+        // 上传与绘制分离: write_buffer 统一在 submit 的全部 pass 之前执行,
+        // 必须整批一次上传 (逐层上传会被后写覆盖), 各层只按区间绘制。
         let rect_spans = rects.layer_spans();
         let text_spans = texts.layer_spans();
+        debug_assert_eq!(
+            rect_spans.len(),
+            text_spans.len(),
+            "push_layer 需在 RectBatch/TextBatch 配对调用: 漏压一侧会静默错乱 \
+             (浮层文字滞留在低层, 被浮层自己的矩形盖住)"
+        );
+        self.rect_pipeline
+            .upload(&self.device, &self.queue, rects, &target);
+        self.text_pipeline
+            .upload(&self.device, &self.queue, texts, &target);
         let layers = rect_spans.len().max(text_spans.len());
         for layer in 0..layers {
             let clear = layer == 0 && !has_background;
             let rect_span = rect_spans.get(layer).cloned().unwrap_or(0..0);
-            self.rect_pipeline.draw(
-                &self.device,
-                &self.queue,
-                &mut encoder,
-                &target,
-                rects,
-                rect_span,
-                clear,
-            );
+            self.rect_pipeline
+                .draw_span(&mut encoder, &target, rect_span, clear);
             if let Some(text_span) = text_spans.get(layer) {
-                self.text_pipeline.draw(
-                    &self.device,
-                    &self.queue,
-                    &mut encoder,
-                    &target,
-                    texts,
-                    text_span.clone(),
-                );
+                self.text_pipeline
+                    .draw_span(&mut encoder, &target, text_span.clone());
             }
         }
         // 图像纹理 pass

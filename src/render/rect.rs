@@ -740,34 +740,43 @@ impl RectPipeline {
         self.capacity = new_capacity;
     }
 
-    /// 开始 render pass 并绘制收集到的矩形区间 (分层渲染的一段)。
+    /// 上传整批实例与屏幕尺寸 uniform (每帧一次, 须在 [`Self::draw_span`] 之前)。
     ///
-    /// `clear` 为 true 时以 `target.clear_color` 清屏; 为 false 时保留已有内容，
-    /// 用于背景图已绘制或后续层叠加的情况。空区间且不清屏时整个 pass 跳过。
-    #[allow(clippy::too_many_arguments)]
-    pub fn draw(
+    /// wgpu 的 write_buffer 统一在 submit 的全部 pass 之前执行: 分层渲染若逐层
+    /// 上传, 后写会覆盖先写、低层 pass 读到高层数据 (评审实锤的 Critical)。
+    /// 因此上传与绘制分离 —— 整批一次上传, 各层只按区间绘制。
+    pub fn upload(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        batch: &RectBatch,
+        target: &DrawTarget,
+    ) {
+        self.write_screen_uniform(queue, target.width, target.height);
+        self.ensure_capacity(device, batch.instances.len());
+        if !batch.instances.is_empty() {
+            queue.write_buffer(
+                &self.instance_buf,
+                0,
+                bytemuck::cast_slice(&batch.instances),
+            );
+        }
+    }
+
+    /// 绘制批次中的一个实例区间 (分层渲染的一段), 须先调用 [`Self::upload`]。
+    ///
+    /// `clear` 为 true 时以 `target.clear_color` 清屏; 为 false 时保留已有内容，
+    /// 用于背景图已绘制或后续层叠加的情况。空区间且不清屏时整个 pass 跳过。
+    pub fn draw_span(
+        &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &DrawTarget,
-        batch: &RectBatch,
         span: Range<usize>,
         clear: bool,
     ) {
         if span.is_empty() && !clear {
             return;
         }
-        self.write_screen_uniform(queue, target.width, target.height);
-        self.ensure_capacity(device, span.len());
-        if !span.is_empty() {
-            queue.write_buffer(
-                &self.instance_buf,
-                0,
-                bytemuck::cast_slice(&batch.instances[span.clone()]),
-            );
-        }
-
         let load = if clear {
             wgpu::LoadOp::Clear(wgpu::Color {
                 r: f64::from(target.clear_color.r),
@@ -799,7 +808,9 @@ impl RectPipeline {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_vertex_buffer(0, self.instance_buf.slice(..));
-            pass.draw(0..6, 0..span.len() as u32);
+            // 实例顶点属性按 first_instance 偏移取值 (WGSL 未用 instance_index):
+            // 直接以区间端点为实例范围, 读各自槽位, 与上传整批一一对应。
+            pass.draw(0..6, span.start as u32..span.end as u32);
         }
     }
 }
