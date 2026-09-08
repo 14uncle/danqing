@@ -709,6 +709,98 @@ impl Widget for Positioned {
     }
 }
 
+/// 渲染分层演示: 底层文字 + 高层浮层卡 (RectBatch/TextBatch::push_layer)。
+///
+/// 验收点两个: ① 浮层卡必须盖住其下的底层文字 (矩形/文本分批次渲染下同层
+/// 文本恒在矩形之上, 遮盖只能靠分层); ② 浮层之外的底层文字与斑马底必须
+/// 完整 (wgpu 的 write_buffer 统一在 submit 的全部 pass 之前执行, 实现若
+/// 退化为逐层上传, 底层实例序列头部会被高层数据顶掉 —— 本页让这类缺损
+/// 肉眼可见)。
+struct LayerDemo {
+    accent: Color,
+    text: Color,
+    zebra: Color,
+}
+
+impl LayerDemo {
+    fn new() -> Self {
+        let t = theme();
+        Self {
+            accent: t.accent(),
+            text: t.text_primary(),
+            zebra: Color::rgba(0.0, 0.0, 0.0, 0.05),
+        }
+    }
+}
+
+impl Widget for LayerDemo {
+    fn sync(&mut self, _state: &dyn std::any::Any) {}
+
+    fn layout(
+        &mut self,
+        constraints: danqing::Constraints,
+        _texts: &mut danqing::TextBatch,
+    ) -> Size {
+        Size::new(constraints.max().width, 120.0)
+    }
+
+    fn paint(&self, area: Rect, rects: &mut danqing::RectBatch, texts: &mut danqing::TextBatch) {
+        const PX: u16 = 14;
+        let x = area.origin.x;
+        let w = area.size.width;
+        // ── 层 0: 三行文字, 中行垫斑马底 ──
+        for (i, line) in [
+            "分层之前的文字: 同层文本恒在矩形之上",
+            "浮层盖不住我, 除非开新层",
+            "高层矩形盖低层文本, 本层完整",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let row_y = area.origin.y + 8.0 + i as f32 * 36.0;
+            if i == 1 {
+                rects.push_rect(Rect::from_xywh(x, row_y - 4.0, w, 28.0), self.zebra, 4.0);
+            }
+            texts.push_text(
+                line,
+                x + 8.0,
+                row_y + texts.ascent(f32::from(PX)),
+                PX,
+                self.text,
+            );
+        }
+        // ── 层 1: 浮层卡 (白底 + 玉色描边) 压住中行 ──
+        rects.push_layer();
+        texts.push_layer();
+        let card = Rect::from_xywh(x + w / 2.0 - 110.0, area.origin.y + 30.0, 220.0, 52.0);
+        rects.push_rect(card, self.accent, 8.0);
+        rects.push_rect(card.inset(1.5), Color::WHITE, 7.0);
+        let label = "浮层 (layer 1)";
+        let lw = texts.measure(label, PX);
+        texts.push_text(
+            label,
+            card.origin.x + (card.size.width - lw) / 2.0,
+            card.origin.y
+                + (card.size.height - texts.line_height(f32::from(PX))) / 2.0
+                + texts.ascent(f32::from(PX)),
+            PX,
+            self.accent,
+        );
+    }
+
+    fn event(&mut self, _event: &Event, _area: Rect, _msgs: &mut MsgQueue) -> EventResult {
+        EventResult::Ignored
+    }
+
+    fn children(&self) -> &[Node] {
+        &[]
+    }
+
+    fn children_mut(&mut self) -> &mut [Node] {
+        &mut []
+    }
+}
+
 /// 页面包装：Scrollable + Padding + 页标题 + 内容。
 fn page(t: &LightTheme, heading: &str, content: impl Widget + 'static) -> impl Widget + 'static {
     Scrollable::themed(
@@ -739,6 +831,7 @@ fn page_base(t: &LightTheme) -> impl Widget + 'static {
             .cross_stretch()
             .child(card(t, "按钮与计数", counter_row(t)))
             .child(card(t, "Image 组件", ImageDemo::new()))
+            .child(card(t, "渲染分层 (push_layer)", LayerDemo::new()))
             .child(card(
                 t,
                 "TitleBar 内嵌输入槽",
