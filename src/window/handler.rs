@@ -103,6 +103,9 @@ pub(super) struct Handler<'a, A: App> {
     /// 热键主键吞键守卫 (热键触发时置入, 主键抬起 / 失焦时清除)。
     /// 详见 [`hotkey_swallow_filter`]。
     swallow_hotkey_key: Option<KeyCode>,
+    /// 指针捕获: 最近一次被组件消费的按下坐标; 配对抬起重定向到该坐标
+    /// (按下态不泄漏, 见 [`pointer_capture`])。
+    mouse_capture: Option<Point>,
     /// 图像纹理收集器 (每帧清空，paint 阶段填充)。
     images: ImageBatch,
     /// ── Adaptive 帧率治理状态 (仅 WindowMode::Adaptive 使用) ──
@@ -165,6 +168,7 @@ impl<'a, A: App> Handler<'a, A> {
             has_os_focus: false,
             last_real_size: PhysicalSize::new(0, 0),
             swallow_hotkey_key: None,
+            mouse_capture: None,
             images: ImageBatch::new(),
             frame_rate: super::frame_budget::FrameRate::Full,
             last_activity: boot,
@@ -186,6 +190,38 @@ use super::{CloseBehavior, WindowConfig};
 /// (此时 `has_os_focus == false`); 用户主动遍历只发生在持有 OS 焦点期间。
 fn tab_traverse_allowed(has_os_focus: bool) -> bool {
     has_os_focus
+}
+
+/// 焦点组件未消费的按下事件是否回退应用层。
+///
+/// 组件已消费必不回退 (防 TextInput 处理过的字符重复到达 app.event);
+/// 未消费时由应用经 [`crate::App::propagate_unhandled_keys`] opt-in 决定,
+/// 默认关 = 既有应用零波及。用途: 大面积只读组件 (如日志查看器) 持焦后,
+/// 应用级导航键 (j/k/翻页) 不失灵。
+fn key_falls_back_to_app(consumed: bool, propagate: bool) -> bool {
+    !consumed && propagate
+}
+
+/// 指针捕获配对: 返回 (新捕获态, 抬起重定向坐标)。
+///
+/// 消费了按下的组件必须收到配对抬起 —— MouseInput 按位置命中分发,
+/// 抬起落在其他区域 (拖出组件/窗外释放) 时按下组件永远收不到,
+/// 按下态泄漏 (danqing-log 框选粘滞, 2026-09-08 评审 R1)。
+/// 实现 = 捕获「按下坐标」, 抬起时重定向回该坐标 (同坐标 = 同命中路径,
+/// 布局在按下-抬起间剧变的极端情形属可接受近似)。
+fn pointer_capture(
+    capture: Option<Point>,
+    pressed: bool,
+    consumed: bool,
+    pos: Point,
+) -> (Option<Point>, Option<Point>) {
+    if pressed {
+        // 已消费按下才捕获 (未消费 = 树无人认领, 无配对义务);
+        // 捕获存续期的新按下不覆盖 (多键同按的罕见情形, 先按先配)。
+        (if consumed { Some(pos) } else { capture }, None)
+    } else {
+        (None, capture)
+    }
 }
 
 /// Windows 虚拟键码 → winit KeyCode (仅覆盖字母与数字键; 其他键不吞, 返回 None)。
@@ -423,7 +459,16 @@ impl<A: App> Handler<'_, A> {
                     }
                     _ => {}
                 }
-                event_at_path(&mut self.tree, &path, event, self.root_area, &mut self.msgs);
+                let result =
+                    event_at_path(&mut self.tree, &path, event, self.root_area, &mut self.msgs);
+                // 焦点组件未消费且应用 opt-in 开启时回退应用层
+                // (大面积只读组件持焦后, 应用级导航键不失灵)。
+                if key_falls_back_to_app(
+                    result == crate::widget::EventResult::Consumed,
+                    self.app.propagate_unhandled_keys(),
+                ) {
+                    self.app.event(event);
+                }
             }
             Event::Ime(_) => {
                 event_at_path(&mut self.tree, &path, event, self.root_area, &mut self.msgs);
@@ -839,6 +884,27 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             // 鼠标事件
             if let Some(internal) = convert_event(&event, self.cursor, self.modifiers) {
                 Self::note_activity(self.config.mode, &mut self.last_activity);
+                // 指针捕获配对: 抬起重定向到捕获的按下坐标, 保证消费按下的
+                // 组件收到配对抬起 (按下态不泄漏; 布局剧变属可接受近似)
+                let mut internal = internal;
+                if let Event::MouseInput {
+                    pressed: false,
+                    position,
+                    button,
+                } = internal
+                {
+                    let (cap, redirect) =
+                        pointer_capture(self.mouse_capture, false, false, position);
+                    self.mouse_capture = cap;
+                    if let Some(p) = redirect {
+                        // 同参数仅换坐标: 抬起重定向回捕获的按下位置
+                        internal = Event::MouseInput {
+                            button,
+                            pressed: false,
+                            position: p,
+                        };
+                    }
+                }
                 let result = self.tree.event(&internal, self.root_area, &mut self.msgs);
                 if let Event::MouseInput {
                     pressed: true,
@@ -846,6 +912,13 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     ..
                 } = &internal
                 {
+                    let (cap, _) = pointer_capture(
+                        self.mouse_capture,
+                        true,
+                        result == crate::widget::EventResult::Consumed,
+                        *position,
+                    );
+                    self.mouse_capture = cap;
                     let prev = self.focus.current().map(|p| p.to_vec());
                     self.focus.set_by_click(&self.tree, *position);
                     let curr = self.focus.current().map(|p| p.to_vec());
@@ -1297,7 +1370,11 @@ impl<A: App> Handler<'_, A> {
 #[cfg(test)]
 mod tests {
     use super::super::WindowMode;
-    use super::{hotkey_swallow_filter, tab_traverse_allowed, vk_to_key_code};
+    use super::{
+        hotkey_swallow_filter, key_falls_back_to_app, pointer_capture, tab_traverse_allowed,
+        vk_to_key_code,
+    };
+    use crate::Point;
     use winit::event::ElementState;
     use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -1369,6 +1446,63 @@ mod tests {
     fn tab_with_os_focus_traverses() {
         // 持有 OS 焦点期间的 Tab 是用户主动遍历, 必须放行。
         assert!(tab_traverse_allowed(true));
+    }
+
+    /// 组件已消费的键永不回退应用层 —— 否则 TextInput 处理过的字符
+    /// 会重复到达 app.event (双触发)。开关状态无关。
+    #[test]
+    fn consumed_key_never_falls_back() {
+        assert!(!key_falls_back_to_app(true, true));
+        assert!(!key_falls_back_to_app(true, false));
+    }
+
+    /// 未消费 + 应用 opt-in 开启 = 回退 (日志查看器 LogView 持焦后
+    /// j/k/翻页等应用级导航键不失灵, 2026-09-08 文本选区特性引入)。
+    #[test]
+    fn unconsumed_key_falls_back_when_propagate_enabled() {
+        assert!(key_falls_back_to_app(false, true));
+    }
+
+    /// 未消费 + 默认关闭 = 维持现状丢弃, 既有应用零波及。
+    #[test]
+    fn unconsumed_key_dropped_by_default() {
+        assert!(!key_falls_back_to_app(false, false));
+    }
+
+    /// 按下被消费 → 记入捕获 (配对抬起的重定向坐标)。
+    /// 日志视图框选粘滞根因修复 (2026-09-08 R1): 抬起落在其他区域时
+    /// 按下组件收不到配对事件, 按下态泄漏。
+    #[test]
+    fn consumed_press_captures_position() {
+        let p = Point::new(10.0, 20.0);
+        let (cap, redirect) = pointer_capture(None, true, true, p);
+        assert_eq!(cap, Some(p));
+        assert_eq!(redirect, None);
+    }
+
+    /// 按下未消费 → 不产生捕获 (树无人认领, 无配对义务)。
+    #[test]
+    fn unconsumed_press_does_not_capture() {
+        let p = Point::new(10.0, 20.0);
+        let (cap, _) = pointer_capture(None, true, false, p);
+        assert_eq!(cap, None);
+    }
+
+    /// 抬起 → 取出捕获坐标作为重定向目标, 捕获清零 (一次性配对)。
+    #[test]
+    fn release_redirects_to_captured_press_position() {
+        let p = Point::new(10.0, 20.0);
+        let (cap, redirect) = pointer_capture(Some(p), false, false, Point::new(999.0, 999.0));
+        assert_eq!(cap, None);
+        assert_eq!(redirect, Some(p));
+    }
+
+    /// 无捕获的抬起 → 不重定向 (正常按位置分发)。
+    #[test]
+    fn release_without_capture_passes_through() {
+        let (cap, redirect) = pointer_capture(None, false, false, Point::new(1.0, 1.0));
+        assert_eq!(cap, None);
+        assert_eq!(redirect, None);
     }
 
     /// 按需渲染模式: 隐藏态应使用 Wait (零唤醒)。
