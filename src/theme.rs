@@ -264,7 +264,7 @@ impl Theme for LightTheme {
     }
 
     fn font_size_body(&self) -> u16 {
-        16
+        15
     }
 
     fn font_size_heading(&self) -> u16 {
