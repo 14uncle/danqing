@@ -975,15 +975,15 @@ impl Widget for TitleBar {
                 let x = logo_rect.origin.x;
                 let y = logo_rect.origin.y;
                 let s = logo_size;
-                let accent = BRAND_JADE;
+                let jade = BRAND_JADE;
 
-                // 外框窗口: accent 圆角矩形, 几何居中 (SVG 28..228 / 48..208)。
+                // 外框窗口: 玉色圆角矩形, 几何居中 (SVG 28..228 / 48..208)。
                 let wx0 = s * 0.109;
                 let wy0 = s * 0.1875;
                 let ww = s * 0.781;
                 let wh = s * 0.625;
                 let wr = s * 0.109;
-                rects.push_rect(Rect::from_xywh(x + wx0, y + wy0, ww, wh), accent, wr);
+                rects.push_rect(Rect::from_xywh(x + wx0, y + wy0, ww, wh), jade, wr);
 
                 // 玻璃内填 (SVG inset 20/256): 形成描边环效果。
                 let gi = s * 0.078;
@@ -999,9 +999,9 @@ impl Widget for TitleBar {
                 let bh = s * (16.0 / 256.0);
                 let br = bh / 2.0;
                 let rows: [(f32, f32, Color); 4] = [
-                    (72.0, 120.0, accent),
-                    (104.0, 82.0, accent),
-                    (136.0, 130.0, accent),
+                    (72.0, 120.0, jade),
+                    (104.0, 82.0, jade),
+                    (136.0, 130.0, jade),
                     (168.0, 138.0, self.logo_dot_color),
                 ];
                 for (y0, w0, color) in rows {
