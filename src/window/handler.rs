@@ -774,6 +774,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // maximized (那会让窗口在 GPU 初始化期间全屏白屏)。最大化过程有内容, 无白屏。
         if self.config.maximized {
             window.set_maximized(true);
+            // 同步通知应用层 (与 MaximizeOrRestore/maximize_window 两路径一致):
+            // 漏掉则 TitleBar 最大化图标停在 □, 与真实最大化状态相反。
+            self.app.maximized_changed(true);
         }
         log::info!("窗口已显示");
         // 初始可见性同步: visibility_changed 的契约是「可见性变化后必回调」,
