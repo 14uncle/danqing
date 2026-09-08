@@ -28,12 +28,17 @@ pub enum Easing {
     Linear,
     /// 缓入缓出。
     EaseInOut,
+    /// 三次缓入 (起手慢、收尾快): 适合淡出/离场。
+    EaseIn,
+    /// 三次缓出 (起手快、收尾慢): 适合淡入/进场。
+    EaseOut,
 }
 
 impl Easing {
     /// 对进度 `t` 求值 (输入输出均夹到 0..1)。
     ///
     /// `EaseInOut` 采用三次缓入缓出：两端平缓、中段陡峭。
+    /// `EaseIn` = t³; `EaseOut` = 1-(1-t)³。
     pub fn eval(self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);
         match self {
@@ -45,6 +50,8 @@ impl Easing {
                     1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
                 }
             }
+            Self::EaseIn => t.powi(3),
+            Self::EaseOut => 1.0 - (1.0 - t).powi(3),
         }
     }
 }
@@ -594,6 +601,48 @@ mod tests {
     fn light_theme_implements_theme() {
         fn assert_theme<T: Theme>() {}
         assert_theme::<LightTheme>();
+    }
+
+    #[test]
+    fn easing_endpoints_are_exact() {
+        // 端点精确: 所有曲线 eval(0)=0, eval(1)=1 (动画首尾帧不漂移)。
+        for e in [
+            Easing::Linear,
+            Easing::EaseInOut,
+            Easing::EaseIn,
+            Easing::EaseOut,
+        ] {
+            assert_eq!(e.eval(0.0), 0.0, "{e:?} 起点");
+            assert_eq!(e.eval(1.0), 1.0, "{e:?} 终点");
+        }
+    }
+
+    #[test]
+    fn easing_is_monotonic() {
+        // 单调不减: 动画不倒退 (步进扫描, 允许浮点等值)。
+        for e in [
+            Easing::Linear,
+            Easing::EaseInOut,
+            Easing::EaseIn,
+            Easing::EaseOut,
+        ] {
+            let mut prev = e.eval(0.0);
+            for i in 1..=100 {
+                let cur = e.eval(i as f32 / 100.0);
+                assert!(cur >= prev, "{e:?} 在 {i}/100 处倒退: {prev} -> {cur}");
+                prev = cur;
+            }
+        }
+    }
+
+    #[test]
+    fn ease_in_out_midpoint_direction() {
+        // 中点方向性: 缓入中点低于线性 (起手慢), 缓出中点高于线性 (收尾慢)。
+        assert!(Easing::EaseIn.eval(0.5) < 0.5);
+        assert!(Easing::EaseOut.eval(0.5) > 0.5);
+        // 与 pomodoro hint.rs 私有实现语义对齐: 三次方曲线。
+        assert!((Easing::EaseIn.eval(0.5) - 0.125).abs() < 1e-6);
+        assert!((Easing::EaseOut.eval(0.5) - 0.875).abs() < 1e-6);
     }
 
     #[test]

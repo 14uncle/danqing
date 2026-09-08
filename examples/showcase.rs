@@ -19,8 +19,8 @@ use danqing::widget::{
     TitleBar, Widget,
 };
 use danqing::{
-    App, BackgroundConfig, Color, Event, GlobalHotkey, Key, LightTheme, NamedKey, Point, Rect,
-    ScaleMode, Size, Theme, WindowAction, WindowEventSender,
+    App, BackgroundConfig, Color, Crossfade, Easing, Event, GlobalHotkey, Key, LightTheme,
+    NamedKey, Point, Pulse, Rect, ScaleMode, Size, Theme, Tween, WindowAction, WindowEventSender,
 };
 /// 键盘移动方块的区域尺寸。
 const KEYBOARD_AREA: Size = Size::new(300.0, 180.0);
@@ -86,6 +86,20 @@ struct Showcase {
     last_elapsed: std::time::Duration,
     /// 伸手仲裁演示: 最近一次手势协议消息 ("未按" / "已按住" / "已撤防")。
     reach_state: String,
+    /// 动画原语演示: 补间 (目标由按钮翻转)。
+    anim_tween: Tween,
+    /// 动画原语演示: 补间目标 (0/1 交替)。
+    anim_tween_target: f32,
+    /// 动画原语演示: 补间当前值 (tick 推进)。
+    anim_tween_value: f32,
+    /// 动画原语演示: 一次性脉冲。
+    anim_pulse: Pulse,
+    /// 动画原语演示: 脉冲当前 alpha (tick 推进; None = 未激活/已结束)。
+    anim_pulse_alpha: Option<f32>,
+    /// 动画原语演示: 两态交叉淡化。
+    anim_cross: Crossfade,
+    /// 动画原语演示: 淡化最近帧文本 (tick 推进)。
+    anim_cross_text: String,
 }
 
 /// 应用消息。
@@ -128,6 +142,12 @@ enum Msg {
     DemoFlash,
     /// 伸手仲裁演示: 按下登记。
     ReachArm,
+    /// 动画原语演示: 触发脉冲。
+    AnimPulseTrigger,
+    /// 动画原语演示: 翻转补间目标。
+    AnimTweenToggle,
+    /// 动画原语演示: 切换淡化状态。
+    AnimCrossSwitch,
     /// 伸手仲裁演示: 撤防 (转拖拽/早抬起)。
     ReachCancel,
 }
@@ -201,6 +221,18 @@ impl App for Showcase {
             }
             Msg::ReachArm => self.reach_state = "已按住 (待产品长按判定)".into(),
             Msg::ReachCancel => self.reach_state = "已撤防 (转拖拽/早抬起)".into(),
+            Msg::AnimPulseTrigger => self.anim_pulse.trigger(self.last_elapsed),
+            Msg::AnimTweenToggle => {
+                self.anim_tween_target = if self.anim_tween_target == 0.0 {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+            Msg::AnimCrossSwitch => {
+                let next = 1 - self.anim_cross.current();
+                self.anim_cross.switch_to(next, self.last_elapsed);
+            }
         }
     }
 
@@ -245,6 +277,11 @@ impl App for Showcase {
                 self.demo_flash_at = None;
             }
         }
+        // 动画原语演示: 三原语经 tick 心跳推进 (时间注入, 不读 wall-clock)。
+        self.anim_tween_value = self.anim_tween.value(ctx.elapsed, self.anim_tween_target);
+        self.anim_pulse_alpha = self.anim_pulse.progress(ctx.elapsed);
+        let (from, to, fade) = self.anim_cross.frame(ctx.elapsed, Easing::EaseInOut);
+        self.anim_cross_text = format!("场景 {from} → {to} · fade {fade:.2}");
     }
 
     fn event(&mut self, event: &Event) {
@@ -994,6 +1031,7 @@ fn page_layout(t: &LightTheme) -> impl Widget + 'static {
             .child(card(t, "DragArea 拖拽层", drag_area_card(t)))
             .child(card(t, "时辰调色 + 双蒙版", tod_card(t)))
             .child(card(t, "音频 (audio)", audio_card(t)))
+            .child(card(t, "动画原语 (anim)", anim_card(t)))
             .child(card(t, "伸手仲裁 ReachArea", reach_area_card(t))),
     )
 }
@@ -1007,6 +1045,53 @@ fn audio_card(t: &LightTheme) -> impl Widget + 'static {
             .color(Color::WHITE),
     )
     .on_click(|| Msg::PlayTestTone)
+}
+
+/// 动画原语演示: Tween / Pulse / Crossfade 经 tick 心跳推进 (以用代测)。
+/// 数值实时回显; 视觉消费实例 = mixer (Tween) 与 switch (Tween)。
+fn anim_card(t: &LightTheme) -> impl Widget + 'static {
+    let label = |text: &'static str| {
+        Text::new(text)
+            .font_size(t.font_size_body())
+            .color(Color::WHITE)
+    };
+    let readout = |f: fn(&Showcase) -> String| {
+        Text::bind(move |s: &Showcase| f(s))
+            .font_size(t.font_size_body())
+            .color(t.text_primary())
+    };
+    Column::new()
+        .gap(t.spacing_sm())
+        .cross_stretch()
+        .child(
+            Row::new()
+                .gap(t.spacing_lg())
+                .cross_center()
+                .child(Button::themed(t, label("翻转补间目标")).on_click(|| Msg::AnimTweenToggle))
+                .child(readout(|s| {
+                    format!(
+                        "Tween 值 {:.2} → 目标 {:.0} (800ms EaseInOut)",
+                        s.anim_tween_value, s.anim_tween_target
+                    )
+                })),
+        )
+        .child(
+            Row::new()
+                .gap(t.spacing_lg())
+                .cross_center()
+                .child(Button::themed(t, label("触发脉冲")).on_click(|| Msg::AnimPulseTrigger))
+                .child(readout(|s| match s.anim_pulse_alpha {
+                    Some(a) => format!("Pulse alpha {a:.2} (600ms 线性衰减)"),
+                    None => "Pulse 未激活/已结束".to_string(),
+                })),
+        )
+        .child(
+            Row::new()
+                .gap(t.spacing_lg())
+                .cross_center()
+                .child(Button::themed(t, label("切换淡化")).on_click(|| Msg::AnimCrossSwitch))
+                .child(readout(|s| s.anim_cross_text.clone())),
+        )
 }
 
 /// 萤火虫演示包络 (8s): 1.5s 淡入 → 保持 → 1.5s 淡出。
@@ -1462,6 +1547,13 @@ fn main() -> anyhow::Result<()> {
         },
         last_elapsed: std::time::Duration::ZERO,
         reach_state: "未按".into(),
+        anim_tween: Tween::new(std::time::Duration::from_millis(800), Easing::EaseInOut),
+        anim_tween_target: 0.0,
+        anim_tween_value: 0.0,
+        anim_pulse: Pulse::default(),
+        anim_pulse_alpha: None,
+        anim_cross: Crossfade::new(0, std::time::Duration::from_millis(800)),
+        anim_cross_text: "场景 0 → 0 · fade 1.00".into(),
     };
 
     let t = theme();

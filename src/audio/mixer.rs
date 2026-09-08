@@ -13,52 +13,30 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use crate::anim::Tween;
+use crate::theme::Easing;
+
 /// 增益包络时长 (淡入/淡出对称; pomodoro 同款 300ms)。
 const ENVELOPE_DURATION: Duration = Duration::from_millis(300);
 
-/// 单声道增益包络: 目标变化触发线性包络, 反向边沿从当前值续接。
+/// 声道状态: 登记目标增益 + 补间包络 (下沉后的 `anim::Tween`)。
 ///
 /// 目标可持续微变 (时辰点缀层增益随时辰曲线逐帧滑动): 每帧微变 =
 /// 300ms 时间常数的平滑跟随器, 无跳变; 目标静止时包络精确到达。
 #[derive(Debug, Clone)]
-struct ChannelEnvelope {
-    /// 包络当前值 (0..1)。
-    current: f32,
+struct Channel {
     /// 产品登记的目标增益 (全局关闭时帧内按 0 覆写, 不改本值)。
     target: f32,
-    /// 进行中的包络动画: (起始值, 目标值, 开始时刻)。
-    anim: Option<(f32, f32, Duration)>,
+    /// 增益补间 (目标变化触发, 反向边沿从当前值续接无跳变)。
+    tween: Tween,
 }
 
-impl ChannelEnvelope {
+impl Channel {
     fn new() -> Self {
         Self {
-            current: 0.0,
             target: 0.0,
-            anim: None,
+            tween: Tween::new(ENVELOPE_DURATION, Easing::Linear),
         }
-    }
-
-    /// 推进包络并返回当前增益。目标变化 (含中途反向) → 从当前值起
-    /// 300ms 线性包络续接; 稳定态精确到达 (无渐近漂移)。
-    fn gain(&mut self, now: Duration, effective_target: f32) -> f32 {
-        let needs_anim = match self.anim {
-            Some((_, tv, _)) => tv != effective_target, // 目标变了 → 重触发
-            None => self.current != effective_target,   // 未到目标 → 触发
-        };
-        if needs_anim {
-            self.anim = Some((self.current, effective_target, now));
-        }
-        if let Some((start_v, target_v, start_t)) = self.anim {
-            let t = (now.saturating_sub(start_t).as_secs_f32() / ENVELOPE_DURATION.as_secs_f32())
-                .clamp(0.0, 1.0);
-            self.current = start_v + (target_v - start_v) * t;
-            if t >= 1.0 {
-                self.anim = None;
-                self.current = target_v;
-            }
-        }
-        self.current
     }
 }
 
@@ -68,7 +46,7 @@ impl ChannelEnvelope {
 /// 声道号升序 (确定性, 回放/日志可比对)。全局开关 `set_enabled(false)`
 /// = 所有声道目标强制 0 (走包络淡出, 非硬切 —— 桌面应用不可有爆音路径)。
 pub struct Mixer {
-    channels: BTreeMap<u32, ChannelEnvelope>,
+    channels: BTreeMap<u32, Channel>,
     enabled: bool,
 }
 
@@ -91,7 +69,7 @@ impl Mixer {
     pub fn set_target(&mut self, channel: u32, gain: f32) {
         self.channels
             .entry(channel)
-            .or_insert_with(ChannelEnvelope::new)
+            .or_insert_with(Channel::new)
             .target = gain.clamp(0.0, 1.0);
     }
 
@@ -99,9 +77,9 @@ impl Mixer {
     pub fn frame_gains(&mut self, now: Duration) -> Vec<(u32, f32)> {
         self.channels
             .iter_mut()
-            .map(|(&id, env)| {
-                let target = if self.enabled { env.target } else { 0.0 };
-                (id, env.gain(now, target))
+            .map(|(&id, ch)| {
+                let target = if self.enabled { ch.target } else { 0.0 };
+                (id, ch.tween.value(now, target))
             })
             .collect()
     }
