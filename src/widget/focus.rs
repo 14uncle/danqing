@@ -184,7 +184,11 @@ impl FocusManager {
     }
 }
 
-/// 命中测试：返回点击位置最上层 (z 序靠后绘制者) 的可聚焦节点路径。
+/// 命中测试：返回点击位置的可聚焦节点路径。
+///
+/// 兄弟重叠时低索引赢 (visit 逆序遍历但逐次覆写 result，
+/// 最终低索引覆盖高索引)。若需高索引优先，可在 visit 中
+/// 找到首个匹配即 return。
 fn hit_focusable(root: &Node, pos: Point) -> Option<FocusPath> {
     let mut result = None;
     let mut path = Vec::new();
@@ -207,7 +211,7 @@ fn visit(
         (None, None) => None,
     };
 
-    // 后绘制者优先：先遍历子节点，再检查自身
+    // 逆序遍历子节点，再检查自身 (兄弟重叠时低索引赢：result 逐次覆写)
     for (i, child) in node.children().iter().enumerate().rev() {
         path.push(i);
         visit(child, path, pos, child_clip, result);
@@ -232,7 +236,7 @@ fn visit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Box as UiBox, Button, Column, Text, node};
+    use crate::widget::{Box as UiBox, Button, Column, Stack, Text, node};
     use crate::{Color, Constraints, Rect, Size};
 
     fn dummy_texts() -> crate::TextBatch {
@@ -496,5 +500,41 @@ mod tests {
         // 点击视口外不应聚焦。
         mgr.set_by_click(&tree, Point::new(50.0, 150.0));
         assert!(mgr.current().is_none());
+    }
+
+    #[test]
+    fn overlapping_siblings_low_index_wins() {
+        // 末写者胜反转：visit 逆序遍历但逐次覆写 result,
+        // 最终低索引覆盖高索引 = 先绘制者赢 (非注释声称的后绘制者优先)。
+        // Overlay 簇C 评审 C2 发现此语义，钉板测试锁定行为。
+        let mut texts = dummy_texts();
+        let mut tree = node(
+            Stack::new()
+                .child(
+                    UiBox::new(Color::TRANSPARENT)
+                        .size(200.0, 200.0)
+                        .child(Button::new(Text::new("A"))),
+                )
+                .child(
+                    UiBox::new(Color::TRANSPARENT)
+                        .size(200.0, 200.0)
+                        .child(Button::new(Text::new("B"))),
+                ),
+        );
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+
+        // 两个按钮完全重叠，点击中心应命中 A（索引 0，低索引赢）。
+        let hit = hit_focusable(&tree, Point::new(50.0, 50.0));
+        assert_eq!(hit, Some(vec![0, 0]), "重叠兄弟应命中先绘制者 (A)");
+
+        // 反向验证：单独只有 B 时命中 B。
+        let mut tree_b_only = node(Stack::new().child(
+            UiBox::new(Color::TRANSPARENT)
+                .size(200.0, 200.0)
+                .child(Button::new(Text::new("B"))),
+        ));
+        tree_b_only.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let hit_b = hit_focusable(&tree_b_only, Point::new(50.0, 50.0));
+        assert_eq!(hit_b, Some(vec![0, 0]), "单个按钮应命中自身");
     }
 }
