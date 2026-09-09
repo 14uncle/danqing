@@ -15,6 +15,9 @@ license = "MIT OR Apache-2.0"
 # 不启用则不拉网络/序列化栈 (`update` 全 optional)。产品显式开启。
 default = []
 update = ["dep:ureq", "dep:serde", "dep:serde_json", "dep:dirs", "dep:open"]
+# 应用持久化核心 (config_dir/atomic_save/load_or_default/DirtyFlag/VersionedDoc)。
+# 产品显式开启; dirs+serde+serde_json 与 update 共享,不重复拉。
+persist = ["dep:dirs", "dep:serde", "dep:serde_json"]
 
 [dependencies]
 winit = "0.30.13"

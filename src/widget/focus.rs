@@ -528,11 +528,13 @@ mod tests {
         assert_eq!(hit, Some(vec![0, 0]), "重叠兄弟应命中先绘制者 (A)");
 
         // 反向验证：单独只有 B 时命中 B。
-        let mut tree_b_only = node(Stack::new().child(
-            UiBox::new(Color::TRANSPARENT)
-                .size(200.0, 200.0)
-                .child(Button::new(Text::new("B"))),
-        ));
+        let mut tree_b_only = node(
+            Stack::new().child(
+                UiBox::new(Color::TRANSPARENT)
+                    .size(200.0, 200.0)
+                    .child(Button::new(Text::new("B"))),
+            ),
+        );
         tree_b_only.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
         let hit_b = hit_focusable(&tree_b_only, Point::new(50.0, 50.0));
         assert_eq!(hit_b, Some(vec![0, 0]), "单个按钮应命中自身");

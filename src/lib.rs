@@ -16,6 +16,10 @@ pub mod event;
 mod job;
 pub mod layout;
 pub mod log;
+/// 应用持久化核心 (config_dir/atomic_save/load_or_default/DirtyFlag/VersionedDoc)。
+/// 仅 `persist` feature 启用: 默认关闭不拉序列化栈, 产品显式开启。
+#[cfg(feature = "persist")]
+pub mod persist;
 mod render;
 mod text;
 pub mod theme;
