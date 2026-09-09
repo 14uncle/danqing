@@ -49,3 +49,12 @@
 
 ### ★ Checkpoint 3: 全量验收
 - [ ] 各仓三件套绿; 分仓分别提交, message 注明关联 danqing 提交
+
+## 交接 (2026-09-09 收工)
+
+- **已提交待 push**: danqing `36c714a` (Esc 事实更正 + 本文件进度), pomodoro `7a0d6ea` (T4, +115/−119)。push 待用户口令, 联动顺序 danqing 先
+- **待人工**: T4 四姿势 (开合/互斥/焦点回归/点面板外不穿透) + CP2 showcase 浮层卡三姿势
+- **T5 闸不变**: log 在途批次 (async-open+text-selection) 提交授权前不动 log
+- **T6**: 待用户裁决动不动 clipboard (日用在用)
+- 衍生挂账: focus.rs visit() 钉板测试立案 / pomodoro license.rs:65 根治裁决
+- 口令坑: pomodoro 纯二进制 crate 无 lib target, 测试用裸 `cargo test` (--lib --tests 会报 no library targets); Bash 工具 cwd 跨调用复位不规律, 每条链显式 cd + pwd 核对
