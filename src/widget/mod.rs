@@ -23,7 +23,7 @@ pub use focus::FocusManager;
 pub use form::{IconInput, Switch, TextArea, TextInput};
 pub use layout::{Box, Center, Column, CrossAlign, DragArea, Padding, ReachArea, Row, Stack};
 pub use title_bar::{LogoKind, TitleBar, TitleBarStyle};
-pub use view::{MultiPanel, ScrollAxis, Scrollable, Tabs};
+pub use view::{MultiPanel, Overlay, ScrollAxis, Scrollable, Tabs};
 
 use std::any::Any;
 

@@ -15,8 +15,8 @@
 
 use danqing::widget::{
     self, Box as UiBox, Button, CloseButton, Column, DragArea, EventResult, IconInput, MsgQueue,
-    MultiPanel, Node, Padding, ReachArea, Row, Scrollable, Switch, Tabs, Text, TextArea, TextInput,
-    TitleBar, Widget,
+    MultiPanel, Node, Overlay, Padding, ReachArea, Row, Scrollable, Stack, Switch, Tabs, Text,
+    TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
     App, AsyncJob, BackgroundConfig, Color, Crossfade, Easing, Event, GlobalHotkey, Key,
@@ -107,6 +107,10 @@ struct Showcase {
     job_demo_status: String,
     /// 异步作业演示: 发起轮次号 (连点演示旧轮丢弃)。
     job_demo_round: u64,
+    /// 模态浮层演示: 浮层开关态。
+    overlay_demo_open: bool,
+    /// 模态浮层演示: 关闭后待回归的焦点锚 (一次性; focus_request/focus_restored)。
+    focus_back: Option<&'static str>,
 }
 
 /// 应用消息。
@@ -159,6 +163,10 @@ enum Msg {
     JobDemoStart,
     /// 异步作业演示: 起 panic 作业 (护栏转 Err, 不卡死)。
     JobDemoPanic,
+    /// 模态浮层演示: 打开浮层。
+    OverlayDemoOpen,
+    /// 模态浮层演示: 关闭浮层 (× / 点遮罩), 焦点回「打开」按钮。
+    OverlayDemoClose,
     /// 伸手仲裁演示: 撤防 (转拖拽/早抬起)。
     ReachCancel,
 }
@@ -263,11 +271,26 @@ impl App for Showcase {
                     || "panic 已被护栏转为 Err (应用不卡 Loading)".to_string(),
                 );
             }
+            Msg::OverlayDemoOpen => self.overlay_demo_open = true,
+            Msg::OverlayDemoClose => {
+                self.overlay_demo_open = false;
+                // 关闭后焦点回「打开」按钮 (App::focus_request 协议演示)。
+                self.focus_back = Some("overlay-demo-open");
+            }
         }
     }
 
     fn view(&self) -> Node {
         build_tree()
+    }
+
+    /// 模态浮层演示: 关闭后焦点回「打开」按钮 (一次性请求, 应用后框架回调清除)。
+    fn focus_request(&self) -> Option<&'static str> {
+        self.focus_back
+    }
+
+    fn focus_restored(&mut self) {
+        self.focus_back = None;
     }
 
     /// 时辰调色演示: 每帧产出背景状态 (场景 0 渐变 / 场景 1 时辰演示图)。
@@ -1070,6 +1093,7 @@ fn page_layout(t: &LightTheme) -> impl Widget + 'static {
             .child(card(t, "音频 (audio)", audio_card(t)))
             .child(card(t, "动画原语 (anim)", anim_card(t)))
             .child(card(t, "异步作业 (job)", job_card(t)))
+            .child(card(t, "模态浮层 (Overlay)", overlay_card(t)))
             .child(card(t, "伸手仲裁 ReachArea", reach_area_card(t))),
     )
 }
@@ -1160,6 +1184,61 @@ fn job_card(t: &LightTheme) -> impl Widget + 'static {
                 .font_size(t.font_size_body())
                 .color(t.text_primary()),
         )
+}
+
+/// 模态浮层演示卡: 打开按钮 (焦点锚)。浮层本体盖在根 Stack 顶 (见 overlay_demo)。
+fn overlay_card(t: &LightTheme) -> impl Widget + 'static {
+    Column::new()
+        .gap(t.spacing_sm())
+        .cross_stretch()
+        .child(
+            Text::new("open 绑定驱动; 点遮罩或 × 关闭; 关闭后焦点回本按钮; 关态时本页全部可点。")
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+        .child(
+            Button::themed(
+                t,
+                Text::new("打开模态浮层")
+                    .font_size(t.font_size_body())
+                    .color(Color::WHITE),
+            )
+            .id("overlay-demo-open")
+            .on_click(|| Msg::OverlayDemoOpen),
+        )
+}
+
+/// 模态浮层演示本体: 盖顶常驻 (根 Stack 末位), open 绑定 + 点遮罩关闭。
+/// 关态零尺寸不拦事件 (反证: 关着时本页按钮照常可点)。
+fn overlay_demo(t: &LightTheme) -> impl Widget + 'static {
+    Overlay::new(
+        UiBox::new(t.surface())
+            .radius(t.radius_lg())
+            .child(Padding::all(
+                t.spacing_xl(),
+                Column::new()
+                    .gap(t.spacing_sm())
+                    .cross_stretch()
+                    .child(
+                        Row::new()
+                            .cross_center()
+                            .child(
+                                Text::new("模态浮层")
+                                    .font_size(t.font_size_heading())
+                                    .color(t.text_primary()),
+                            )
+                            .fill(UiBox::new(Color::TRANSPARENT), 1)
+                            .child(CloseButton::new().on_click(|| Msg::OverlayDemoClose)),
+                    )
+                    .child(
+                        Text::new("scrim 遮罩吞掉底层事件; 卡片自开渲染新层盖住文本。")
+                            .font_size(t.font_size_body())
+                            .color(t.text_primary()),
+                    ),
+            )),
+    )
+    .bind_open(|s: &Showcase| s.overlay_demo_open)
+    .on_scrim_click(|| Msg::OverlayDemoClose)
 }
 
 /// 萤火虫演示包络 (8s): 1.5s 淡入 → 保持 → 1.5s 淡出。
@@ -1548,31 +1627,36 @@ fn sidebar(t: &LightTheme) -> impl Widget + 'static {
 fn build_tree() -> Node {
     let t = theme();
     widget::node(
-        Column::new()
+        Stack::new()
             .child(
-                TitleBar::themed(&t, "danqing 丹青")
-                    .bind_maximized(|s: &Showcase| s.is_maximized)
-                    .on_close(|| WindowAction::Close)
-                    .on_minimize(|| WindowAction::Minimize)
-                    .on_maximize(|| WindowAction::MaximizeOrRestore)
-                    .on_drag(|| WindowAction::Drag),
-            )
-            .fill(
-                Row::new()
-                    .child(Padding::all(t.spacing_lg(), sidebar(&t)))
-                    // 分类面板：四个页面常驻实例化，MultiPanel 只切换可见性。
+                Column::new()
+                    .child(
+                        TitleBar::themed(&t, "danqing 丹青")
+                            .bind_maximized(|s: &Showcase| s.is_maximized)
+                            .on_close(|| WindowAction::Close)
+                            .on_minimize(|| WindowAction::Minimize)
+                            .on_maximize(|| WindowAction::MaximizeOrRestore)
+                            .on_drag(|| WindowAction::Drag),
+                    )
                     .fill(
-                        MultiPanel::new()
-                            .child(page_base(&t))
-                            .child(page_layout(&t))
-                            .child(page_form(&t))
-                            .child(page_nav(&t))
-                            .child(page_view(&t))
-                            .bind(|s: &Showcase| s.selected),
+                        Row::new()
+                            .child(Padding::all(t.spacing_lg(), sidebar(&t)))
+                            // 分类面板：四个页面常驻实例化，MultiPanel 只切换可见性。
+                            .fill(
+                                MultiPanel::new()
+                                    .child(page_base(&t))
+                                    .child(page_layout(&t))
+                                    .child(page_form(&t))
+                                    .child(page_nav(&t))
+                                    .child(page_view(&t))
+                                    .bind(|s: &Showcase| s.selected),
+                                1,
+                            ),
                         1,
                     ),
-                1,
-            ),
+            )
+            // 模态浮层演示: 盖顶 (Stack 末位), open 绑定驱动。
+            .child(overlay_demo(&t)),
     )
 }
 
@@ -1625,6 +1709,8 @@ fn main() -> anyhow::Result<()> {
         job_demo: AsyncJob::new(),
         job_demo_status: "未发起".into(),
         job_demo_round: 0,
+        overlay_demo_open: false,
+        focus_back: None,
     };
 
     let t = theme();
