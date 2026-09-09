@@ -37,10 +37,10 @@
   - 人工四姿势: 开合 / 互斥 / 焦点回归 / 点面板外不穿透底层 (待人工)
   - Files: `src/main.rs` | M | 前提: danqing push (a544cf9 已在远程)
 
-- [ ] **T5: log 迁移** — `SettingsOverlay` 整删 + 本地 `Scrim` 组件删除 → `danqing::Overlay`; Esc 前置关卡 (main.rs:999-1002) 保留; settings_open 绑定直通
-  - Acceptance: 既有测试全绿; SettingsOverlay/Scrim 零残留
-  - 人工两姿势: 设置卡盖表格文本清晰 (push_layer 效应) / Esc 两阶段 (先清焦后关层)
-  - Files: `src/settings.rs`, `src/main.rs` | M | **前提闸: log 在途批次 (async-open+text-selection) 已提交**
+- [x] **T5: log 迁移 ✅ 2026-09-09** — `SettingsOverlay` 整删 + 本地 `Scrim` 组件删除 → `danqing::Overlay::themed(&LightTheme, ...).bind_open(...).on_scrim_click(...)`; Esc 前置关卡 (main.rs:998-1009) 保留; `scrim()` 颜色函数随删; 注释更新
+  - Acceptance: 既有测试全绿 (110 通过); SettingsOverlay/Scrim 零残留 ✅
+  - 人工两姿势: 设置卡盖表格文本清晰 (push_layer 效应) / Esc 两阶段 (先清焦后关层) (待人工)
+  - Files: `src/settings.rs` M, `src/main.rs` M | 前提闸: log 在途批次 (async-open+text-selection) 已提交 ✅
 
 - [ ] **T6: clipboard 迁移** — 设置面板 + 清空确认两处换 Overlay (双层叠加 = z 序验证场)
   - Acceptance: 既有测试全绿; 手写 scrim 两处零残留
@@ -50,11 +50,11 @@
 ### ★ Checkpoint 3: 全量验收
 - [ ] 各仓三件套绿; 分仓分别提交, message 注明关联 danqing 提交
 
-## 交接 (2026-09-09 收工)
+## 交接 (2026-09-09 T5 落地)
 
-- **已提交待 push**: danqing `36c714a` (Esc 事实更正 + 本文件进度), pomodoro `7a0d6ea` (T4, +115/−119)。push 待用户口令, 联动顺序 danqing 先
-- **待人工**: T4 四姿势 (开合/互斥/焦点回归/点面板外不穿透) + CP2 showcase 浮层卡三姿势
-- **T5 闸不变**: log 在途批次 (async-open+text-selection) 提交授权前不动 log
+- **已 push**: danqing `6333ab9`, pomodoro `2b7f256` (T4 联动)
+- **T5 已落地待 push**: log `settings.rs` SettingsOverlay+Scrim → Overlay (110 测试绿)
+- **待人工**: T4 四姿势 + CP2 showcase 三姿势 + T5 两姿势 (设置卡盖表格清晰 / Esc 两阶段)
 - **T6**: 待用户裁决动不动 clipboard (日用在用)
 - 衍生挂账: focus.rs visit() 钉板测试立案 / pomodoro license.rs:65 根治裁决
 - 口令坑: pomodoro 纯二进制 crate 无 lib target, 测试用裸 `cargo test` (--lib --tests 会报 no library targets); Bash 工具 cwd 跨调用复位不规律, 每条链显式 cd + pwd 核对
