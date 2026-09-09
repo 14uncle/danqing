@@ -8,6 +8,7 @@
 //! 约定: 任何一步解析/读写/网络失败都按「无新版」静默处理, 不打扰用户。
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 检查结果缓存新鲜度: 24 小时内不重复发起网络查询。
@@ -128,20 +129,37 @@ pub fn update_action_text() -> &'static str {
     "前往下载"
 }
 
-/// 全局检查结果: 后台线程 [`publish`] 写, UI 线程经 [`current_hint`] 每帧读。
-static CHECK_CACHE: std::sync::Mutex<Option<CheckCache>> = std::sync::Mutex::new(None);
+/// 全局检查结果 (含发布代次): 后台线程 [`publish`] 写, UI 线程经 [`current_hint`] 每帧读。
+static CHECK_CACHE: std::sync::Mutex<(u64, Option<CheckCache>)> = std::sync::Mutex::new((0, None));
+
+/// 代次发行器 (单调递增): spawn_check 入口与无代次 publish 各取一号。
+static GEN: AtomicU64 = AtomicU64::new(0);
 
 /// 发布检查结果 (覆盖式; None = 清空)。锁中毒时放弃本次发布 (不 panic)。
+/// 无代次发布 (产品直调): 恒取最新号, 必然应用。
 pub fn publish(cache: Option<CheckCache>) {
+    publish_with_gen(GEN.fetch_add(1, Ordering::Relaxed) + 1, cache);
+}
+
+/// 带代次发布: 代次闸门拒绝乱序晚到的旧检查, 不得覆盖新代次结果
+/// (盘点簇B 标记的潜在缺口: 裸线程 + 全局缓存无代次防护)。
+fn publish_with_gen(generation: u64, cache: Option<CheckCache>) {
     if let Ok(mut guard) = CHECK_CACHE.lock() {
-        *guard = cache;
+        if accept_gen(guard.0, generation) {
+            *guard = (generation, cache);
+        }
     }
+}
+
+/// 代次闸门: 新代次或同代次 (同轮 spawn_check 的二次发布) 放行; 旧代次 = 乱序晚到, 拒绝。
+fn accept_gen(published: u64, incoming: u64) -> bool {
+    incoming >= published
 }
 
 /// 当前更新提示: 全局缓存 + spec 的当前版本合成, UI 每帧调用。
 /// 返回 Some = 设置按钮亮角标; 无缓存/已最新/版本号解析失败 → None (界面零变化)。
 pub fn current_hint(spec: &UpdateSpec) -> Option<UpdateHint> {
-    update_hint(spec.current_version, CHECK_CACHE.lock().ok()?.as_ref())
+    update_hint(spec.current_version, CHECK_CACHE.lock().ok()?.1.as_ref())
 }
 
 /// 由缓存计算更新提示: 无缓存/已最新/版本追平/解析失败 → None。
@@ -176,12 +194,13 @@ fn now_secs() -> u64 {
 /// 启动更新检查: 读缓存立即发布 (过期缓存经 [`usable_cache`] 版本闸门), 过期/缺失
 /// 才后台线程重查; 成功写缓存并发布, 失败静默 (一行 warn, 本次会话不重试)。
 pub fn spawn_check(spec: UpdateSpec) {
+    let generation = GEN.fetch_add(1, Ordering::Relaxed) + 1;
     let cached = usable_cache(
         cache_path(&spec).and_then(|p| load_cache_from(&p)),
         spec.current_version,
     );
     let fresh = cached.as_ref().is_some_and(|c| c.is_fresh(now_secs()));
-    publish(cached);
+    publish_with_gen(generation, cached);
     if fresh {
         return;
     }
@@ -201,7 +220,7 @@ pub fn spawn_check(spec: UpdateSpec) {
                 }
                 None => log::warn!("配置目录不可得, 更新检查结果不落盘"),
             }
-            publish(Some(cache));
+            publish_with_gen(generation, Some(cache));
         }
         None => log::warn!("更新检查失败, 本次会话不再重试"),
     });
@@ -411,5 +430,16 @@ mod tests {
         assert!(current_hint(&spec).is_some());
         publish(None);
         assert!(current_hint(&spec).is_none());
+    }
+
+    #[test]
+    fn generation_gate_rejects_stale_publish() {
+        // 代次闸门 (簇B 潜在缺口加固): 新代次应用; 同代次二次发布放行
+        // (spawn_check 的缓存直发 + 网络回写同号); 旧代次乱序晚到拒绝。
+        // 只测纯函数: 全局静态 (CHECK_CACHE/GEN) 的集成测试会与
+        // current_hint_reflects_published_cache 并行互踩; 接线仅 3 行, 由评审覆盖。
+        assert!(accept_gen(0, 1), "新代次应用");
+        assert!(accept_gen(5, 5), "同代次二次发布放行");
+        assert!(!accept_gen(5, 4), "旧代次乱序晚到拒绝");
     }
 }

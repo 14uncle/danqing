@@ -13,6 +13,7 @@ mod app;
 pub mod asset;
 pub mod audio;
 pub mod event;
+mod job;
 pub mod layout;
 pub mod log;
 mod render;
@@ -28,6 +29,7 @@ mod window;
 pub use anim::{Crossfade, Cue, CueTiming, Pulse, Tween};
 pub use app::{AnimationCtx, App};
 pub use event::{Event, ImeEvent, Key, MouseButton, NamedKey, WindowAction};
+pub use job::{AsyncJob, CancelFlag, CancelToken, SearchNav};
 pub use layout::{Color, Constraints, Edges, FlowChild, Point, Rect, Size, distribute};
 pub use render::{
     BackgroundConfig, BackgroundFrame, Context as RenderContext, ImageBatch, RectBatch,

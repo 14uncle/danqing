@@ -19,8 +19,9 @@ use danqing::widget::{
     TitleBar, Widget,
 };
 use danqing::{
-    App, BackgroundConfig, Color, Crossfade, Easing, Event, GlobalHotkey, Key, LightTheme,
-    NamedKey, Point, Pulse, Rect, ScaleMode, Size, Theme, Tween, WindowAction, WindowEventSender,
+    App, AsyncJob, BackgroundConfig, Color, Crossfade, Easing, Event, GlobalHotkey, Key,
+    LightTheme, NamedKey, Point, Pulse, Rect, ScaleMode, Size, Theme, Tween, WindowAction,
+    WindowEventSender,
 };
 /// 键盘移动方块的区域尺寸。
 const KEYBOARD_AREA: Size = Size::new(300.0, 180.0);
@@ -100,6 +101,12 @@ struct Showcase {
     anim_cross: Crossfade,
     /// 动画原语演示: 淡化最近帧文本 (tick 推进)。
     anim_cross_text: String,
+    /// 异步作业演示: 作业本体 (代次防乱序 + panic 护栏)。
+    job_demo: AsyncJob<Result<String, String>>,
+    /// 异步作业演示: 状态回显文本。
+    job_demo_status: String,
+    /// 异步作业演示: 发起轮次号 (连点演示旧轮丢弃)。
+    job_demo_round: u64,
 }
 
 /// 应用消息。
@@ -148,6 +155,10 @@ enum Msg {
     AnimTweenToggle,
     /// 动画原语演示: 切换淡化状态。
     AnimCrossSwitch,
+    /// 异步作业演示: 起 300ms 假作业 (连点演示旧轮丢弃)。
+    JobDemoStart,
+    /// 异步作业演示: 起 panic 作业 (护栏转 Err, 不卡死)。
+    JobDemoPanic,
     /// 伸手仲裁演示: 撤防 (转拖拽/早抬起)。
     ReachCancel,
 }
@@ -233,6 +244,25 @@ impl App for Showcase {
                 let next = 1 - self.anim_cross.current();
                 self.anim_cross.switch_to(next, self.last_elapsed);
             }
+            Msg::JobDemoStart => {
+                self.job_demo_round += 1;
+                let round = self.job_demo_round;
+                self.job_demo_status = format!("第 {round} 轮在途 (300ms)…");
+                self.job_demo.launch_catched(
+                    move || {
+                        std::thread::sleep(std::time::Duration::from_millis(300));
+                        Ok(format!("第 {round} 轮完成"))
+                    },
+                    || "worker panic".to_string(),
+                );
+            }
+            Msg::JobDemoPanic => {
+                self.job_demo_status = "panic 作业在途…".into();
+                self.job_demo.launch_catched(
+                    || -> Result<String, String> { panic!("showcase 演示 panic") },
+                    || "panic 已被护栏转为 Err (应用不卡 Loading)".to_string(),
+                );
+            }
         }
     }
 
@@ -282,6 +312,13 @@ impl App for Showcase {
         self.anim_pulse_alpha = self.anim_pulse.progress(ctx.elapsed);
         let (from, to, fade) = self.anim_cross.frame(ctx.elapsed, Easing::EaseInOut);
         self.anim_cross_text = format!("场景 {from} → {to} · fade {fade:.2}");
+        // 异步作业演示: 每帧拾取 (旧代次乱序结果被代次闸门丢弃)。
+        if let Some(result) = self.job_demo.poll() {
+            self.job_demo_status = match result {
+                Ok(s) => s,
+                Err(e) => format!("Err: {e}"),
+            };
+        }
     }
 
     fn event(&mut self, event: &Event) {
@@ -1032,6 +1069,7 @@ fn page_layout(t: &LightTheme) -> impl Widget + 'static {
             .child(card(t, "时辰调色 + 双蒙版", tod_card(t)))
             .child(card(t, "音频 (audio)", audio_card(t)))
             .child(card(t, "动画原语 (anim)", anim_card(t)))
+            .child(card(t, "异步作业 (job)", job_card(t)))
             .child(card(t, "伸手仲裁 ReachArea", reach_area_card(t))),
     )
 }
@@ -1091,6 +1129,36 @@ fn anim_card(t: &LightTheme) -> impl Widget + 'static {
                 .cross_center()
                 .child(Button::themed(t, label("切换淡化")).on_click(|| Msg::AnimCrossSwitch))
                 .child(readout(|s| s.anim_cross_text.clone())),
+        )
+}
+
+/// 异步作业演示: AsyncJob 代次防乱序 + panic 护栏 (以用代测)。
+/// 连点「起作业」旧轮结果永不上屏; 「起 panic 作业」Err 文案落屏, 应用不卡死。
+/// 注: panic 护栏仅 panic=unwind 构建 (dev/test) 生效; release (panic="abort")
+/// 下点「起 panic 作业」会整体 abort —— 本卡验收请在 dev 构建下进行。
+fn job_card(t: &LightTheme) -> impl Widget + 'static {
+    let label = |text: &'static str| {
+        Text::new(text)
+            .font_size(t.font_size_body())
+            .color(Color::WHITE)
+    };
+    Column::new()
+        .gap(t.spacing_sm())
+        .cross_stretch()
+        .child(
+            Row::new()
+                .gap(t.spacing_lg())
+                .cross_center()
+                .child(
+                    Button::themed(t, label("起 300ms 作业 (可连点)"))
+                        .on_click(|| Msg::JobDemoStart),
+                )
+                .child(Button::themed(t, label("起 panic 作业")).on_click(|| Msg::JobDemoPanic)),
+        )
+        .child(
+            Text::bind(|s: &Showcase| s.job_demo_status.clone())
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
         )
 }
 
@@ -1554,6 +1622,9 @@ fn main() -> anyhow::Result<()> {
         anim_pulse_alpha: None,
         anim_cross: Crossfade::new(0, std::time::Duration::from_millis(800)),
         anim_cross_text: "场景 0 → 0 · fade 1.00".into(),
+        job_demo: AsyncJob::new(),
+        job_demo_status: "未发起".into(),
+        job_demo_round: 0,
     };
 
     let t = theme();
