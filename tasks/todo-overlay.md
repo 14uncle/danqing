@@ -27,33 +27,32 @@
   - Files: `examples/showcase.rs` | S
 
 ### ★ Checkpoint 2: 框架侧完成
-- [ ] 实机人工过目 (三姿势 + 焦点回归; 注: focus_request 仅在焦点为空时应用 —— 若焦点环未回归, 先查关闭点击点是否压到底层可聚焦组件, 非演示 bug)
-- [ ] 用户裁决 commit/push (danqing 先行)
+- [x] 实机人工过目 (三姿势 + 焦点回归) ✅ 2026-09-09
+- [x] 用户裁决 commit/push (danqing 先行) ✅ 2026-09-09
 
 ## Phase 3: 产品迁移 (分仓, danqing push 后)
 
 - [x] **T4: pomodoro 三面板迁移 ✅ 2026-09-09** — 三面板函数改 `Overlay::themed(&t, xxx_card(t)).bind_open(..)` 一行 + 卡片函数提取; MultiPanel 页结构保留 (保真「页面替换」视觉, 非压暗底层 —— D2 吞事件仍生效); Padding 垫层删除 (Overlay 门控内化焦点路径隐患); Esc/互斥/焦点回归状态逻辑逐行未动。实况更正: pomodoro 有 app 级 Esc 关闭 (早前 spec 依据「Esc」字面 grep 漏判 Escape, 已修 spec+组件 doc)
   - Acceptance: 既有测试零改动全绿 (184 通过 = 行为保持判据) ✅; 手写 `Stack{scrim,Center}` 三处零残留 (grep 验证) ✅
-  - 人工四姿势: 开合 / 互斥 / 焦点回归 / 点面板外不穿透底层 (待人工)
+  - 人工四姿势: 开合 / 互斥 / 焦点回归 / 点面板外不穿透底层 ✅ 2026-09-09
   - Files: `src/main.rs` | M | 前提: danqing push (a544cf9 已在远程)
 
 - [x] **T5: log 迁移 ✅ 2026-09-09** — `SettingsOverlay` 整删 + 本地 `Scrim` 组件删除 → `danqing::Overlay::themed(&LightTheme, ...).bind_open(...).on_scrim_click(...)`; Esc 前置关卡 (main.rs:998-1009) 保留; `scrim()` 颜色函数随删; 注释更新
   - Acceptance: 既有测试全绿 (110 通过); SettingsOverlay/Scrim 零残留 ✅
-  - 人工两姿势: 设置卡盖表格文本清晰 (push_layer 效应) / Esc 两阶段 (先清焦后关层) (待人工)
+  - 人工两姿势: 设置卡盖表格文本清晰 (push_layer 效应) / Esc 两阶段 (先清焦后关层) ✅ 2026-09-09
   - Files: `src/settings.rs` M, `src/main.rs` M | 前提闸: log 在途批次 (async-open+text-selection) 已提交 ✅
 
 - [x] **T6: clipboard 迁移 ✅ 2026-09-09** — 设置面板 + 清空确认两处换 Overlay::themed (簇C 下沉, 双层叠加 = z 序验证场); `UiBox::new(t.scrim())` 两处随删; Esc 逻辑保留 (app 级两阶段); MultiPanel 结构保留
   - Acceptance: 既有测试全绿 (134 通过); 手写 scrim 两处零残留 ✅
-  - 人工姿势: 确认层盖设置层 z 序正确 / 关任一层 (待人工)
+  - 人工姿势: 确认层盖设置层 z 序正确 / 关任一层 ✅ 2026-09-09
   - Files: `src/ui/settings.rs` M | **前提: 用户裁决** ✅
 
 ### ★ Checkpoint 3: 全量验收
 - [x] 各仓三件套绿; 分仓分别提交, message 注明关联 danqing 提交 ✅ 2026-09-09
 
-## 交接 (2026-09-09 T5+T6 落地)
+## 交接 (2026-09-09 簇C 全线收工)
 
-- **已 push**: danqing `95951c8`, danqing-log `0c3327e` (T5)
-- **T6 已落地待 push**: clipboard `settings.rs` 两处 scrim → Overlay (134 测试绿)
-- **待人工**: T4 四姿势 + CP2 showcase 三姿势 + T5 两姿势 + T6 两姿势 (确认层盖设置层 z 序 / 关任一层)
-- 衍生挂账: focus.rs visit() 钉板测试立案 / pomodoro license.rs:65 根治裁决
-- 口令坑: pomodoro 纯二进制 crate 无 lib target, 测试用裸 `cargo test` (--lib --tests 会报 no library targets); Bash 工具 cwd 跨调用复位不规律, 每条链显式 cd + pwd 核对
+- **全 push**: danqing `32ecdd0`, danqing-log `0c3327e`, danqing-clipboard `faa58d1`, danqing-pomodoro `7a0d6ea`/`2b7f256`
+- **人工验收全通过** ✅ 2026-09-09
+- **衍生挂账**: focus.rs visit() 钉板测试立案 / pomodoro license.rs:65 根治裁决
+- **口令坑**: pomodoro 纯二进制 crate 无 lib target, 测试用裸 `cargo test` (--lib --tests 会报 no library targets); Bash 工具 cwd 跨调用复位不规律, 每条链显式 cd + pwd 核对; log 多 bin target 需 `--bin danqing-log`
