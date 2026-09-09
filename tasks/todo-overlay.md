@@ -42,19 +42,18 @@
   - 人工两姿势: 设置卡盖表格文本清晰 (push_layer 效应) / Esc 两阶段 (先清焦后关层) (待人工)
   - Files: `src/settings.rs` M, `src/main.rs` M | 前提闸: log 在途批次 (async-open+text-selection) 已提交 ✅
 
-- [ ] **T6: clipboard 迁移** — 设置面板 + 清空确认两处换 Overlay (双层叠加 = z 序验证场)
-  - Acceptance: 既有测试全绿; 手写 scrim 两处零残留
-  - 人工姿势: 确认层盖设置层 z 序正确 / 关任一层
-  - Files: `src/ui/settings.rs` | S-M | **前提: 用户裁决动不动** (clipboard 日用在用)
+- [x] **T6: clipboard 迁移 ✅ 2026-09-09** — 设置面板 + 清空确认两处换 Overlay::themed (簇C 下沉, 双层叠加 = z 序验证场); `UiBox::new(t.scrim())` 两处随删; Esc 逻辑保留 (app 级两阶段); MultiPanel 结构保留
+  - Acceptance: 既有测试全绿 (134 通过); 手写 scrim 两处零残留 ✅
+  - 人工姿势: 确认层盖设置层 z 序正确 / 关任一层 (待人工)
+  - Files: `src/ui/settings.rs` M | **前提: 用户裁决** ✅
 
 ### ★ Checkpoint 3: 全量验收
-- [ ] 各仓三件套绿; 分仓分别提交, message 注明关联 danqing 提交
+- [x] 各仓三件套绿; 分仓分别提交, message 注明关联 danqing 提交 ✅ 2026-09-09
 
-## 交接 (2026-09-09 T5 落地)
+## 交接 (2026-09-09 T5+T6 落地)
 
-- **已 push**: danqing `6333ab9`, pomodoro `2b7f256` (T4 联动)
-- **T5 已落地待 push**: log `settings.rs` SettingsOverlay+Scrim → Overlay (110 测试绿)
-- **待人工**: T4 四姿势 + CP2 showcase 三姿势 + T5 两姿势 (设置卡盖表格清晰 / Esc 两阶段)
-- **T6**: 待用户裁决动不动 clipboard (日用在用)
+- **已 push**: danqing `95951c8`, danqing-log `0c3327e` (T5)
+- **T6 已落地待 push**: clipboard `settings.rs` 两处 scrim → Overlay (134 测试绿)
+- **待人工**: T4 四姿势 + CP2 showcase 三姿势 + T5 两姿势 + T6 两姿势 (确认层盖设置层 z 序 / 关任一层)
 - 衍生挂账: focus.rs visit() 钉板测试立案 / pomodoro license.rs:65 根治裁决
 - 口令坑: pomodoro 纯二进制 crate 无 lib target, 测试用裸 `cargo test` (--lib --tests 会报 no library targets); Bash 工具 cwd 跨调用复位不规律, 每条链显式 cd + pwd 核对
