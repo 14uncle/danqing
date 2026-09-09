@@ -2,7 +2,7 @@
 
 - @author 十四叔
 - @date 2026/09/09
-- 状态: **已批准**（2026-09-09）；框架侧 T1–T7 已落地（/build auto 零 commit，三件套绿 494 通过）；review 通过（APPROVE，Critical/Required 零发现；2 条 Optional 已处置：Tween 有限值 doc + 原地补间短路）；pomodoro 联动 T8–T9 待 danqing push 后开工
+- 状态: **已批准**（2026-09-09）；框架侧 T1–T7 已提交并 push（danqing fdd3d01，三件套绿 495 通过）；review 通过（APPROVE，Critical/Required 零发现；2 条 Optional 已处置：Tween 有限值 doc + 原地补间短路）；pomodoro 联动 T8 已落地（零 commit，184 测试全绿、四类型零残留），T9 实机四姿势 + pomodoro 提交待用户裁决
 - 需求来源: `docs/intent/framework-sinking.md` 簇A（跨产品重复发明 4+ 处，成本 S，建议顺序第一）
 
 ## 目标

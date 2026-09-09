@@ -4,6 +4,13 @@
 > 每任务完成 = 验收条件全勾 + 三件套绿; 按序推进, Checkpoint 处人工过目。
 > commit/push 待用户指示 (D7)。
 
+## 明日交接 (2026-09-09 收工盘点)
+
+- danqing: T1–T7 **已提交并 push (fdd3d01)**; 工作树余 2 个 doc 台账改动 (本文件 + SPEC-anim.md 状态行), 随下次提交带走
+- pomodoro: T8 **已迁移未提交** (M main.rs / M motion.rs / M CLAUDE.md / D fader.rs+flash.rs+hint.rs), 184 测试绿、仓库惯例 clippy 净、四类型零残留; Cargo.lock 无变动 (patch 段已提交, lock 无 git rev)
+- 待用户四件事: ① pomodoro commit/push 裁决 ② CP2 实机 (danqing showcase: switch 拨动/快速双击 + 动画原语卡三按钮) ③ T9 四姿势实机 (场景切换淡化/完成脉冲/首启提示 has_seen 两路径/暂停 500ms 沉降) ④ pomodoro license.rs:65 `#[expect(dead_code)]` 在 --all-targets 下预存炸 (HEAD 同样炸), 修不修
+- 之后: 簇B (AsyncJob) 待用户发令; 下沉三政策门裁决仍挂账 (见 docs/intent/framework-sinking.md)
+
 ## Phase 1: 框架纯加法
 
 - [x] **T1: Easing 扩展 ✅ 2026-09-09** — `theme.rs` Easing 加 `EaseIn`(t³) / `EaseOut`(1-(1-t)³) 变体 + eval 分支
@@ -55,22 +62,22 @@
 
 ## Phase 4: pomodoro 联动迁移 (danqing-pomodoro 仓)
 
-- [ ] **T8: 调用点迁移** — 前提: danqing 已 push; lock 经 `cargo check` 驱动重解 (D6, 不用 cargo update -p)
-  - main.rs: 删 `mod fader/flash/hint` + 三 use; 类型换 `danqing::{Crossfade, Pulse, Cue, CueTiming, Tween}`
-  - `fader.frame(now, |t| FADE_EASING.eval(t))` ×3 → `frame(now, FADE_EASING)`; `current()/switch_to()` 直通
-  - `motion_envelope.gain(running, now)` → `tween.value(now, target)` (参数序翻转, target = running?1:0); 字段/构造点同步
-  - hint 两构造点 (`main.rs:201` `:273`): `triggered_at(ZERO)`→`Cue::new(CueTiming::default())`+`trigger(ZERO)`; `idle()`→`Cue::new(..)`
-  - motion.rs: 删 MotionEnvelope + 其 3 条专属测试; 场景索引常量 + 9 强度函数保留不动
-  - 删 flash.rs / hint.rs / fader.rs
-  - Acceptance: 编译过; `MotionEnvelope`/`FlashOverlay`/`ShortcutHintOverlay`/`SceneFader` 全仓零残留 (grep 验证)
-  - Verify: `cargo test` 全绿; 三件套绿
-  - Files: `src/main.rs`, `src/motion.rs`, 删 3 文件 | M
+- [x] **T8: 调用点迁移 ✅ 2026-09-09** — 前提: danqing 已 push (fdd3d01); lock 经 `cargo check` 验证**无需变动** ([patch] 已提交在 Cargo.toml, lock 中 danqing 条目无 git rev 钉, 发布去 patch 时再钉) (D6)
+  - main.rs: 删 `mod fader/flash/hint` + 三 use; 类型换 `danqing::{Crossfade, Pulse, Cue, CueTiming, Tween}` ✅
+  - `fader.frame(now, |t| FADE_EASING.eval(t))` ×3 → `frame(now, FADE_EASING)`; `current()/switch_to()` 直通 ✅
+  - `motion_envelope.gain(running, now)` → `value(now, target)` (参数序翻转, target = running?1:0); 字段名保留, 构造点 ×2 换 `Tween::new(motion::SETTLE_DURATION, Easing::Linear)` ✅
+  - hint 两构造点: 新助手 `triggered_cue(at)` (Cue::new+trigger); `idle()` → `Cue::new(CueTiming::default())` ✅
+  - motion.rs: 删 MotionEnvelope + 其 3 条专属测试; 2 条暂停测试改由 danqing::Tween 驱动 (同值断言); 场景索引常量 + 9 强度函数保留 ✅; CLAUDE.md 同步 (Patterns/Source Layout)
+  - 删 flash.rs / hint.rs / fader.rs ✅
+  - Acceptance: 编译过; 四类型全仓零残留 (历史 spec 文档除外) ✅
+  - Verify: `cargo test` 184 全绿; 仓库惯例 clippy (`-- -D warnings`) 零警告。注: `--all-targets` 暴露 license.rs:65 `#[expect(dead_code)]` 预存失败 (仅测试引用所致, HEAD 上同样炸, 非本次引入)
+  - Files: `src/main.rs`, `src/motion.rs`, `CLAUDE.md`, 删 3 文件 | M
 
-- [ ] **T9: pomodoro 回归** — 既有测试全绿 (场景强度/索引锁不动); 实机四姿势: 场景切换交叉淡化 / 阶段完成脉冲 / 首启快捷键提示 (has_seen 两路径) / 暂停 500ms 视觉沉降
+- [ ] **T9: pomodoro 回归** — 既有测试全绿 (184 通过 2026-09-09, 场景强度/索引锁不动 ✅ 机器部分); 实机四姿势: 场景切换交叉淡化 / 阶段完成脉冲 / 首启快捷键提示 (has_seen 两路径) / 暂停 500ms 视觉沉降
   - Acceptance: 四姿势观感与迁移前一致 (人工)
-  - Verify: `cargo test` + 实机
+  - Verify: `cargo test` ✅ + 实机 (待人工)
   - Files: — | S
 
 ### ★ Checkpoint 3: 全量验收
-- [ ] 两仓三件套绿
-- [ ] 用户裁决 commit/push: danqing (T1–T7) 先提交并 push → pomodoro (T8–T9) 提交 lock, message 注明关联
+- [x] 两仓三件套绿 (danqing 495 / pomodoro 184, 2026-09-09)
+- [ ] 用户裁决 commit/push: danqing (T1–T7) ✅ 已提交并 push (fdd3d01) → pomodoro (T8–T9) 待裁决提交 (lock 无变动), message 注明关联
