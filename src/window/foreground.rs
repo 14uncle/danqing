@@ -387,9 +387,14 @@ mod tests {
         );
     }
 
-    /// 粘贴注入: 模拟 Ctrl+V 按键到前台窗口。
+    /// 粘贴注入: 向**真实前台窗口**发 SendInput Ctrl+V。
+    ///
+    /// 默认忽略: 全量 `cargo test` (尤其实体机自动化跑三件套) 会把 Ctrl+V
+    /// 打进用户正在用的终端/编辑器, 把当前剪贴板内容贴进去 —— 2026-09-09
+    /// 「剪贴板隐藏态自动粘贴」的真根因。仅手动 `-- --include-ignored` 跑。
     #[test]
     #[cfg(target_os = "windows")]
+    #[ignore = "向真实前台注入 Ctrl+V, 仅手动验证"]
     fn simulate_paste_shortcut_does_not_panic() {
         // 验证 simulate_paste() API 存在且不 panic
         // 实际效果需要手测验证 (需要真实前台窗口)
