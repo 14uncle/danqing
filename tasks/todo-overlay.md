@@ -32,10 +32,10 @@
 
 ## Phase 3: 产品迁移 (分仓, danqing push 后)
 
-- [ ] **T4: pomodoro 三面板迁移** — settings/stats/report 面板函数改为返回内容卡; 树装配处包 `Overlay::themed(..).bind_open(..)`; 互斥与焦点回归逻辑 (main.rs:461-506) 逐行保留; 手写 `Stack{scrim,Center}` 三处删除
-  - Acceptance: 既有测试全绿 (面板互斥/焦点回归零改动 = 行为保持判据); 三处手写机构零残留
-  - 人工四姿势: 开合 / 互斥 / 焦点回归 / 点面板外不穿透底层 (D2 观感变化点)
-  - Files: `src/main.rs` | M | 前提: danqing push
+- [x] **T4: pomodoro 三面板迁移 ✅ 2026-09-09** — 三面板函数改 `Overlay::themed(&t, xxx_card(t)).bind_open(..)` 一行 + 卡片函数提取; MultiPanel 页结构保留 (保真「页面替换」视觉, 非压暗底层 —— D2 吞事件仍生效); Padding 垫层删除 (Overlay 门控内化焦点路径隐患); Esc/互斥/焦点回归状态逻辑逐行未动。实况更正: pomodoro 有 app 级 Esc 关闭 (早前 spec 依据「Esc」字面 grep 漏判 Escape, 已修 spec+组件 doc)
+  - Acceptance: 既有测试零改动全绿 (184 通过 = 行为保持判据) ✅; 手写 `Stack{scrim,Center}` 三处零残留 (grep 验证) ✅
+  - 人工四姿势: 开合 / 互斥 / 焦点回归 / 点面板外不穿透底层 (待人工)
+  - Files: `src/main.rs` | M | 前提: danqing push (a544cf9 已在远程)
 
 - [ ] **T5: log 迁移** — `SettingsOverlay` 整删 + 本地 `Scrim` 组件删除 → `danqing::Overlay`; Esc 前置关卡 (main.rs:999-1002) 保留; settings_open 绑定直通
   - Acceptance: 既有测试全绿; SettingsOverlay/Scrim 零残留

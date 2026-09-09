@@ -21,9 +21,9 @@
 //! 容器自身恒不可聚焦 (Tabs 范式: FocusManager collect 无条件递归子节点,
 //! 容器无需自证可聚焦; 焦点直达卡内组件)。
 //!
-//! 不做什么: Esc 关闭不进组件 (产品语义分裂 —— pomodoro 无; log 有且须先清
-//! 输入焦点再关层, 见 log main.rs S3 回归注释; 各产品 app 级自理); 焦点回归编排
-//! 不进组件 (用既有 `App::focus_request`/`focus_restored` 协议, 产品侧两行);
+//! 不做什么: Esc 关闭不进组件 (各产品 app 级自理且语义不同 —— pomodoro 关面板
+//! 顺带焦点回归; log 须先清输入焦点再关层, 见其 main.rs S3 回归注释; 组件统一
+//! 接管会踩焦点优先级差异); 焦点回归编排不进组件 (用既有 `App::focus_request`/`focus_restored` 协议, 产品侧两行);
 //! 玻璃卡片样式不进组件 (内容槽纯注入, 产品用 UiBox+Padding 自建); 无开合动画
 //! (v1; 未来可叠 `anim` 原语)。
 //!

@@ -12,7 +12,7 @@
 **形态说明**：本簇是 widget 组件，落 `widget/view/`（MultiPanel/Tabs 同族），不涉三政策门。框架既有配套全部就位，本组件是它们的组装者而非新设施：`theme.scrim()` token、`RectBatch/TextBatch::push_layer()`、`App::focus_request`/`focus_restored` 协议（focus.rs 注释本就写着「弹层面板关闭后焦点回到打开面板的按钮」）、`Button::id()` 稳定焦点标识。
 
 **非目标**（明确不做）：
-- **Esc 关闭不进组件**：产品语义分裂——pomodoro 无 Esc 关闭；log 有且须先清 TextInput 焦点再关层（S3 回归教训，两层 Escape 竞争）。Esc 留在产品侧，组件 doc 写明范式
+- **Esc 关闭不进组件**：各产品 app 级自理且语义不同——pomodoro 有（app 级：关面板 + 焦点回归，main.rs:577-589）；log 有且须先清 TextInput 焦点再关层（S3 回归教训，两层 Escape 竞争）。组件统一接管会踩焦点优先级差异；Esc 留在产品侧，组件 doc 写明范式
 - **焦点回归编排不进组件**：框架 `App::focus_request`/`focus_restored` 协议已在，产品侧两行调用即可（pomodoro 现网即如此）
 - **面板互斥状态机**（pomodoro 三面板互开互关）是产品状态，不进组件
 - **开合动画** v1 不做（三产品现状即无动画；未来可叠簇A Cue/Tween）
