@@ -54,21 +54,16 @@ fn longest_prefix(s: &str, w: f32, measure: &mut impl FnMut(&str) -> f32) -> usi
     lo
 }
 
-/// 尾部省略: 超宽则二分最长可容纳前缀 (字符边界对齐), 给省略号腾位。
+/// 尾部省略: 超宽则二分最长可容纳前缀 (给省略号腾位后), 字符边界对齐。
 /// 返回 (展示切片, 是否截断) —— 零分配, 渲染侧 paint 直接消费切片。
 pub fn fit_line(s: &str, max_w: f32, mut measure: impl FnMut(&str) -> f32) -> (&str, bool) {
     if measure(s) <= max_w {
         return (s, false);
     }
-    let mut lo = longest_prefix(s, max_w, &mut measure);
-    // 给省略号腾位
+    // 直接找「前缀 + 省略号 ≤ max_w」的最长前缀: 上限 = max_w - 省略号宽。
+    // 省略号比 max_w 还宽时上限为负, longest_prefix 返回 0 (空前缀)。
     let ell = measure(ELLIPSIS);
-    while lo > 0 && measure(&s[..lo]) + ell > max_w {
-        lo -= 1;
-        while !s.is_char_boundary(lo) {
-            lo -= 1;
-        }
-    }
+    let lo = longest_prefix(s, max_w - ell, &mut measure);
     (&s[..lo], true)
 }
 
