@@ -14,6 +14,8 @@ pub mod asset;
 pub mod audio;
 pub mod clipboard;
 pub mod event;
+pub mod fs;
+pub mod image;
 mod job;
 pub mod layout;
 pub mod log;
@@ -24,6 +26,7 @@ pub mod persist;
 mod render;
 mod text;
 pub mod theme;
+pub mod time;
 /// 应用内更新检查核心 (版本对比/缓存/后台检查/GitHub 运输)。
 /// 仅 `update` feature 启用: 默认关闭不拉网络栈, 产品显式开启。
 #[cfg(feature = "update")]
