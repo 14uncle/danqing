@@ -84,6 +84,18 @@ feature gate `persist`，产品 opt-in。依赖全已有 (dirs/serde/serde_json)
 - [x] 人工过目 (pomodoro 启动/退出/持久化行为不变) ✅ 2026-09-10
 - [x] 进 review 阶段 ✅ 2026-09-10 — 五轴评审: 1 Critical (未来版本保护失效) + 4 Required, 已全部修复 (persist.rs / state.rs / stats.rs)
 
+### Phase 3: 补漏 —— update.rs 缓存合并
+
+- [x] **T7: danqing update.rs ad-hoc 缓存合并进 persist** ✅ 2026-09-10
+  - 文件: `danqing/src/update.rs` + `danqing/Cargo.toml` | S
+  - 背景: 簇D「下沉方向」承诺「与 update.rs 私有实现合并」, SPEC「为什么」列 update.rs ~50 行手写, 但原 plan 遗漏此任务 (2026-09-10 「D 开工」时补齐)
+  - 内容: `cache_path` 复用 `persist::config_dir`; `save_cache_to` 改用 `persist::atomic_save`
+    (原 `fs::write` 非原子, 崩溃损坏缓存文件 → 升级为原子写); `load_cache_from` 保留手写
+    (需 None 语义「无缓存→重查」, persist 无对应原语, 强合破坏语义); `update` feature 依赖 `persist` (零新增外部依赖)
+  - 验收: 三件套绿 (clippy --all-features 零警告; test --all-features + 默认全绿)
+  - 估时: S
+  - 依赖: T1 (persist 已 push)
+
 ## Risks and Mitigations
 
 | 风险 | 影响 | 缓解 |

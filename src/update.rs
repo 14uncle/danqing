@@ -91,24 +91,25 @@ impl CheckCache {
 }
 
 /// 指定仓库的缓存文件路径 (按 repo 分词, 避免多产品相互覆盖)。
+/// 经 [`crate::persist::config_dir`] 定位 `%APPDATA%/danqing`, 顺带确保目录存在。
 pub fn cache_path(spec: &UpdateSpec) -> Option<PathBuf> {
     let slug = spec.repo.replace('/', "-");
-    dirs::config_dir().map(|p| p.join("danqing").join(format!("update-check-{slug}.json")))
+    crate::persist::config_dir("danqing").map(|p| p.join(format!("update-check-{slug}.json")))
 }
 
 /// 从指定路径读缓存: 文件缺失/损坏/解析失败一律 None (交给下次重新检查)。
+/// 不复用 [`crate::persist::load_or_default`]: 此处需 None 语义 (无缓存 → 触发重查),
+/// 而非落 `Default` (`CheckCache` 无有意义的默认值)。
 pub fn load_cache_from(path: &Path) -> Option<CheckCache> {
     let text = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&text).ok()
 }
 
-/// 写缓存到指定路径 (先建父目录); 失败由调用方降级为 warn 日志。
+/// 写缓存到指定路径 (经 [`crate::persist::atomic_save`] 原子写, 父目录自动创建);
+/// 失败由调用方降级为 warn 日志。
 pub fn save_cache_to(path: &Path, cache: &CheckCache) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let json = serde_json::to_string(cache).map_err(std::io::Error::other)?;
-    std::fs::write(path, json)
+    crate::persist::atomic_save(path, json.as_bytes())
 }
 
 /// 缓存仅对写入它的二进制版本有效: 版本不一致 (更新/降级) 即作废重查。

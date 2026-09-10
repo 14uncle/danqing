@@ -384,9 +384,7 @@ mod tests {
 
     #[test]
     fn dirty_flag_error_keeps_dirty() {
-        let mut flag = DirtyFlag::new(Duration::from_secs(0), || {
-            Err(io::Error::other("boom"))
-        });
+        let mut flag = DirtyFlag::new(Duration::from_secs(0), || Err(io::Error::other("boom")));
         flag.mark();
         let result = flag.try_flush(Instant::now() + Duration::from_secs(1));
         assert!(result.is_err());

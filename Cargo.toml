@@ -13,8 +13,9 @@ license = "MIT OR Apache-2.0"
 [features]
 # 应用内更新检查核心 (版本对比/缓存/后台检查/GitHub 运输)。默认关闭:
 # 不启用则不拉网络/序列化栈 (`update` 全 optional)。产品显式开启。
+# 缓存落盘复用 persist 原子写, 故 `update` 依赖 `persist` (零新增外部依赖)。
 default = []
-update = ["dep:ureq", "dep:serde", "dep:serde_json", "dep:dirs", "dep:open"]
+update = ["dep:ureq", "dep:serde", "dep:serde_json", "dep:dirs", "dep:open", "persist"]
 # 应用持久化核心 (config_dir/atomic_save/load_or_default/DirtyFlag/VersionedDoc)。
 # 产品显式开启; dirs+serde+serde_json 与 update 共享,不重复拉。
 persist = ["dep:dirs", "dep:serde", "dep:serde_json"]
