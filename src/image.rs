@@ -9,7 +9,16 @@
 /// RGBA 数据降采样到目标尺寸 (双线性插值, 平滑边缘)。
 ///
 /// `data` 为 RGBA 原始字节 (src_w × src_h × 4), 返回 dst_w × dst_h × 4。
+/// panics 若 `data.len() < src_w × src_h × 4` (debug 模式有断言)。
 pub fn downscale_rgba(data: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
+    debug_assert!(
+        data.len() >= (src_w * src_h * 4) as usize,
+        "downscale_rgba: 数据长度 {} < src {}×{}×4={}",
+        data.len(),
+        src_w,
+        src_h,
+        src_w * src_h * 4
+    );
     let mut out = vec![0u8; (dst_w * dst_h * 4) as usize];
     let sx_ratio = src_w as f32 / dst_w as f32;
     let sy_ratio = src_h as f32 / dst_h as f32;
@@ -95,5 +104,20 @@ mod tests {
         let data = vec![100u8; 16]; // 2×2 全同色
         let out = downscale_rgba(&data, 2, 2, 1, 1);
         assert_eq!(out, vec![100; 4]);
+    }
+
+    #[test]
+    fn downscale_rgba_2x2_nonuniform_to_1x1() {
+        // 2×2 非均匀色 → 1×1: 中心点 (0.5,0.5) 四邻域等权插值
+        // (0,0)=红 (1,0)=绿 (0,1)=蓝 (1,1)=黄
+        let data = vec![
+            255, 0, 0, 255, // (0,0) red
+            0, 255, 0, 255, // (1,0) green
+            0, 0, 255, 255, // (0,1) blue
+            255, 255, 0, 255, // (1,1) yellow
+        ];
+        let out = downscale_rgba(&data, 2, 2, 1, 1);
+        // R: (255+0+0+255)/4 = 127.5 →128; G: (0+255+0+255)/4 = 128; B: (0+0+255+0)/4 = 64; A: 255
+        assert_eq!(out, vec![128, 128, 64, 255]);
     }
 }
