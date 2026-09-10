@@ -40,6 +40,7 @@ pub use render::{
     RenderError, ScaleMode, TextBatch,
 };
 pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo, Line, break_lines};
+pub use text::{encoding, fit, selection};
 pub use theme::{
     Easing, LightTheme, ScenePalette, SceneSpec, SceneTheme, Shadow, Theme, composite_over,
     contrast_ratio, relative_luminance,
