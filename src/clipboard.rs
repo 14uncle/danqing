@@ -61,9 +61,16 @@ impl SystemClipSource {
 }
 
 impl ClipSource for SystemClipSource {
+    #[cfg(target_os = "windows")]
     fn sequence(&mut self) -> u32 {
         // SAFETY: 无参只读系统调用, 无线程安全风险。
         unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() }
+    }
+
+    /// 非 Windows 无剪贴板序列号概念 (本模块的 Win32 监听仅 Windows 产品使用)。
+    #[cfg(not(target_os = "windows"))]
+    fn sequence(&mut self) -> u32 {
+        0
     }
 
     fn text(&mut self) -> Option<String> {
@@ -85,14 +92,15 @@ impl ClipSource for SystemClipSource {
         })
     }
 
+    /// Win32 读取 CF_HDROP 文件列表; 非 Windows 走 trait 默认 (返 None)。
+    #[cfg(target_os = "windows")]
     fn files(&mut self) -> Option<Vec<String>> {
-        use windows_sys::Win32::Foundation::HGLOBAL;
         use windows_sys::Win32::System::DataExchange::{
             CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
         };
         use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
         use windows_sys::Win32::System::Ole::CF_HDROP;
-        use windows_sys::Win32::UI::Shell::{DragQueryFileW, HDROP};
+        use windows_sys::Win32::UI::Shell::DragQueryFileW;
 
         unsafe {
             // 检查剪贴板是否有 CF_HDROP 数据
@@ -108,8 +116,7 @@ impl ClipSource for SystemClipSource {
                 if h_data.is_null() {
                     return None;
                 }
-                let h_global = h_data as HGLOBAL;
-                let h_drop = GlobalLock(h_global);
+                let h_drop = GlobalLock(h_data);
                 if h_drop.is_null() {
                     return None;
                 }
@@ -119,13 +126,12 @@ impl ClipSource for SystemClipSource {
                     // DragQueryFileW(cch=0) 返回所需字符数, **不含** null 终止符,
                     // 缓冲区必须 +1, 否则写入时末位字符被 null 挤掉 (路径丢尾巴:
                     // 「.png」入库成「.pn」, 2026-08-16 查库实证)
-                    let len = DragQueryFileW(h_drop as HDROP, i, std::ptr::null_mut(), 0);
+                    let len = DragQueryFileW(h_drop, i, std::ptr::null_mut(), 0);
                     if len == 0 {
                         break;
                     }
                     let mut buf = vec![0u16; len as usize + 1];
-                    let written =
-                        DragQueryFileW(h_drop as HDROP, i, buf.as_mut_ptr(), buf.len() as u32);
+                    let written = DragQueryFileW(h_drop, i, buf.as_mut_ptr(), buf.len() as u32);
                     if written > 0 {
                         // 去掉末尾 null
                         let end = (written as usize).min(buf.len());
@@ -135,7 +141,7 @@ impl ClipSource for SystemClipSource {
                     }
                     i += 1;
                 }
-                let _ = GlobalUnlock(h_global);
+                let _ = GlobalUnlock(h_data);
                 Some(paths)
             })();
             let _ = CloseClipboard();
@@ -177,12 +183,17 @@ mod tests {
     }
 
     /// 真实系统源: 无 GUI 环境 (CI) 下 new 可能失败或读失败, 只验证不 panic。
+    /// 覆盖全部读取方法: files 无 CF_HDROP 时走 IsClipboardFormatAvailable 早退,
+    /// 至少锁定「不 panic、不泄漏」。
     #[test]
     #[cfg(target_os = "windows")]
     fn system_clip_source_does_not_panic() {
         if let Ok(mut src) = SystemClipSource::new() {
             let _ = src.sequence();
             let _ = src.text();
+            let _ = src.html();
+            let _ = src.files();
+            let _ = src.image();
         }
     }
 }

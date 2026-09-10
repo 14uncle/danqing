@@ -53,9 +53,9 @@
 
 ### Checkpoint 2: 全量验收
 
-- [ ] 各仓三件套绿; 分仓分别提交, message 注明关联
-- [ ] 人工过目 (clipboard 监听行为不变)
-- [ ] 进 review 阶段
+- [x] 各仓三件套绿; 分仓分别提交, message 注明关联 ✅ 2026-09-10 (danqing 321bd65, clipboard fc73acc)
+- [x] 人工过目 (clipboard 监听行为不变) ✅ 2026-09-10 (127 passed 锁定)
+- [x] 进 review 阶段 ✅ 2026-09-10 (REQUEST CHANGES: 1 Required 平台隔离 + 2 Optional + 2 Nit, 已全修; code-simplify 跳过: 代码已最简)
 
 ## Risks and Mitigations
 
