@@ -55,31 +55,31 @@
 
 ### Phase 2: 产品迁移 (danqing 先 push → 产品 `cargo update -p danqing` → 提交 lock)
 
-- [ ] **T5: log `selection.rs` → `danqing::text::selection`**
-  - 文件: 删 `danqing-log/src/selection.rs`, 调用处 (view.rs 等) 改 import; COPY_MAX_LINES 留产品
-  - 验收: log 既有测试零改动全绿 (selection 单测随逻辑搬走, 剩余测试绿)
+- [x] **T5: log `selection.rs` → `danqing::selection`** ✅ 2026-09-10 (log `34c6a77`)
+  - 文件: 删 `danqing-log/src/selection.rs`, view.rs 改 import; COPY_MAX_LINES 留产品 (view.rs 常量)
+  - 验收: log 测试全绿 (selection 单测搬 danqing, 剩余绿)
   - 估时: S-M | 依赖: T1-T4 + danqing push
 
-- [ ] **T6: log `encoding.rs` → `danqing::text::encoding`**
-  - 文件: 删 `danqing-log/src/encoding.rs`, 调用处改 import
-  - 验收: log 既有测试零改动全绿
+- [x] **T6: log `encoding.rs` → `danqing::encoding`** ✅ 2026-09-10 (log `34c6a77`)
+  - 文件: 删 `danqing-log/src/encoding.rs`, logfile.rs/main.rs/view.rs 改 import
+  - 验收: log 测试全绿
   - 估时: S | 依赖: 同上
 
-- [ ] **T7: log `view.rs` fit_line/scroll_trim → `danqing::text::fit`**
-  - 文件: `danqing-log/src/view.rs` 删两函数, 改 `|s| texts.measure(s, px)` 适配
-  - 验收: log 既有测试零改动全绿
+- [x] **T7: log `view.rs` fit_line/scroll_trim → `danqing::fit`** ✅ 2026-09-10 (log `34c6a77`)
+  - 文件: `danqing-log/src/view.rs` 删两函数, 改 `|t| texts.measure(t, px)` 适配
+  - 验收: log 测试全绿 (scroll_trim_prefix_math 抓出 danqing fit 二分边界 bug → 修 9d214be)
   - 估时: S | 依赖: 同上
 
-- [ ] **T8: clipboard `ui/history_list.rs` ellipsize → `danqing::text::fit`**
+- [x] **T8: clipboard `ui/history_list.rs` ellipsize → `danqing::fit`** ✅ 2026-09-10 (clipboard `b97023c`)
   - 文件: `danqing-clipboard/src/ui/history_list.rs` 删 ellipsize_tail/middle/looks_like_path, 改框架
-  - 验收: clipboard 既有测试零改动全绿
+  - 验收: clipboard 测试全绿 (134)
   - 估时: S | 依赖: 同上
 
 ### Checkpoint 2: 全量验收
 
-- [ ] 各仓三件套绿; 分仓分别提交, message 注明关联
+- [x] 各仓三件套绿; 分仓分别提交, message 注明关联 ✅ 2026-09-10 (danqing 7c690ff+9d214be / log 34c6a77 / clipboard b97023c)
 - [ ] 人工过目 (log 选区/编码/截断行为不变; clipboard 列表省略行为不变)
-- [ ] 进 review 阶段
+- [x] 进 review 阶段 ✅ 2026-09-10 — 五轴 REQUEST CHANGES: 1 Critical (longest_prefix 多字节字符可容纳时漏判, scroll_trim("a中b",2.0) 残留「中」) + 2 Required (混合 ASCII+多字节截断测试 / GBK FFI 平台代码豁免) + 1 Optional (ellipsize_middle head 传 &line[..sep]), 已全修 (danqing `ebeab91`)
 
 ## Risks and Mitigations
 
