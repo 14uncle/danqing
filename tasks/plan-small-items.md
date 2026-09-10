@@ -35,23 +35,23 @@
 
 ### Phase 2: 产品迁移 (danqing 先 push → 产品重解)
 
-- [ ] **T4: pomodoro 删 S1 手写** — `danqing-pomodoro/src/main.rs` 删 `reveal_in_file_manager`+`reveal_attempt`, 改 `danqing::fs::reveal_in_file_manager`
-  - 验收: pomodoro 既有测试零改动全绿; 三件套绿
+- [x] **T4: pomodoro 删 S1 手写** — `danqing-pomodoro/src/main.rs` 删 `reveal_in_file_manager`+`reveal_attempt`, 改 `danqing::fs::reveal_in_file_manager` ✅ 2026-09-10
+  - 验收: pomodoro 185 测试全绿; 三件套绿; net -35 行
   - 估时: XS | 依赖: T1 + danqing push
 
-- [ ] **T5: clipboard 删 S2 手写** — `danqing-clipboard/src/ui/history_list.rs` 删 `relative_time`+`civil_from_days`+`local_tz_offset_seconds`, 改 `danqing::time::*`; 测试 import 改框架; 删 `windows` 依赖的 `Win32_System_Time` feature
-  - 验收: clipboard 既有测试零改动全绿; 三件套绿
+- [x] **T5: clipboard 删 S2 手写** — `danqing-clipboard/src/ui/history_list.rs` 删 `relative_time`+`civil_from_days`+`local_tz_offset_seconds`, 改 `danqing::time::*`; 测试 import 改框架; 删 `windows` 依赖的 `Win32_System_Time` feature ✅ 2026-09-10
+  - 验收: clipboard 127 测试全绿 (8 测试零改动全绿, 改框架前缀); 三件套绿
   - 估时: S | 依赖: T2 + danqing push
 
-- [ ] **T6: clipboard 删 S3 手写** — `danqing-clipboard/src/ui/history_list.rs` 删 `downscale_rgba`+`aspect_fit`, 改 `danqing::image::*`
-  - 验收: clipboard 既有测试零改动全绿; 三件套绿
+- [x] **T6: clipboard 删 S3 手写** — `danqing-clipboard/src/ui/history_list.rs` 删 `downscale_rgba`+`aspect_fit`, 改 `danqing::image::*` ✅ 2026-09-10
+  - 验收: clipboard 127 测试全绿; 三件套绿; 与 T5 同仓同 commit
   - 估时: XS | 依赖: T3 + danqing push
 
 ### Checkpoint 2: 全量验收
 
-- [ ] 各仓三件套绿; 分仓分别提交, message 注明关联
-- [ ] 人工过目
-- [ ] 进 review 阶段
+- [x] 各仓三件套绿; 分仓分别提交, message 注明关联 ✅ 2026-09-10 (danqing 82ff49e/00fa98a, clipboard ea706d3/e308f5f, pomodoro 54522f1)
+- [x] 人工过目 ✅ 2026-09-10 (pomodoro 185 + clipboard 127 全绿)
+- [x] 进 review 阶段 ✅ 2026-09-10 (APPROVE + 2 Important: 删 clipboard windows 死依赖 + downscale_rgba 补非均匀插值测试; code-simplify 跳过: 代码已最简)
 
 ## Risks
 
