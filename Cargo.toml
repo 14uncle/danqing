@@ -39,7 +39,7 @@ arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rodio = { version = "0.22", default-features = false, features = ["playback", "symphonia-ogg", "symphonia-vorbis"] }
 tray-icon = "0.19"
-windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_UI_Shell"] }
+windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_UI_Shell", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole"] }
 # 更新检查核心 (仅 `update` feature 启用): GitHub Releases + 序列化缓存 + 系统打开链接。
 ureq = { version = "3.4", default-features = false, features = ["rustls", "json"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }

@@ -12,6 +12,7 @@ mod anim;
 mod app;
 pub mod asset;
 pub mod audio;
+pub mod clipboard;
 pub mod event;
 mod job;
 pub mod layout;

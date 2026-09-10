@@ -58,30 +58,46 @@ pub fn foreground_process_name() -> Option<String>;
 pub fn to_crlf(text: &str) -> String;
 ```
 
-### E4 (`src/clipboard.rs` 新模块, 依赖开放问题裁决)
+### E4 (`src/clipboard.rs` 新模块 — 驻地方案a)
 
 ```rust
+/// 剪贴板图片 (RGBA 原始字节)。
+#[derive(Clone)]
+pub struct ClipImage {
+    pub width: usize,
+    pub height: usize,
+    pub rgba: Vec<u8>,
+}
+
+/// 剪贴板读取抽象: 真实实现走 arboard + Win32 序列号; 测试用假源。
 pub trait ClipSource {
+    /// 剪贴板序列号, 变化即内容变了。
     fn sequence(&mut self) -> u32;
+    /// 读纯文本; 非文本或读失败返回 None。
     fn text(&mut self) -> Option<String>;
     fn html(&mut self) -> Option<String> { None }
     fn files(&mut self) -> Option<Vec<String>> { None }
     fn image(&mut self) -> Option<ClipImage> { None }
 }
 
+/// 真实剪贴板源 (arboard 读文本, Win32 读序列号/文件列表)。
 pub struct SystemClipSource { /* arboard + Win32 */ }
+impl SystemClipSource {
+    /// 失败返回 arboard 错误 (框架不引 anyhow 进生产依赖)。
+    pub fn new() -> Result<Self, arboard::Error>;
+}
 
 /// DIB 来源 RGBA 常带全 0 alpha → 全置 255; 存在非零则尊重原通道。
 pub fn ensure_opaque_alpha(rgba: &mut [u8]);
 ```
 
-**不下沉**: `Monitor` (监听器) 的隐私判定 (ExclusionList) / 落库 (Store) / 轮询循环 (run) 是产品业务; `strip_html_tags` / `paths_to_json` 是 RichText 展示语义, 暂留产品 (等第二消费者)。
+**不下沉**: `Monitor` (监听器) 的隐私判定 (ExclusionList) / 落库 (Store) / 轮询循环 (run) 是产品业务; `strip_html_tags` / `paths_to_json` 是 RichText 展示语义, 暂留产品 (等第二消费者); `MAX_IMAGE_BYTES` (单条上限) / `POLL_INTERVAL` (轮询间隔) 是产品策略, 留产品。
 
 ## 依赖
 
 - E1/E2: 无新增 (windows-sys `Win32_UI_WindowsAndMessaging` + `Win32_System_Threading` 已声明)。
 - E3: 无 (纯 std)。
-- E4: 新增 windows-sys features —— `Win32_System_DataExchange` (序列号/剪贴板句柄) + `Win32_System_Memory` (GlobalLock/Unlock) + CF_HDROP (Win32_System_Ole 或 Win32_UI_Shell)。arboard 已依赖。
+- E4: 新增 windows-sys features —— `Win32_System_DataExchange` (序列号/OpenClipboard/GetClipboardData/CloseClipboard) + `Win32_System_Memory` (GlobalLock/Unlock) + `Win32_System_Ole` (CF_HDROP)。`Win32_UI_Shell` (DragQueryFileW) 已有。arboard 已依赖 (零新增外部依赖)。
 
 ## 验收标准
 
@@ -89,7 +105,7 @@ pub fn ensure_opaque_alpha(rgba: &mut [u8]);
    - E1: clipboard `foreground.rs` 现有测试不 panic (无 GUI 环境); 新增超时降级纯逻辑可测 (注入时间源? 或保留轮询只测不 panic)。
    - E2: 现有 `foreground_process_name_does_not_panic` 搬移。
    - E3: 3 测试直接搬, 零改动 (裸 LF / 已含 CRLF 各一, 空串 + 无换行 + 孤立 \r 折进 `edge_cases`)。
-   - E4: `ensure_opaque_alpha` 3 测试 (全 0 置 255 / 尊重非零 / 空与奇数长度) 直接搬; `SystemClipSource::files` 的 CF_HDROP +1 教训随代码内化。
+   - E4: `ensure_opaque_alpha` 3 测试 (全 0 置 255 / 尊重非零 / 空与奇数长度) 直接搬; `SystemClipSource` 不 panic 冒烟 (无 GUI 环境返 None/失败); `SystemClipSource::files` 的 CF_HDROP 缓冲区 +1 教训随代码内化。
 2. **三件套**: `cargo fmt` + `cargo clippy --all-targets -- -D warnings` + `cargo test --lib --tests` 全绿。
 3. **产品迁移验证** (clipboard):
    - E1: `foreground.rs` 删手写 `wait_for_focus_leave`, 改 `danqing::foreground::wait_for_focus_leave`; `main.rs` paste_into_previous 相应简化。
