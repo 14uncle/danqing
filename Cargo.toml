@@ -21,6 +21,8 @@ update = ["dep:ureq", "dep:serde", "dep:serde_json", "dep:dirs", "dep:open", "pe
 persist = ["dep:dirs", "dep:serde", "dep:serde_json"]
 
 [dependencies]
+# 编码检测与转码 (兄弟 crate, 零 UI 依赖)
+danqing-encoding = { git = "https://github.com/14uncle/danqing-encoding" }
 winit = "0.30.13"
 # 与 winit 0.30 共享同一 raw-window-handle 版本 (0.6), 用于取原生窗口句柄 (HWND)。
 raw-window-handle = "0.6"

@@ -7,7 +7,6 @@
 
 mod atlas;
 mod crlf;
-pub mod encoding;
 pub mod fit;
 mod font;
 pub mod line_layout;

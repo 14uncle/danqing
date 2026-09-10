@@ -36,6 +36,8 @@ mod window;
 
 pub use anim::{Crossfade, Cue, CueTiming, Pulse, Tween};
 pub use app::{AnimationCtx, App};
+/// 编码检测与转码 (兄弟 crate, 零 UI 依赖)。
+pub use danqing_encoding as encoding;
 pub use event::{Event, ImeEvent, Key, MouseButton, NamedKey, WindowAction};
 pub use job::{AsyncJob, CancelFlag, CancelToken, SearchNav};
 pub use layout::{Color, Constraints, Edges, FlowChild, Point, Rect, Size, distribute};
@@ -44,7 +46,7 @@ pub use render::{
     RenderError, ScaleMode, TextBatch,
 };
 pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo, Line, break_lines, to_crlf};
-pub use text::{encoding, fit, selection};
+pub use text::{fit, selection};
 pub use theme::{
     Easing, LightTheme, ScenePalette, SceneSpec, SceneTheme, Shadow, Theme, composite_over,
     contrast_ratio, relative_luminance,
