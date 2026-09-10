@@ -16,7 +16,7 @@
 | E2 | `foreground_process_name` | 获取前台进程名 (隐私三件套比对排除名单) | clipboard `foreground.rs:12-53` | S-M | danqing 零 |
 | E3 | `to_crlf` 文本归一 | 裸 LF → CRLF (Windows 剪贴板惯例, 旧版记事本换行丢失) | clipboard `inject.rs:15-20` | **S** | 3 测试纯逻辑, 零依赖 |
 | E4 | 剪贴板监听 (`ClipSource`/`SystemClipSource`/`ensure_opaque_alpha`) | 序列号门控 + CF_HDROP 文件读取 + DIB alpha 修补 | clipboard `monitor.rs:37-164,58-64` | M-L | 20+ 测试全场最厚; 需新平台驻地 |
-| E5 | 粘贴注入编排配方 | 防重入 + 写剪贴板 + 隐藏 + 等焦点离开 + 恢复 + Ctrl+V | clipboard `main.rs:295-387` | M | 依赖 E1; 编排含产品状态, 不全下沉 |
+| E5 | 粘贴注入编排配方 | 等焦点离开 → 恢复原前台 → Ctrl+V 三连 (防重入/写剪贴板/隐藏留产品) | clipboard `main.rs:376-386,432-441` | **S** | 依赖 E1; 只下沉注入三连, 产品状态留产品 |
 
 **已下沉 (勿再提议)**: `record_foreground` / `restore_foreground` / `simulate_paste` 已在 `danqing::foreground` (window/foreground.rs, 2026-08-01 AttachThreadInput 方案)。
 
@@ -93,6 +93,17 @@ pub fn ensure_opaque_alpha(rgba: &mut [u8]);
 
 **不下沉**: `Monitor` (监听器) 的隐私判定 (ExclusionList) / 落库 (Store) / 轮询循环 (run) 是产品业务; `strip_html_tags` / `paths_to_json` 是 RichText 展示语义, 暂留产品 (等第二消费者); `MAX_IMAGE_BYTES` (单条上限) / `POLL_INTERVAL` (轮询间隔) 是产品策略, 留产品。
 
+### E5 (`window/foreground.rs` 追加 `paste_into_previous`)
+
+```rust
+/// 粘贴注入配方: 隐藏窗口后, 等焦点离开本进程 → 恢复原前台 → 模拟 Ctrl+V。
+/// 三步顺序是 bug 换来的 (等焦点离开 / 恢复不杀 TSF / 注入)。调用方负责
+/// 写剪贴板 + 隐藏窗口 + 防重入 (产品状态)。无返回值, 各步失败静默降级。
+pub fn paste_into_previous(prev_foreground: Option<HWND>, timeout: std::time::Duration);
+```
+
+**不下沉**: 防重入 (`is_pasting` 标志) / 找条目 / 写剪贴板 (`write_clipboard` 按 kind 选格式) / 隐藏窗口 (`hide_window`) 是产品状态与业务。
+
 ## 依赖
 
 - E1/E2: 无新增 (windows-sys `Win32_UI_WindowsAndMessaging` + `Win32_System_Threading` 已声明)。
@@ -106,6 +117,7 @@ pub fn ensure_opaque_alpha(rgba: &mut [u8]);
    - E2: 现有 `foreground_process_name_does_not_panic` 搬移。
    - E3: 3 测试直接搬, 零改动 (裸 LF / 已含 CRLF 各一, 空串 + 无换行 + 孤立 \r 折进 `edge_cases`)。
    - E4: `ensure_opaque_alpha` 3 测试 (全 0 置 255 / 尊重非零 / 空与奇数长度) 直接搬; `SystemClipSource` 不 panic 冒烟 (无 GUI 环境返 None/失败); `SystemClipSource::files` 的 CF_HDROP 缓冲区 +1 教训随代码内化。
+   - E5: `paste_into_previous` 组合 wait_for_focus_leave/restore_foreground/simulate_paste (均已有), 无新测试 (simulate_paste 注入真实 Ctrl+V, 进默认测试违反「测试严禁真实桌面副作用」铁律); 产品迁移验证粘贴行为不变。
 2. **三件套**: `cargo fmt` + `cargo clippy --all-targets -- -D warnings` + `cargo test --lib --tests` 全绿。
 3. **产品迁移验证** (clipboard):
    - E1: `foreground.rs` 删手写 `wait_for_focus_leave`, 改 `danqing::foreground::wait_for_focus_leave`; `main.rs` paste_into_previous 相应简化。

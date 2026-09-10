@@ -173,6 +173,24 @@ pub fn wait_for_focus_leave(timeout: std::time::Duration) -> bool {
     false
 }
 
+/// 粘贴注入配方: 隐藏窗口后, 等焦点离开本进程 → 恢复原前台 → 模拟 Ctrl+V。
+///
+/// 三步顺序是 bug 换来的:
+/// 1. 等焦点离开 ([`wait_for_focus_leave`], 10ms 轮询 + 超时降级) —— 固定延时过短
+///    Ctrl+V 打在自己窗口, 过长用户感知延迟;
+/// 2. 恢复原前台 ([`restore_foreground`]) —— 窗口已隐藏, 不杀 TSF (TSF 仅在窗口可见时杀);
+/// 3. 模拟 Ctrl+V ([`simulate_paste`])。
+///
+/// 调用方负责: 写剪贴板 + 隐藏窗口 + 防重入 (产品状态)。本函数无返回值,
+/// 各步失败静默降级 (wait 超时仍注入, 恢复失败仅警告, 注入失败仅警告)。
+pub fn paste_into_previous(prev_foreground: Option<HWND>, timeout: std::time::Duration) {
+    let _ = wait_for_focus_leave(timeout);
+    if let Some(hwnd) = prev_foreground {
+        restore_foreground(hwnd);
+    }
+    simulate_paste();
+}
+
 /// 获取当前前台窗口的进程名 (如 "notepad.exe")。
 ///
 /// 失败返回 None (无前台窗口 / 权限不足 / API 调用失败)。不取本进程自己。
