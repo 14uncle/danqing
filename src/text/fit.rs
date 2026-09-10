@@ -16,10 +16,14 @@ const ELLIPSIS: &str = "…";
 
 /// 二分找最长字符边界 `lo` 使 `measure(&s[..lo]) <= w`。返回 `lo`。
 ///
-/// 不变量: `measure(&s[..lo]) <= w`, `lo < hi` 时 `mid = lo + (hi-lo)/2` 下取整,
-/// 回退到字符边界后若 `m <= lo` 说明 lo 已是该多字节字符前的最长边界, 提前终止
-/// (杜绝 lo 不前进的死循环)。`hi = m` 而非 `m-1`, 因 m 是边界且 measure 超宽。
+/// 全文 ≤ w 时直接返回 `s.len()` (下取整二分会在 len-1 处提前停, 不达全文长);
+/// 否则不变量 `measure(&s[..lo]) <= w < measure(&s[..hi])`, `mid = lo+(hi-lo)/2`
+/// 下取整, 回退到字符边界后若 `m <= lo` 提前终止 (杜绝 lo 不前进的死循环)。
+/// `hi = m` 而非 `m-1`, 因 m 是边界且 measure 超宽。
 fn longest_prefix(s: &str, w: f32, measure: &mut impl FnMut(&str) -> f32) -> usize {
+    if measure(s) <= w {
+        return s.len();
+    }
     let mut lo = 0usize;
     let mut hi = s.len();
     while lo < hi {
@@ -166,6 +170,12 @@ mod tests {
     #[test]
     fn scroll_trim_nonpositive_returns_whole() {
         assert_eq!(scroll_trim("ab", 0.0, chars_width), ("ab", 0.0));
+    }
+
+    #[test]
+    fn scroll_trim_whole_width_returns_empty() {
+        // w 超过全文宽: 全滚出为空 (longest_prefix 前置检查直接返回全文长)
+        assert_eq!(scroll_trim("abcdef", 99.0, chars_width).0, "");
     }
 
     // ---- ellipsize_tail ----
