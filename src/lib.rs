@@ -39,7 +39,7 @@ pub use render::{
     BackgroundConfig, BackgroundFrame, Context as RenderContext, ImageBatch, RectBatch,
     RenderError, ScaleMode, TextBatch,
 };
-pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo, Line, break_lines};
+pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo, Line, break_lines, to_crlf};
 pub use text::{encoding, fit, selection};
 pub use theme::{
     Easing, LightTheme, ScenePalette, SceneSpec, SceneTheme, Shadow, Theme, composite_over,

@@ -139,6 +139,89 @@ pub fn simulate_paste() {
     }
 }
 
+/// 轮询等待前台窗口不再是本进程 (焦点已转移)。
+///
+/// 隐藏窗口后焦点转移是异步的, 固定延时不可靠：过短则 Ctrl+V 打在自己窗口,
+/// 过长则用户感知延迟。本函数每 10ms 检测一次, 最多等 `timeout`。
+/// 超时返回 `false` (调用方仍应注入, 降级为旧行为)。
+pub fn wait_for_focus_leave(timeout: std::time::Duration) -> bool {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    let my_pid = unsafe { GetCurrentProcessId() };
+    let deadline = std::time::Instant::now() + timeout;
+    let poll_interval = std::time::Duration::from_millis(10);
+
+    while std::time::Instant::now() < deadline {
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd.is_null() {
+                // 无前台窗口 — 焦点已离开
+                return true;
+            }
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid != my_pid {
+                // 焦点已转移到其他进程
+                return true;
+            }
+        }
+        std::thread::sleep(poll_interval);
+    }
+    false
+}
+
+/// 获取当前前台窗口的进程名 (如 "notepad.exe")。
+///
+/// 失败返回 None (无前台窗口 / 权限不足 / API 调用失败)。不取本进程自己。
+pub fn foreground_process_name() -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return None;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == 0 {
+            return None;
+        }
+        // 不取自己进程的名称 (监听线程的前台没意义)
+        if pid == GetCurrentProcessId() {
+            return None;
+        }
+
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return None;
+        }
+        let result = (|| {
+            let mut buf = [0u16; 260];
+            let mut size = buf.len() as u32;
+            // PROCESS_NAME_FORMAT(0) = 0: 返回完整映像路径
+            let ok = QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut size);
+            if ok == 0 {
+                return None;
+            }
+            let path = String::from_utf16_lossy(&buf[..size as usize]);
+            // 取最后的文件名部分
+            path.rsplit(['\\', '/']).next().map(str::to_string)
+        })();
+        let _ = CloseHandle(handle);
+        result
+    }
+}
+
 /// 把窗口抢到前台 + 提到顶层 (Windows)。对后台常驻进程同样有效。
 ///
 /// 调用方应保证窗口已可见 (`set_visible(true)` 之后)；否则 `SetForegroundWindow`
@@ -399,5 +482,19 @@ mod tests {
         // 验证 simulate_paste() API 存在且不 panic
         // 实际效果需要手测验证 (需要真实前台窗口)
         super::simulate_paste();
+    }
+
+    /// 焦点离开轮询: 无 GUI 环境 (CI) 下前台可能是本进程或 None, 只验证不 panic。
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn wait_for_focus_leave_does_not_panic() {
+        let _ = super::wait_for_focus_leave(std::time::Duration::from_millis(10));
+    }
+
+    /// 前台进程名: 无 GUI 环境 (CI) 可能返回 None, 只验证不 panic。
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn foreground_process_name_does_not_panic() {
+        let _ = super::foreground_process_name();
     }
 }
