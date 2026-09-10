@@ -55,31 +55,32 @@ feature gate `persist`，产品 opt-in。依赖全已有 (dirs/serde/serde_json)
 
 - [x] 三件套绿; 14 条单测全锁定 (14 tests, 0 failed) ✅ 2026-09-09
 - [x] review (全模块) — 通过 ✅ 2026-09-09
-- [ ] 用户过目
+- [x] 用户过目 — "批准" ✅ 2026-09-09
 
 ### Phase 2: 产品迁移
 
-- [ ] **T4: pomodoro state.rs 迁移** — `save_to_path` / `load_from_path` 改用 `atomic_save` / `load_or_default`
+- [x] **T4: pomodoro state.rs 迁移** — `save_to_path` / `load_from_path` 改用 `atomic_save` / `load_or_default` ✅ 2026-09-09 (pomodoro `ef7a199`)
   - 文件: `danqing-pomodoro/src/state.rs` | M
   - 验收: 既有测试零改动全绿 (行为保持判据)
   - 估时: S
   - 依赖: T1, danqing push
 
-- [ ] **T5: pomodoro stats.rs 迁移** — `FocusHistory` 的版本保护改用 `VersionedDoc`
+- [x] **T5: pomodoro stats.rs 迁移** — `FocusHistory` 的版本保护改用 `VersionedDoc` ✅ 2026-09-09 (pomodoro `6ccebe4`/`60057f8`)
   - 文件: `danqing-pomodoro/src/stats.rs` | M
   - 验收: 既有 22+ 测试零改动全绿
   - 估时: M
   - 依赖: T3, danqing push
 
-- [ ] **T6: pomodoro main.rs 脏标记迁移** — 脏标记 + 节流逻辑改用 `DirtyFlag`
+- [x] **T6: pomodoro main.rs 脏标记迁移** — 跳过 (DirtyFlag 时间源与测试耦合不兼容)
   - 文件: `danqing-pomodoro/src/main.rs` | M
-  - 验收: 既有测试零改动全绿
-  - 估时: S-M
+  - 原因: DirtyFlag 用 Instant(墙钟), pomodoro 用 Duration(动画时钟); 20+ 测试直接赋值 last_save_at; 双脏标记需两个 DirtyFlag 实例
+  - 结论: 保留手写逻辑, DirtyFlag 留给新产品使用
+  - 估时: S-M → N/A
   - 依赖: T2, danqing push
 
 ### Checkpoint 2: 全量验收
 
-- [ ] 各仓三件套绿; 分仓分别提交, message 注明关联
+- [x] 各仓三件套绿; 分仓分别提交, message 注明关联 ✅ 2026-09-09
 - [ ] 人工过目 (pomodoro 启动/退出/持久化行为不变)
 - [ ] 进 review 阶段
 
