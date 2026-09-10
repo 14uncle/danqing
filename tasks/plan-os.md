@@ -13,7 +13,7 @@ E1/E2 需 `windows` 0.62 → `windows-sys` 0.59 移植。
 
 1. **落点**: E3 落 `text/crlf.rs` (纯逻辑, 与 selection/encoding/fit 同层); E1/E2 落 `window/foreground.rs` (现平台驻地, 与 record/restore/simulate_paste 同居)。
 2. **windows 移植** (0.62 → 0.59): `OpenProcess`/`QueryFullProcessImageNameW` 等 `Result` 返回 → `HANDLE`/`BOOL` 判空判 0; `GetWindowThreadProcessId` 的 `Option<&mut u32>` → `*mut u32` 裸指针 out 参数。
-3. **非 Windows stub**: E1/E2 用 `#[cfg(windows)]` + 非 Windows 降级 (wait → 视为已离开返 true; name → None)。
+3. **非 Windows 门控**: E1/E2 随 `foreground` 模块级 `#[cfg(target_os = "windows")]` 门控 (与 record/restore/simulate_paste 一致), 非 Windows 上符号整体不存在, 无需单独 stub/降级。
 4. **测试策略**: E3 4 测试直接搬 (纯逻辑); E1/E2 平台 API 依赖真实前台窗口, 只做「不 panic」冒烟 (仿 window/foreground 现有测试), 无 GUI 环境返降级值。
 
 ## Task List
@@ -36,7 +36,7 @@ E1/E2 需 `windows` 0.62 → `windows-sys` 0.59 移植。
   - 估时: S-M | 依赖: 无
 
 - [x] **T4: re-export 接线** — `danqing/src/lib.rs` (确认 foreground 已导出; text 加 to_crlf) ✅ 2026-09-10
-  - 验收: `cargo check` 通过, `danqing::foreground::wait_for_focus_leave` / `danqing::text::to_crlf` 可达
+  - 验收: `cargo check` 通过, `danqing::foreground::wait_for_focus_leave` / `danqing::to_crlf` 可达
   - 估时: XS | 依赖: T1-T3
 
 ### Checkpoint 1: 框架侧完成

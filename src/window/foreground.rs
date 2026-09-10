@@ -491,6 +491,14 @@ mod tests {
         let _ = super::wait_for_focus_leave(std::time::Duration::from_millis(10));
     }
 
+    /// 超时降级: `Duration::ZERO` 使 `now < deadline` 立即为 false, 循环一次不进, 确定返回 false。
+    /// 锁定「超时仍注入 (降级旧行为)」这一唯一有意义的逻辑分支, 无需真实前台窗口、非 flaky。
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn wait_for_focus_leave_zero_timeout_returns_false() {
+        assert!(!super::wait_for_focus_leave(std::time::Duration::ZERO));
+    }
+
     /// 前台进程名: 无 GUI 环境 (CI) 可能返回 None, 只验证不 panic。
     #[test]
     #[cfg(target_os = "windows")]
