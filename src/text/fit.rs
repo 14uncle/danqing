@@ -16,9 +16,9 @@ const ELLIPSIS: &str = "…";
 
 /// 二分找最长字符边界 `lo` 使 `measure(&s[..lo]) <= w`。返回 `lo`。
 ///
-/// 全文 ≤ w 时直接返回 `s.len()` (下取整二分会在 len-1 处提前停, 不达全文长);
-/// 否则不变量 `measure(&s[..lo]) <= w < measure(&s[..hi])`, `mid = lo+(hi-lo)/2`
-/// 下取整, 回退到字符边界后若 `m <= lo` 提前终止 (杜绝 lo 不前进的死循环)。
+/// 全文 ≤ w 时直接返回 `s.len()`; 否则下取整二分。`mid` 落在多字节字符内部时
+/// 回退到字符边界; 若回退到 `lo` 说明 mid 落在 lo 所在字符内, 此时改为探测
+/// lo 之后的下一个字符边界 (而非直接收敛), 避免「该字符本身可容纳」时漏判。
 /// `hi = m` 而非 `m-1`, 因 m 是边界且 measure 超宽。
 fn longest_prefix(s: &str, w: f32, measure: &mut impl FnMut(&str) -> f32) -> usize {
     if measure(s) <= w {
@@ -33,7 +33,17 @@ fn longest_prefix(s: &str, w: f32, measure: &mut impl FnMut(&str) -> f32) -> usi
             m -= 1;
         }
         if m <= lo {
-            break;
+            // mid 落在 lo 所在多字节字符内部: 探测下一字符边界 (lo + 该字符字节长)
+            let next = lo + s[lo..].chars().next().map_or(hi, |c| c.len_utf8());
+            if next >= hi {
+                break; // (lo, hi) 内已无未探测边界
+            }
+            if measure(&s[..next]) <= w {
+                lo = next;
+            } else {
+                hi = next;
+            }
+            continue;
         }
         if measure(&s[..m]) <= w {
             lo = m;
@@ -110,7 +120,7 @@ pub fn ellipsize_middle(
         return ellipsize_tail(line, max_width, measure);
     }
     let head_budget = max_width - reserved;
-    let head_lo = longest_prefix(line, head_budget, &mut measure);
+    let head_lo = longest_prefix(&line[..sep], head_budget, &mut measure);
     format!("{}{}{}", &line[..head_lo], ELLIPSIS, tail)
 }
 
@@ -176,6 +186,13 @@ mod tests {
     fn scroll_trim_whole_width_returns_empty() {
         // w 超过全文宽: 全滚出为空 (longest_prefix 前置检查直接返回全文长)
         assert_eq!(scroll_trim("abcdef", 99.0, chars_width).0, "");
+    }
+
+    #[test]
+    fn scroll_trim_mixed_ascii_multibyte_cuts_whole_char() {
+        // "a中b": a=0..1, 中=1..4(3字节), b=4..5 —— mid 落进多字节字符内部的分支
+        assert_eq!(scroll_trim("a中b", 2.0, chars_width), ("b", 0.0)); // 中完整切出
+        assert_eq!(scroll_trim("a中b", 1.5, chars_width), ("中b", 0.5)); // 中未被切, 亚偏移 0.5
     }
 
     // ---- ellipsize_tail ----
