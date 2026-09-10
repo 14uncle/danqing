@@ -39,20 +39,24 @@ use serde::de::DeserializeOwned;
 /// | macOS | `~/Library/Application Support/<name>` |
 /// | Linux | `~/.config/<name>` |
 ///
-/// # Panics
+/// # 返回值
 ///
-/// 当 `dirs::config_dir()` 返回 `None`（极罕见的桌面环境缺失）时 panic。
+/// 配置目录不可得 (`dirs::config_dir()` 返回 `None`, 极罕见) 或创建失败时
+/// 返回 `None`, 由调用方决定降级策略 (如跳过持久化)。
 ///
 /// # Examples
 ///
 /// ```ignore
-/// let dir = danqing::persist::config_dir("my-app");
+/// let dir = danqing::persist::config_dir("my-app").expect("配置目录不可用");
 /// assert!(dir.ends_with("my-app"));
 /// ```
-pub fn config_dir(name: &str) -> PathBuf {
-    let dir = dirs::config_dir().expect("config_dir 不可用").join(name);
-    fs::create_dir_all(&dir).expect("create config dir");
-    dir
+pub fn config_dir(name: &str) -> Option<PathBuf> {
+    let dir = dirs::config_dir()?.join(name);
+    if let Err(e) = fs::create_dir_all(&dir) {
+        log::warn!("创建配置目录失败: {} — {e}", dir.display());
+        return None;
+    }
+    Some(dir)
 }
 
 // ── 2. atomic_save ───────────────────────────────────────────────────
@@ -72,6 +76,9 @@ pub fn config_dir(name: &str) -> PathBuf {
 /// danqing::persist::atomic_save(&path, b"hello")?;
 /// ```
 pub fn atomic_save(path: &Path, data: &[u8]) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, data)?;
     fs::rename(&tmp, path)?;
@@ -94,10 +101,20 @@ pub fn atomic_save(path: &Path, data: &[u8]) -> io::Result<()> {
 /// assert_eq!(cfg.volume, 0.0); // 文件不存在 → 默认值
 /// ```
 pub fn load_or_default<T: Default + DeserializeOwned>(path: &Path) -> T {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    match fs::read_to_string(path) {
+        Ok(s) => match serde_json::from_str::<T>(&s) {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("持久化文件损坏, 使用默认值: {} — {e}", path.display());
+                T::default()
+            }
+        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => T::default(),
+        Err(e) => {
+            log::warn!("持久化文件读取失败, 使用默认值: {} — {e}", path.display());
+            T::default()
+        }
+    }
 }
 
 // ── 4. DirtyFlag ─────────────────────────────────────────────────────
@@ -219,11 +236,13 @@ impl<T: Serialize + DeserializeOwned + Clone> VersionedDoc<T> {
         Self { version, data }
     }
 
-    /// 从 JSON 文件加载。版本号高于当前版本时拒绝并返回 `None`；
-    /// 文件不存在或格式错误时返回 `Some(VersionedDoc::new(version, Default))`。
+    /// 从 JSON 文件加载。以下任一情况返回 `None`：
+    /// - 文件不存在
+    /// - 格式错误 (非 JSON / 字段类型不匹配)
+    /// - 版本号高于 `version` (未来版本, 拒绝降级)
     ///
-    /// **注意**：`T` 需实现 `Default`。调用方需在 `T` 不满足 `Default` 时
-    /// 使用其他加载方式。
+    /// 版本号 ≤ `version` 时正常加载。`T` 需实现 `Default` 仅用于
+    /// 文档注释一致性；实现本身不依赖 `Default`。
     pub fn load(path: &Path, version: u32) -> Option<Self>
     where
         T: Default,
@@ -273,7 +292,7 @@ mod tests {
 
     #[test]
     fn config_dir_returns_path() {
-        let dir = config_dir("danqing-test-config");
+        let dir = config_dir("danqing-test-config").unwrap();
         assert!(dir.exists());
         // 清理
         let _ = fs::remove_dir_all(&dir);
@@ -281,7 +300,7 @@ mod tests {
 
     #[test]
     fn atomic_save_writes_file() {
-        let dir = config_dir("danqing-test-atomic");
+        let dir = config_dir("danqing-test-atomic").unwrap();
         let path = dir.join("test.txt");
         atomic_save(&path, b"hello world").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "hello world");
@@ -291,7 +310,7 @@ mod tests {
 
     #[test]
     fn load_or_default_existing_file() {
-        let dir = config_dir("danqing-test-load");
+        let dir = config_dir("danqing-test-load").unwrap();
         let path = dir.join("config.json");
         fs::write(&path, r#"{"key":"value"}"#).unwrap();
         let data: serde_json::Value = load_or_default(&path);
@@ -308,7 +327,7 @@ mod tests {
 
     #[test]
     fn load_or_default_corrupt_json() {
-        let dir = config_dir("danqing-test-corrupt");
+        let dir = config_dir("danqing-test-corrupt").unwrap();
         let path = dir.join("bad.json");
         fs::write(&path, "not json!!!").unwrap();
         let data: serde_json::Value = load_or_default(&path);
@@ -366,7 +385,7 @@ mod tests {
     #[test]
     fn dirty_flag_error_keeps_dirty() {
         let mut flag = DirtyFlag::new(Duration::from_secs(0), || {
-            Err(io::Error::new(io::ErrorKind::Other, "boom"))
+            Err(io::Error::other("boom"))
         });
         flag.mark();
         let result = flag.try_flush(Instant::now() + Duration::from_secs(1));
@@ -377,7 +396,7 @@ mod tests {
 
     #[test]
     fn versioned_doc_roundtrip() {
-        let dir = config_dir("danqing-test-versioned");
+        let dir = config_dir("danqing-test-versioned").unwrap();
         let path = dir.join("doc.json");
 
         let doc = VersionedDoc::new(1, vec![1, 2, 3]);
@@ -390,7 +409,7 @@ mod tests {
 
     #[test]
     fn versioned_doc_rejects_higher_version() {
-        let dir = config_dir("danqing-test-reject");
+        let dir = config_dir("danqing-test-reject").unwrap();
         let path = dir.join("doc.json");
 
         // 写入 version=2
@@ -412,7 +431,7 @@ mod tests {
 
     #[test]
     fn versioned_doc_corrupt_json_returns_default() {
-        let dir = config_dir("danqing-test-vcorrupt");
+        let dir = config_dir("danqing-test-vcorrupt").unwrap();
         let path = dir.join("bad.json");
         fs::write(&path, "not json").unwrap();
         let loaded = VersionedDoc::<u32>::load(&path, 1);

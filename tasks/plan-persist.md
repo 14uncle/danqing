@@ -81,8 +81,8 @@ feature gate `persist`，产品 opt-in。依赖全已有 (dirs/serde/serde_json)
 ### Checkpoint 2: 全量验收
 
 - [x] 各仓三件套绿; 分仓分别提交, message 注明关联 ✅ 2026-09-09
-- [ ] 人工过目 (pomodoro 启动/退出/持久化行为不变)
-- [ ] 进 review 阶段
+- [x] 人工过目 (pomodoro 启动/退出/持久化行为不变) ✅ 2026-09-10
+- [x] 进 review 阶段 ✅ 2026-09-10 — 五轴评审: 1 Critical (未来版本保护失效) + 4 Required, 已全部修复 (persist.rs / state.rs / stats.rs)
 
 ## Risks and Mitigations
 
