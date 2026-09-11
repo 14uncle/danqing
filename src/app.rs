@@ -48,6 +48,14 @@ pub trait App: Any {
     /// 未被组件树消费的鼠标事件也会到达这里。
     fn event(&mut self, _event: &Event) {}
 
+    /// 无焦点应用是否请求 IME (中文输入法合成)。焦点组件经
+    /// [`crate::widget::Widget::wants_ime`] 声明; 本钩子补上「无焦点直收键盘/IME」
+    /// 场景 (如日志查看器自建搜索框)。每帧查询。默认 false —— 无焦点即关 IME,
+    /// 与既有焦点应用行为一致, 零波及。
+    fn wants_ime(&self) -> bool {
+        false
+    }
+
     /// 键盘前置过滤: 在焦点组件分发**之前**调用, 给应用层拦截机会。
     ///
     /// 返回 `Some(msg)` 表示应用消费了该按键 (消息入队, 事件不再下发);
@@ -55,6 +63,16 @@ pub trait App: Any {
     /// 默认 `None` (不拦截)。
     fn app_key_filter(&mut self, _event: &Event) -> Option<Self::Msg> {
         None
+    }
+
+    /// 焦点组件未消费的按下事件是否回退 [`App::event`]。默认 false ——
+    /// 维持「未消费即丢弃」的既有行为, 既有应用零波及。
+    ///
+    /// 开启场景: 大面积只读组件持焦的应用 (如日志查看器), 持焦后
+    /// 应用级导航键 (j/k/翻页/快捷键) 仍须到达应用层。已消费的键
+    /// 永不回退 (TextInput 处理过的字符不会重复到达)。
+    fn propagate_unhandled_keys(&self) -> bool {
+        false
     }
 
     /// 每帧心跳：在 `sync` 之前调用，驱动计时 / 过渡动画等时间相关状态。
@@ -66,6 +84,11 @@ pub trait App: Any {
     /// 启动首次显示后也会回调一次 (初始状态同步) —— 应用层的可见性镜像
     /// (如热键 toggle 方向判断) 以此为准, 无需自行假设初始值。
     fn visibility_changed(&mut self, _visible: bool) {}
+
+    /// 渲染暂停态变化 (仅 WindowMode::Adaptive): 前台全屏应用检出/退出时
+    /// 调用。常驻氛围应用据此把声音一并沉降 (性能洁癖的听觉一半:
+    /// 用户在游戏, 世界的雨声也不该飘进耳机)。默认无操作。
+    fn render_suspended(&mut self, _suspended: bool) {}
 
     /// 每帧背景状态：场景选择 / 淡化进度 / 清屏色。
     ///
@@ -82,6 +105,21 @@ pub trait App: Any {
     fn boot_elapsed_offset(&self) -> Duration {
         Duration::ZERO
     }
+
+    /// 位置记忆: 读取上次窗口位置 (物理像素, 左上角)。
+    ///
+    /// 仅 `ShowPlacement::Remember` 时在窗口创建后 (显示前) 调用一次;
+    /// 返回 `None` (默认, 无存储) 时退化为居中。存储由产品侧负责,
+    /// 引擎保持零文件 I/O (与托盘「引擎管机制, 产品管内容」同构)。
+    fn load_window_position(&self) -> Option<(i32, i32)> {
+        None
+    }
+
+    /// 位置记忆: 窗口移动 (非最大化) 后回调新位置 (物理像素, 左上角)。
+    ///
+    /// 拖动期间按 `Moved` 事件频率回调, 实现方应自行防抖落盘。
+    /// 仅 `ShowPlacement::Remember` 时回调。默认 no-op。
+    fn save_window_position(&mut self, _x: i32, _y: i32) {}
 
     /// 注入窗口事件发送器 (App 主动控制窗口：显隐 / 全局热键退出等)。
     /// 默认空实现：不需要窗口控制的应用无需关心。
@@ -140,4 +178,12 @@ pub trait App: Any {
     /// 用于跟踪焦点状态 (如剪贴板管理器的首次焦点守卫)。默认空实现。
     /// 调用时机：`WindowEvent::Focused(true)` 到达时。
     fn focus_gained(&mut self) {}
+
+    /// 动态窗口标题: 每帧查询, 与上次不同则更新窗口标题栏与任务栏显示。
+    ///
+    /// 返回 `Some(title)` 时框架调用 `window.set_title(title)`; 返回 `None` (默认)
+    /// 不更新。适用于标题随模式/文件变化的应用 (如日志查看器 JSONL/原始模式切换)。
+    fn window_title(&self) -> Option<String> {
+        None
+    }
 }

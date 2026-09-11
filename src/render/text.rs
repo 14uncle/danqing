@@ -6,6 +6,8 @@
 //! [`TextBatch`] 是 CPU 侧：持有字体与图集，负责按字排版并收集实例;
 //! [`TextPipeline`] 是 GPU 侧：负责把图集脏区域上传纹理并绘制实例。
 
+use std::ops::Range;
+
 use crate::Color;
 use crate::render::DrawTarget;
 use crate::text::{Font, GlyphAtlas};
@@ -43,6 +45,9 @@ pub struct TextBatch {
     instances: Vec<GlyphInstance>,
     /// 裁剪矩形栈;`None` 表示当前裁剪区为空 (完全裁剪)。
     clip_stack: Vec<Option<crate::Rect>>,
+    /// 层边界: 与 RectBatch::push_layer 配套; 渲染按层分段交替,
+    /// 本层的矩形先画 (可盖低层文本), 本层文本后画。
+    layer_marks: Vec<usize>,
 }
 
 impl TextBatch {
@@ -53,6 +58,7 @@ impl TextBatch {
             atlas: GlyphAtlas::new(),
             instances: Vec::new(),
             clip_stack: Vec::new(),
+            layer_marks: Vec::new(),
         }
     }
 
@@ -129,8 +135,12 @@ impl TextBatch {
                 continue;
             };
             if info.width > 0 {
-                let gx = pen_x + info.bearing_x as f32;
-                let gy = baseline - info.bearing_y as f32;
+                // 字形落点吸附整数像素: dst 矩形与物理像素格对齐后, 线性采样
+                // 退化为逐纹素取值 —— 分数位置会让每个字形向邻像素渗色,
+                // 小字号正文整片发灰发虚 (与竞品 ClearType 观感的差距主因)。
+                // pen_x 仍按真实 advance 累加, 只吸附落点, 行间/词间距离不变。
+                let gx = (pen_x + info.bearing_x as f32).round();
+                let gy = (baseline - info.bearing_y as f32).round();
                 let glyph_rect =
                     crate::Rect::from_xywh(gx, gy, info.width as f32, info.height as f32);
                 let (clip_min, clip_max) = match self.current_clip() {
@@ -169,9 +179,27 @@ impl TextBatch {
         }
     }
 
-    /// 清空本帧实例 (字体与图集保留)。
+    /// 清空本帧实例与层标记 (字体与图集保留)。
     pub fn clear(&mut self) {
         self.instances.clear();
+        self.layer_marks.clear();
+    }
+
+    /// 开新层：之后 push 的文本属于新层 (与 RectBatch::push_layer 配对调用)。
+    pub fn push_layer(&mut self) {
+        self.layer_marks.push(self.instances.len());
+    }
+
+    /// 逐层实例区间 (恒 ≥1 段; 未 push_layer 时为单层全量)。
+    pub fn layer_spans(&self) -> Vec<Range<usize>> {
+        let mut spans = Vec::with_capacity(self.layer_marks.len() + 1);
+        let mut start = 0;
+        for &mark in &self.layer_marks {
+            spans.push(start..mark);
+            start = mark;
+        }
+        spans.push(start..self.instances.len());
+        spans
     }
 
     /// 实例数量。
@@ -416,28 +444,41 @@ impl TextPipeline {
         self.capacity = new_capacity;
     }
 
-    /// 在已有内容的画面上叠加绘制文本 (LoadOp::Load, 不清屏)。
-    pub fn draw(
+    /// 上传图集脏区 + 整批字形实例 + 屏幕 uniform (每帧一次, 须在 [`Self::draw_span`] 之前)。
+    ///
+    /// 与 RectPipeline::upload 同理: wgpu 的 write_buffer 统一在 submit 的全部
+    /// pass 之前执行, 分层渲染必须整批一次上传、各层只按区间绘制。
+    pub fn upload(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &DrawTarget,
         batch: &mut TextBatch,
+        target: &DrawTarget,
     ) {
         self.sync_atlas(queue, batch);
-        if batch.is_empty() {
-            return;
-        }
         let data = [target.width, target.height, 0.0, 0.0];
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::cast_slice(&data));
-        self.ensure_capacity(device, batch.len());
-        queue.write_buffer(
-            &self.instance_buf,
-            0,
-            bytemuck::cast_slice(&batch.instances),
-        );
+        self.ensure_capacity(device, batch.instances.len());
+        if !batch.instances.is_empty() {
+            queue.write_buffer(
+                &self.instance_buf,
+                0,
+                bytemuck::cast_slice(&batch.instances),
+            );
+        }
+    }
 
+    /// 在已有内容的画面上叠加绘制批次中的一个字形区间 (LoadOp::Load, 不清屏),
+    /// 须先调用 [`Self::upload`]。空区间直接跳过, 不开 pass。
+    pub fn draw_span(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &DrawTarget,
+        span: Range<usize>,
+    ) {
+        if span.is_empty() {
+            return;
+        }
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("text pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -458,7 +499,8 @@ impl TextPipeline {
         pass.set_bind_group(0, &self.uniform_bind, &[]);
         pass.set_bind_group(1, &self.atlas_bind, &[]);
         pass.set_vertex_buffer(0, self.instance_buf.slice(..));
-        pass.draw(0..6, 0..batch.len() as u32);
+        // 实例顶点属性按 first_instance 偏移取值: 以区间端点为实例范围。
+        pass.draw(0..6, span.start as u32..span.end as u32);
     }
 }
 
@@ -485,6 +527,19 @@ mod tests {
     }
 
     #[test]
+    fn layer_spans_and_clear_resets() {
+        let mut batch = TextBatch::new();
+        batch.push_text("A", 0.0, 20.0, 16, Color::BLACK);
+        let n1 = batch.len();
+        batch.push_layer();
+        batch.push_text("B", 0.0, 20.0, 16, Color::BLACK);
+        let n2 = batch.len();
+        assert_eq!(batch.layer_spans(), vec![0..n1, n1..n2], "两层分段");
+        batch.clear();
+        assert_eq!(batch.layer_spans(), vec![0..0], "clear 后回归单层空段");
+    }
+
+    #[test]
     fn nested_clip_intersects_for_text() {
         let mut batch = TextBatch::new();
         batch.push_clip(Rect::from_xywh(0.0, 0.0, 100.0, 100.0));
@@ -498,13 +553,23 @@ mod tests {
     }
 
     #[test]
-    fn descent_returns_fallback_when_no_metrics() {
+    fn descent_returns_loaded_font_descent() {
+        // TextBatch::new() 用 Font::load()，总带真实 metrics；descent 应返回加载字体的
+        // descent（px*0.2 只是无 metrics 时的防御回退，正常字体走不到）。
+        // 旧版断言硬编码 0.2*px=3.2，仅因 Noto 的 descent 恰为 3.2 而通过；换 mono 后
+        // 露馅(4.56)——改成与加载字体的真实 descent 比对，不再绑定字体巧合值。
         let batch = TextBatch::new();
         let d = batch.descent(16.0);
-        // 无字体 metrics 时应回退 px * 0.2
+        let expected = batch
+            .font
+            .inner()
+            .horizontal_line_metrics(16.0)
+            .unwrap()
+            .descent
+            .abs();
         assert!(
-            (d - 3.2).abs() < 0.01,
-            "descent 应为 16.0 * 0.2 = 3.2, 实际 {d}"
+            (d - expected).abs() < 0.01,
+            "descent 应为加载字体的 descent {expected}, 实际 {d}"
         );
     }
 }

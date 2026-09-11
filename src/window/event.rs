@@ -17,6 +17,7 @@ use winit::{
 
 use crate::Color;
 use crate::Point;
+use crate::Size;
 use crate::event::{Event, ImeEvent, Key, MouseButton, NamedKey};
 
 /// 应用主动发给窗口的事件 (用于全局热键配套：显隐 / 退出等)。
@@ -35,6 +36,20 @@ pub enum WindowAppEvent {
     PhaseAdvanced,
     /// 动态更新窗口背景色 (主题切换等场景)。
     SetClearColor(Color),
+    /// 切换点击穿透 (桌面常驻陪伴形态): true = 鼠标事件直达下层窗口,
+    /// 本窗口纯观赏; false = 恢复正常交互。只改命中测试, 不动可见性与焦点。
+    SetClickThrough(bool),
+    /// 切换置顶层级: true = 恒在普通窗口之上; false = 普通层级。
+    SetTopmost(bool),
+    /// 请求调整窗口内尺寸 (逻辑像素, 与 `WindowConfig.size` 同约定)。
+    /// winit 异步生效, 实际结果以随后的 `Resized` 事件为准。
+    SetInnerSize(Size),
+    /// 事件升帧 (仅 [`crate::WindowMode::Adaptive`] 生效): 微事件播放期
+    /// 临时恢复全帧率, 到期自动回落。`f32` = 升帧时长 (秒), 后发覆盖先到。
+    BoostFrames(f32),
+    /// 请求 Handler 读取剪贴板文本, 回送为 `Event::Ime(Commit)` 经 `app.event`
+    /// 送达 (App 层无剪贴板直连; 供无焦点应用支持粘贴)。
+    ReadClipboard,
 }
 
 /// 应用持有的窗口事件发送器 (轻量 clone, 内部是 mpsc Sender)。
@@ -75,6 +90,34 @@ impl WindowEventSender {
     pub fn set_clear_color(&self, color: Color) {
         let _ = self.sender.send(WindowAppEvent::SetClearColor(color));
     }
+
+    /// 切换点击穿透 (true = 鼠标事件直达下层, 窗口纯观赏)。
+    /// 底层实现幂等: 重复发送同值无副作用。
+    pub fn set_click_through(&self, enabled: bool) {
+        let _ = self.sender.send(WindowAppEvent::SetClickThrough(enabled));
+    }
+
+    /// 切换置顶层级 (true = 恒在普通窗口之上)。
+    pub fn set_topmost(&self, topmost: bool) {
+        let _ = self.sender.send(WindowAppEvent::SetTopmost(topmost));
+    }
+
+    /// 请求调整窗口内尺寸 (逻辑像素)。winit 异步生效, 实际尺寸
+    /// 以随后的 `Resized` 事件为准; 窗口未创建时 Handler 丢弃该请求。
+    pub fn request_inner_size(&self, size: Size) {
+        let _ = self.sender.send(WindowAppEvent::SetInnerSize(size));
+    }
+
+    /// 事件升帧 (仅 [`crate::WindowMode::Adaptive`] 生效): 微事件播放期
+    /// 临时恢复全帧率, 到期自动回落降帧。`secs` 为升帧时长 (秒)。
+    pub fn boost_frames(&self, secs: f32) {
+        let _ = self.sender.send(WindowAppEvent::BoostFrames(secs));
+    }
+
+    /// 请求读取剪贴板文本 (Handler 回送 `Event::Ime(Commit)` 经 `app.event` 送达)。
+    pub fn read_clipboard(&self) {
+        let _ = self.sender.send(WindowAppEvent::ReadClipboard);
+    }
 }
 
 /// 把 winit 窗口事件转换为内部事件; 无关事件返回 None。
@@ -112,6 +155,9 @@ pub(super) fn convert_event(
             Some(Event::MouseWheel {
                 delta: d,
                 position: cursor,
+                shift: modifiers.shift_key(),
+                ctrl: modifiers.control_key(),
+                alt: modifiers.alt_key(),
             })
         }
         WindowEvent::KeyboardInput { event, .. } => {
@@ -131,6 +177,8 @@ pub(super) fn convert_event(
                         WinitNamedKey::Delete => NamedKey::Delete,
                         WinitNamedKey::Home => NamedKey::Home,
                         WinitNamedKey::End => NamedKey::End,
+                        WinitNamedKey::PageUp => NamedKey::PageUp,
+                        WinitNamedKey::PageDown => NamedKey::PageDown,
                         WinitNamedKey::Shift => NamedKey::Shift,
                         WinitNamedKey::Control => NamedKey::Control,
                         WinitNamedKey::Alt => NamedKey::Alt,
@@ -160,5 +208,39 @@ pub(super) fn convert_event(
             })),
         },
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Size;
+
+    /// 尺寸切换事件经通道完整送达 (变体 + 载荷)。
+    #[test]
+    fn request_inner_size_sends_variant_with_payload() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sender = WindowEventSender { sender: tx };
+        sender.request_inner_size(Size::new(480.0, 360.0));
+        match rx.try_recv() {
+            Ok(WindowAppEvent::SetInnerSize(size)) => {
+                assert_eq!(size, Size::new(480.0, 360.0));
+            }
+            other => panic!("期望 SetInnerSize, 实际 {other:?}"),
+        }
+    }
+
+    /// 事件升帧经通道完整送达 (变体 + 载荷)。
+    #[test]
+    fn boost_frames_sends_variant_with_payload() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sender = WindowEventSender { sender: tx };
+        sender.boost_frames(20.0);
+        match rx.try_recv() {
+            Ok(WindowAppEvent::BoostFrames(secs)) => {
+                assert_eq!(secs, 20.0);
+            }
+            other => panic!("期望 BoostFrames, 实际 {other:?}"),
+        }
     }
 }

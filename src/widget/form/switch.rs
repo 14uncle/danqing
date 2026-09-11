@@ -8,10 +8,13 @@
 
 use std::any::Any;
 use std::cell::Cell;
+use std::time::Duration;
 
+use crate::anim::Tween;
 use crate::app::AnimationCtx;
 use crate::event::{Event, Key, MouseButton, NamedKey};
 use crate::render::{RectBatch, TextBatch};
+use crate::theme::Easing;
 use crate::widget::{EventResult, MsgQueue, Widget};
 use crate::{Color, Constraints, LightTheme, Point, Rect, Size, Theme};
 
@@ -30,10 +33,8 @@ const KNOB_DIAMETER: f32 = 16.0;
 const TRACK_RADIUS: f32 = TRACK_HEIGHT / 2.0;
 /// 滑块与轨道边缘的间距。
 const KNOB_PADDING: f32 = (TRACK_HEIGHT - KNOB_DIAMETER) / 2.0;
-/// 动画时长 (毫秒)。
-const ANIM_DURATION_MS: f32 = 150.0;
-/// 动画时长 (秒)。
-const ANIM_DURATION_S: f32 = ANIM_DURATION_MS / 1000.0;
+/// 动画时长 (150ms 线性补间, 经 `anim::Tween` 推进)。
+const ANIM_DURATION: Duration = Duration::from_millis(150);
 
 /// 滑动开关组件。
 ///
@@ -51,8 +52,8 @@ pub struct Switch {
     anim_progress: f32,
     /// 动画目标: 0.0 或 1.0。
     anim_target: f32,
-    /// 上一帧的绝对时间 (用于计算 dt)。
-    last_time: Option<std::time::Instant>,
+    /// 进度补间 (150ms 线性, 目标翻转从当前值续接)。
+    tween: Tween,
     /// 鼠标悬停。
     hovered: bool,
     /// 鼠标按下。
@@ -85,7 +86,7 @@ impl Switch {
             on_toggle: None,
             anim_progress: 0.0,
             anim_target: 0.0,
-            last_time: None,
+            tween: Tween::new(ANIM_DURATION, Easing::Linear),
             hovered: false,
             pressed: false,
             focused: false,
@@ -152,19 +153,7 @@ impl Widget for Switch {
     }
 
     fn animate(&mut self, ctx: &AnimationCtx) {
-        let now = ctx.now;
-        if let Some(last) = self.last_time {
-            let dt = now.duration_since(last).as_secs_f32();
-            if dt > 0.0 && (self.anim_progress - self.anim_target).abs() > 0.001 {
-                let step = dt / ANIM_DURATION_S;
-                if self.anim_progress < self.anim_target {
-                    self.anim_progress = (self.anim_progress + step).min(self.anim_target);
-                } else {
-                    self.anim_progress = (self.anim_progress - step).max(self.anim_target);
-                }
-            }
-        }
-        self.last_time = Some(now);
+        self.anim_progress = self.tween.value(ctx.elapsed, self.anim_target);
     }
 
     fn layout(&mut self, constraints: Constraints, _texts: &mut TextBatch) -> Size {
@@ -474,8 +463,8 @@ mod tests {
 
         let now = Instant::now();
         sw.animate(&AnimationCtx::new(now, Duration::ZERO));
-        // 第一帧: last_time 为 None, 不插值
-        assert_eq!(sw.anim_progress, 0.0, "第一帧不应插值");
+        // 第一帧: 补间从当前值 0 起 (边沿帧不跳变)
+        assert_eq!(sw.anim_progress, 0.0, "第一帧不应跳变");
 
         // 第二帧: 前进 75ms (一半)
         let t2 = now + Duration::from_millis(75);

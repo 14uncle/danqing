@@ -10,7 +10,19 @@ rust-version = "1.85"
 description = "丹青 —— 跨平台自绘 UI 框架"
 license = "MIT OR Apache-2.0"
 
+[features]
+# 应用内更新检查核心 (版本对比/缓存/后台检查/GitHub 运输)。默认关闭:
+# 不启用则不拉网络/序列化栈 (`update` 全 optional)。产品显式开启。
+# 缓存落盘复用 persist 原子写, 故 `update` 依赖 `persist` (零新增外部依赖)。
+default = []
+update = ["dep:ureq", "dep:serde", "dep:serde_json", "dep:dirs", "dep:open", "persist"]
+# 应用持久化核心 (config_dir/atomic_save/load_or_default/DirtyFlag/VersionedDoc)。
+# 产品显式开启; dirs+serde+serde_json 与 update 共享,不重复拉。
+persist = ["dep:dirs", "dep:serde", "dep:serde_json"]
+
 [dependencies]
+# 编码检测与转码 (兄弟 crate, 零 UI 依赖)
+danqing-encoding = { git = "https://github.com/14uncle/danqing-encoding" }
 winit = "0.30.13"
 # 与 winit 0.30 共享同一 raw-window-handle 版本 (0.6), 用于取原生窗口句柄 (HWND)。
 raw-window-handle = "0.6"
@@ -27,8 +39,15 @@ env_logger = "0.11"
 chrono = "0.4"
 arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
+rodio = { version = "0.22", default-features = false, features = ["playback", "symphonia-ogg", "symphonia-vorbis"] }
 tray-icon = "0.19"
-windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_Graphics_Gdi"] }
+windows-sys = { version = "0.59", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_UI_Shell", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole"] }
+# 更新检查核心 (仅 `update` feature 启用): GitHub Releases + 序列化缓存 + 系统打开链接。
+ureq = { version = "3.4", default-features = false, features = ["rustls", "json"], optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+dirs = { version = "5", optional = true }
+open = { version = "5", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

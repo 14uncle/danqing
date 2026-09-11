@@ -26,8 +26,19 @@ struct Uniforms {
     cave_intensity: f32,
     nightmarket_intensity: f32,
     train_intensity: f32,
-    _pad1: f32,
-    _pad2: f32,
+    // ---- 时辰调色 + 双蒙版 (桌景 scene-world 天级「活的时间」) ----
+    // 全 f32 紧排 (本 struct 无 vec3, 避开 uniform 16B 对齐位错;
+    // Rust 侧 cast_slice 同序 24 字段, 护栏测试锁字段数)。
+    tod_tint_r: f32,       // 时辰色调 R (乘性; 1.0 = 原样)
+    tod_tint_g: f32,
+    tod_tint_b: f32,
+    tod_brightness: f32,   // 时辰亮度乘性
+    tod_saturation: f32,   // 时辰饱和度乘性 (0 = 灰度)
+    sky_amount: f32,       // 天空蒙版夜空化进度 0..1 (0 = 天空原样)
+    glow_amount: f32,      // 发光蒙版点亮进度 0..1 (灰度阈值错落亮灯)
+    // ---- 微事件 (桌景 scene-world 分钟级; 包络由产品调度器算好, 本层只播放) ----
+    event_firefly: f32,    // 萤火虫包络 0..1 (程序化萤绿光点, 免资产)
+    flash_intensity: f32,  // 闪电亮度包络 0..1 (全屏 additive 蓝白)
 }
 
 // ---- 雨幕 (雨场景; 静态图已去丝, 雨全部由本段程序化渲染) ----
@@ -558,7 +569,7 @@ fn star_band(y: f32) -> f32 {
 // 基础星野 (静态, 常驻): 采样 CPU 烘焙的真实星表纹理 — 位置/亮度/暖色全部
 // 来自星表 (Yale BSC5), 暂停时定格可见 (定格语义)。
 fn star_field(uv: vec2<f32>) -> vec3<f32> {
-    return textureSample(starfield_tex, starfield_smp, uv).rgb * star_band(uv.y);
+    return textureSample(starfield_tex, extras_smp, uv).rgb * star_band(uv.y);
 }
 
 // 星闪: 细网格脉冲场**调制**星野纹理采样 (不再自绘光点)。
@@ -572,7 +583,7 @@ fn star_twinkle(uv: vec2<f32>, t: f32) -> vec3<f32> {
     let phase_h = rain_hash(cell.x * 31.0 + cell.y * 47.0 + 9.0); // 独立 hash → 相位真随机
     let k = 2.0 + floor(freq_h * 3.0);  // {2,3,4}/8 Hz
     let pulse = sin(t * STAR_W * k + phase_h * 6.2831853);   // [-1,1] 双极: 明暗双向
-    let star = textureSample(starfield_tex, starfield_smp, uv).rgb;
+    let star = textureSample(starfield_tex, extras_smp, uv).rgb;
     return star * star_band(uv.y) * pulse * SF_TWINKLE_AMP;
 }
 
@@ -669,14 +680,60 @@ var tex_to: texture_2d<f32>;
 @group(2) @binding(1)
 var samp_to: sampler;
 
-// 星野纹理 (星夜场景): CPU 启动烘焙的真实星表星点层, 与场景图同画布,
-// 共用 in.uv 采样 (同一组 Cover 裁剪, 星点与山脊线像素级对齐)。
-// 未配置时 Rust 侧绑 1×1 全黑回退 — 本槽恒可绑。
+// group 3 附加纹理组 (三纹理 + 共享采样器): 星野 / 天空蒙版 / 发光蒙版。
+// 合一原因: wgpu 默认 max_bind_groups=4 (2026-08-30 实测超组 panic),
+// 星野纹理无运行时替换 API (启动后静态), 合并无副作用。
+// 未配置的槽位 Rust 侧绑 1×1 全黑回退 — 三槽恒可绑。
 @group(3) @binding(0)
 var starfield_tex: texture_2d<f32>;
 
+// 天空蒙版 (桌景天级路线 B): 灰度图, 天空区域白 —— sky_amount 驱动天空
+// 向深夜蓝暗沉降。
 @group(3) @binding(1)
-var starfield_smp: sampler;
+var sky_mask_tex: texture_2d<f32>;
+
+// 发光蒙版 (桌景签名时刻): 灰度图, 发光区灰度值 = 亮灯时序阈值
+// (灰度高先亮) —— glow_amount 推进 + 抖动阈值, 灯一盏盏亮起而非全街跳闸。
+@group(3) @binding(2)
+var glow_mask_tex: texture_2d<f32>;
+
+@group(3) @binding(3)
+var extras_smp: sampler;
+
+// 发光蒙版点亮色温 (暖琥珀, 窗内灯光); additive 发射, 不受时辰调色影响
+// (光源恒暖, 调色作用于被照物)。
+const GLOW_WARM: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
+// 天空夜空化目标色相 (深夜蓝暗, 乘性沉降)。
+const NIGHT_SKY_TINT: vec3<f32> = vec3<f32>(0.30, 0.36, 0.55);
+
+// ---- 萤火虫 (桌景分钟级微事件): 程序化萤绿光点, 免资产 ----
+// 5 只, 下半区慢漂 (基位 hash 固定 + 低频正弦游移), 明灭节奏错开
+// (大部分时间是暗的, 亮时忽然 —— 萤火虫的「眨眼」感); 包络由产品调度器
+// 驱动 (事件开演淡入, 落幕淡出), 本层只播放。
+const FF_COUNT: f32 = 5.0;
+const FF_COLOR: vec3<f32> = vec3<f32>(0.72, 1.0, 0.45); // 萤绿偏暖
+const FF_RADIUS: f32 = 0.004;      // 点半径 (纵向 uv; 小窗里 ~1-2px 亮点)
+const FF_DRIFT_X: f32 = 0.045;     // 横向游移幅度
+const FF_DRIFT_Y: f32 = 0.030;     // 纵向游移幅度
+
+fn firefly_layer(uv: vec2<f32>, t: f32) -> f32 {
+    var acc = 0.0;
+    let aspect = u.screen_w / max(u.screen_h, 1.0);
+    for (var i = 0.0; i < FF_COUNT; i += 1.0) {
+        let h1 = rain_hash(i * 12.9 + 3.1);
+        let h2 = rain_hash(i * 7.7 + 9.3);
+        // 基位下半区 (y 0.50~0.92, 贴地面/小屋生活层, 不上天空)。
+        let cx = 0.08 + h1 * 0.84 + sin(t * 0.35 * (0.7 + 0.5 * h2) + h1 * 6.2831853) * FF_DRIFT_X;
+        let cy = 0.50 + h2 * 0.42 + cos(t * 0.50 * (0.6 + 0.4 * h1) + h2 * 6.2831853) * FF_DRIFT_Y;
+        // 明灭: 频率错开, 暗多亮少 (smoothstep 抬门槛)。
+        let tw = 0.5 + 0.5 * sin(t * (1.2 + h1 * 2.2) + h2 * 6.2831853);
+        let blink = smoothstep(0.55, 0.95, tw);
+        let d = distance(vec2<f32>(uv.x * aspect, uv.y), vec2<f32>(cx * aspect, cy));
+        let spot = 1.0 - smoothstep(FF_RADIUS * 0.3, FF_RADIUS, d);
+        acc += spot * blink;
+    }
+    return min(acc, 1.0);
+}
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -812,5 +869,36 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             color.a,
         );
     }
-    return vec4<f32>(color.rgb, color.a * u.opacity);
+    // ---- 时辰调色 + 双蒙版合成 (桌景 scene-world; 恒等值时逐像素零漂移) ----
+    // 顺序: 场景动效合成 → 分级调色 (乘性色调 + 饱和度绕亮度轴 + 亮度) →
+    // 天空夜空化 (蒙版区向深夜蓝沉降) → 发光蒙版 additive 点亮 (发射恒暖,
+    // 不被调色 —— 灯是光源不是被照物)。
+    var rgb = color.rgb * vec3<f32>(u.tod_tint_r, u.tod_tint_g, u.tod_tint_b);
+    let luma = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    rgb = mix(vec3<f32>(luma), rgb, u.tod_saturation) * u.tod_brightness;
+    if (u.sky_amount > 0.0) {
+        let sky = textureSample(sky_mask_tex, extras_smp, in.uv).r;
+        if (sky > 0.003) {
+            rgb = mix(rgb, rgb * NIGHT_SKY_TINT, sky * u.sky_amount);
+        }
+    }
+    if (u.glow_amount > 0.0) {
+        let g = textureSample(glow_mask_tex, extras_smp, in.uv).r;
+        if (g > 0.003) {
+            // 灰度即亮灯时序: 阈值 = 1 - g (灰度高的灯先亮);
+            // 逐像素 hash 抖动破机械边沿 (错落感 =「活」与「假」的分水岭)。
+            let dither = rain_hash(in.uv.x * 719.0 + in.uv.y * 911.0) * 0.06;
+            let lit = clamp((u.glow_amount - (1.0 - g) + dither) * 8.0, 0.0, 1.0);
+            rgb += GLOW_WARM * lit * g * 0.85;
+        }
+    }
+    // 萤火虫 (发射光点, 调色之后叠加 —— 与发光蒙版同层语义: 光源不被调色)。
+    if (u.event_firefly > 0.0) {
+        rgb += FF_COLOR * firefly_layer(in.uv, u.time) * u.event_firefly * 0.7;
+    }
+    // 闪电最后 (压过一切的全屏提亮, 蓝白色温; 双闪脉冲形状在产品侧)。
+    if (u.flash_intensity > 0.0) {
+        rgb += vec3<f32>(0.82, 0.88, 1.05) * u.flash_intensity * 0.85;
+    }
+    return vec4<f32>(rgb, color.a * u.opacity);
 }

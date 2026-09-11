@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use crate::event::{Event, MouseButton};
 use crate::render::{RectBatch, TextBatch};
-use crate::widget::{EventResult, MsgQueue, Widget};
+use crate::widget::{EventResult, MsgQueue, Node, Widget};
 use crate::{Color, Constraints, LightTheme, Point, Rect, Size, Theme};
 
 /// LOGO 变体 — 标题栏程序化绘制。
@@ -28,6 +28,8 @@ pub enum LogoKind {
     Pomodoro,
     /// 剪贴板：深色圆角矩形 + 青色夹子 + 青色横线。
     Clipboard,
+    /// 日志：玉色宽幅视窗 (玻璃内填) + 四条水平日志行, 底部一条朱砂 = live tail。
+    Log,
 }
 
 /// 标题栏按钮布局样式。
@@ -89,6 +91,8 @@ impl ButtonRole {
 
 /// 红绿灯 hover 符号颜色 (macOS 惯例：半透明深灰，不随主题变化)。
 const TRAFFIC_GLYPH_COLOR: Color = Color::rgba(0.0, 0.0, 0.0, 0.55);
+/// 内嵌槽与标题文字、窗口按钮之间的水平留白。
+const EMBED_SLOT_GAP: f32 = 8.0;
 
 /// 标题栏按钮。
 #[derive(Debug, Default, Clone, Copy)]
@@ -178,10 +182,25 @@ pub struct TitleBar {
     is_maximized: bool,
     /// 最大化状态绑定：每帧从应用状态读取，覆盖 `is_maximized`。
     maximized_binding: Option<MaximizedBinding>,
+    /// 内嵌栏槽：在标题文字与窗口按钮之间托管一个子节点 (如搜索/过滤输入)，可选。
+    /// 未设置时 TitleBar 保持叶子行为 (children 为空)，完全向后兼容。
+    embed: Option<Node>,
+    /// 内嵌槽的布局区域 (layout 计算, paint/event 用; 无 embed 为默认)。
+    /// 高度按子节点自身高度竖直居中于标题栏, 宽度取标题右三键左之间的余宽。
+    embed_area: Rect,
 }
 
 /// 品牌朱砂红 (#E34234)：仅用于 LOGO 颜料滴的品牌资产色，不属于 theme token 体系。
 const BRAND_CINNABAR: Color = Color::rgb(227.0 / 255.0, 66.0 / 255.0, 52.0 / 255.0);
+
+/// 品牌玉色 (#0F766E)：LOGO 主体品牌资产色 (与任务栏 PNG/SVG 设计稿一致),
+/// 不随产品主题 accent 流动 —— danqing-log 的 accent 是蓝, 直接走 token 会与
+/// 任务栏图标颜色分裂。
+const BRAND_JADE: Color = Color::rgb(15.0 / 255.0, 118.0 / 255.0, 110.0 / 255.0);
+
+/// LOGO 玻璃内填 (白 0.85)：与 SVG/PNG 一致; 走 surface_input token 会在浅色
+/// 底上几乎隐形 (6% 黑), 「玻璃」感丢失。
+const LOGO_GLASS_FILL: Color = Color::rgba(1.0, 1.0, 1.0, 0.85);
 
 /// 随主题流动的标题栏颜色子集 (构建后仍可经 [`TitleBar::bind_theme`] 每帧刷新)。
 #[derive(Debug, Clone, Copy)]
@@ -263,6 +282,8 @@ impl TitleBar {
             theme_binding: None,
             is_maximized: false,
             maximized_binding: None,
+            embed: None,
+            embed_area: Rect::default(),
         }
     }
 
@@ -328,6 +349,35 @@ impl TitleBar {
     pub fn logo_kind(mut self, kind: LogoKind) -> Self {
         self.logo_kind = kind;
         self
+    }
+
+    /// 设置内嵌栏槽：在标题文字与窗口按钮之间托管一个子节点 (如搜索/过滤输入)。
+    ///
+    /// 未设置时 TitleBar 保持叶子行为 (children 为空)，完全向后兼容。
+    /// 单槽位：多个输入由产品包成一个子组件传入 (如一个含两个 TextInput 的条)。
+    pub fn embed(mut self, widget: impl Widget + 'static) -> Self {
+        self.embed = Some(Box::new(widget));
+        self
+    }
+
+    /// 位置是否落在内嵌槽内 (槽有正宽才转发, 否则视为无槽)。
+    /// `area` 为组件绝对矩形, 槽须平移后与绝对 pointer 比较。
+    fn in_embed(&self, area: Rect, pos: Point) -> bool {
+        self.embed_area.size.width > 0.0 && self.embed_abs(area).contains(pos)
+    }
+
+    /// 把事件转发给内嵌子节点 (以槽的绝对矩形为其实 area), 返回其处理结果;
+    /// 无 embed 返回 None。
+    fn forward_embed(
+        &mut self,
+        event: &Event,
+        area: Rect,
+        msgs: &mut MsgQueue,
+    ) -> Option<EventResult> {
+        let abs = self.embed_abs(area);
+        self.embed
+            .as_mut()
+            .map(|child| child.event(event, abs, msgs))
     }
 
     fn set_action<M: 'static>(slot: &mut Option<ActionFactory>, f: impl Fn() -> M + 'static) {
@@ -437,6 +487,41 @@ impl TitleBar {
             .into_iter()
             .filter(|role| self.is_button_visible(*role))
             .find(|role| self.button_rect(area, *role).contains(position))
+    }
+
+    /// 内嵌槽右界: Standard 取最左窗口按钮左缘, TrafficLights 取窗口右缘边距。
+    fn embed_slot_right(&self, area: Rect) -> f32 {
+        match self.style {
+            TitleBarStyle::Standard => self
+                .style
+                .placed_roles()
+                .iter()
+                .filter(|r| self.is_button_visible(**r))
+                .map(|r| self.button_rect(area, *r).origin.x)
+                .fold(area.origin.x + area.size.width, f32::min),
+            TitleBarStyle::TrafficLights => area.origin.x + area.size.width - self.margin,
+        }
+    }
+
+    /// 内嵌槽 x 范围: `[标题右缘 + 留白, 按钮区左缘]`。
+    /// 标题碰到按钮区 (`x0 >= x1`) 时返回零宽 —— 槽消失, 不覆盖窗口按钮。
+    fn embed_slot_span(&self, area: Rect, texts: &mut TextBatch) -> (f32, f32) {
+        let logo_r = self.logo_rect(area);
+        let title_w = texts.measure(&self.title, self.font_size);
+        let x0 = logo_r.origin.x + logo_r.size.width + self.logo_gap + title_w + EMBED_SLOT_GAP;
+        let x1 = self.embed_slot_right(area);
+        if x0 >= x1 { (x0, x0) } else { (x0, x1) }
+    }
+
+    /// 内嵌槽的绝对矩形: 由 layout 的槽 (相对本组件原点 0) 平移组件实际原点。
+    /// `area` 为 paint/event 收到的组件绝对矩形。
+    fn embed_abs(&self, area: Rect) -> Rect {
+        Rect::from_xywh(
+            self.embed_area.origin.x + area.origin.x,
+            self.embed_area.origin.y + area.origin.y,
+            self.embed_area.size.width,
+            self.embed_area.size.height,
+        )
     }
 
     /// 指定角色按钮的图形符号颜色。
@@ -693,11 +778,39 @@ impl Widget for TitleBar {
         if let Some(binding) = &self.maximized_binding {
             self.is_maximized = binding(state);
         }
+        if let Some(child) = &mut self.embed {
+            child.sync(state);
+        }
     }
 
-    fn layout(&mut self, constraints: Constraints, _texts: &mut TextBatch) -> Size {
+    fn animate(&mut self, ctx: &crate::app::AnimationCtx) {
+        if let Some(child) = &mut self.embed {
+            child.animate(ctx);
+        }
+    }
+
+    fn layout(&mut self, constraints: Constraints, texts: &mut TextBatch) -> Size {
         let size = constraints.constrain(Size::new(constraints.max_width, self.height));
         self.area = Rect::new(Point::ZERO, size);
+        // 内嵌槽: 取标题右、三键左的余宽, 子节点按自然高度竖直居中于标题栏。
+        // 标题碰到按钮区时槽零宽 (embed_area 为默认), 不覆盖按钮。
+        if self.embed.is_some() {
+            let (x0, x1) = self.embed_slot_span(self.area, texts);
+            let slot_w = (x1 - x0).max(0.0);
+            if slot_w > 0.0 {
+                let slot = Rect::from_xywh(x0, self.area.origin.y, slot_w, size.height);
+                if let Some(child) = &mut self.embed {
+                    let child_size = child.layout(Constraints::loose(slot.size), texts);
+                    let y = slot.origin.y + (slot.size.height - child_size.height).max(0.0) / 2.0;
+                    self.embed_area =
+                        Rect::from_xywh(slot.origin.x, y, slot.size.width, child_size.height);
+                }
+            } else {
+                self.embed_area = Rect::default();
+            }
+        } else {
+            self.embed_area = Rect::default();
+        }
         size
     }
 
@@ -854,6 +967,49 @@ impl Widget for TitleBar {
                     rects.push_rect(Rect::from_xywh(line_x, ly, line_w, line_h), accent, line_r);
                 }
             }
+            LogoKind::Log => {
+                // ── 日志：宽幅视窗 (玉色框 + 玻璃内填) + 四条日志行, 底部一条朱砂 ──
+                // 框/行/内填用品牌资产色 (BRAND_JADE + LOGO_GLASS_FILL), 与任务栏
+                // PNG/SVG 设计稿严格一致; 不走主题 token (danqing-log accent 是蓝,
+                // surface_input 是 6% 透明黑, 走 token 会变色+内填隐形)。
+                let x = logo_rect.origin.x;
+                let y = logo_rect.origin.y;
+                let s = logo_size;
+                let jade = BRAND_JADE;
+
+                // 外框窗口: 玉色圆角矩形, 几何居中 (SVG 28..228 / 48..208)。
+                let wx0 = s * 0.109;
+                let wy0 = s * 0.1875;
+                let ww = s * 0.781;
+                let wh = s * 0.625;
+                let wr = s * 0.109;
+                rects.push_rect(Rect::from_xywh(x + wx0, y + wy0, ww, wh), jade, wr);
+
+                // 玻璃内填 (SVG inset 20/256): 形成描边环效果。
+                let gi = s * 0.078;
+                rects.push_rect(
+                    Rect::from_xywh(x + wx0 + gi, y + wy0 + gi, ww - gi * 2.0, wh - gi * 2.0),
+                    LOGO_GLASS_FILL,
+                    (wr - gi).max(0.0),
+                );
+
+                // 四条日志行: 前三玉色, 底部一条朱砂 (live tail, 几何 62..200)。
+                // 数组元素 = (版 y0, 版宽), 均为 256 设计空间值。
+                let bx = x + s * (62.0 / 256.0);
+                let bh = s * (16.0 / 256.0);
+                let br = bh / 2.0;
+                let rows: [(f32, f32, Color); 4] = [
+                    (72.0, 120.0, jade),
+                    (104.0, 82.0, jade),
+                    (136.0, 130.0, jade),
+                    (168.0, 138.0, self.logo_dot_color),
+                ];
+                for (y0, w0, color) in rows {
+                    let by = y + s * (y0 / 256.0);
+                    let bw = s * (w0 / 256.0);
+                    rects.push_rect(Rect::from_xywh(bx, by, bw, bh), color, br);
+                }
+            }
         }
 
         // 标题文字，垂直居中。
@@ -901,6 +1057,13 @@ impl Widget for TitleBar {
                 }
             }
         }
+
+        // 内嵌槽子节点: 绘制在其布局区域 (标题右、按钮左), 须平移组件实际原点。
+        if let Some(child) = &self.embed {
+            if self.embed_area.size.width > 0.0 && self.embed_area.size.height > 0.0 {
+                child.paint(self.embed_abs(area), rects, texts);
+            }
+        }
     }
 
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
@@ -913,6 +1076,10 @@ impl Widget for TitleBar {
                 }
                 if hit.is_some() {
                     EventResult::Consumed
+                } else if self.in_embed(area, *p) {
+                    // 槽内悬停: 转发给内嵌子节点 (如输入框 hover/指针状态)。
+                    self.forward_embed(event, area, msgs)
+                        .unwrap_or(EventResult::Ignored)
                 } else {
                     EventResult::Ignored
                 }
@@ -923,6 +1090,8 @@ impl Widget for TitleBar {
                     btn.pressed = false;
                 }
                 self.last_left_press = None;
+                // 子节点仍在: 补发 CursorLeft 复位其 hover 状态。
+                self.forward_embed(event, area, msgs);
                 EventResult::Ignored
             }
             Event::MouseInput {
@@ -936,8 +1105,12 @@ impl Widget for TitleBar {
                         self.buttons[r.index()].pressed = r == role;
                     }
                     EventResult::Consumed
+                } else if self.in_embed(area, *position) {
+                    // 槽内按下: 转发给子节点 (输入框落焦/光标定位), 不触发拖拽。
+                    self.forward_embed(event, area, msgs)
+                        .unwrap_or(EventResult::Consumed)
                 } else {
-                    // 非按钮区：拖拽或双击最大化
+                    // 非按钮、非槽 (标题/logo 区): 拖拽或双击最大化
                     self.handle_drag_or_double_click(*position, msgs);
                     EventResult::Consumed
                 }
@@ -961,7 +1134,15 @@ impl Widget for TitleBar {
                         self.emit_button_action(role, msgs);
                     }
                 }
-                EventResult::Consumed
+                if hit.is_some() {
+                    EventResult::Consumed
+                } else if self.in_embed(area, *position) {
+                    // 槽内松开: 转发给子节点 (文本选区收尾)。
+                    self.forward_embed(event, area, msgs)
+                        .unwrap_or(EventResult::Consumed)
+                } else {
+                    EventResult::Consumed
+                }
             }
             _ => EventResult::Ignored,
         }
@@ -969,6 +1150,20 @@ impl Widget for TitleBar {
 
     fn hit_area(&self) -> Option<Rect> {
         Some(self.area)
+    }
+
+    fn children(&self) -> &[Node] {
+        match &self.embed {
+            Some(child) => std::slice::from_ref(child),
+            None => &[],
+        }
+    }
+
+    fn children_mut(&mut self) -> &mut [Node] {
+        match &mut self.embed {
+            Some(child) => std::slice::from_mut(child),
+            None => &mut [],
+        }
     }
 }
 
@@ -1620,5 +1815,210 @@ mod tests {
             "红绿灯 + 形符号数不受 is_maximized 影响"
         );
         assert!(count_normal > 0, "hover 态应至少绘制一个符号矩形");
+    }
+
+    // ── embed 内嵌栏槽 (titlebar-embed) ──
+
+    #[test]
+    fn embed_default_has_no_child() {
+        let bar = TitleBar::new("丹青");
+        assert!(bar.children().is_empty(), "未 embed 时 children 应为空");
+        let mut bar = TitleBar::new("丹青");
+        assert!(
+            bar.children_mut().is_empty(),
+            "未 embed 时 children_mut 应为空"
+        );
+    }
+
+    #[test]
+    fn embed_gains_exactly_one_child() {
+        let bar = TitleBar::new("丹青").embed(crate::widget::Text::new("x"));
+        assert_eq!(bar.children().len(), 1, "embed 后应恰好一个子节点");
+        let mut bar = TitleBar::new("丹青").embed(crate::widget::Text::new("x"));
+        assert_eq!(
+            bar.children_mut().len(),
+            1,
+            "children_mut 应同样含一个子节点"
+        );
+    }
+
+    // ── embed 槽布局 (T2) ──
+
+    #[test]
+    fn embed_slot_lies_between_title_and_buttons() {
+        let mut bar =
+            TitleBar::themed(&LightTheme, "丹青日志 POC").embed(crate::widget::Text::new("x"));
+        let mut texts = TextBatch::new();
+        let area = Rect::from_xywh(0.0, 0.0, 400.0, bar.height);
+        bar.layout(Constraints::tight(area.size), &mut texts);
+
+        let slot = bar.embed_area;
+        assert!(slot.size.width > 0.0, "槽应有正宽: {slot:?}");
+        // 槽左缘在 logo + 标题 之后 (不覆盖标题)
+        let logo_r = bar.logo_rect(area);
+        let title_w = texts.measure(&bar.title, bar.font_size);
+        assert!(
+            slot.origin.x >= logo_r.origin.x + logo_r.size.width + bar.logo_gap + title_w,
+            "槽左缘应越过标题: slot={slot:?} title_end={:.1}",
+            logo_r.origin.x + logo_r.size.width + bar.logo_gap + title_w
+        );
+        // 槽右缘不越过最左窗口按钮左缘 (三者皆可见时 = 最小化按钮)
+        let min_btn_x = bar.button_rect(area, ButtonRole::Minimize).origin.x;
+        assert!(
+            slot.origin.x + slot.size.width <= min_btn_x + f32::EPSILON,
+            "槽右缘应止于按钮区左: slot={slot:?} btn_left={min_btn_x:.1}"
+        );
+    }
+
+    // ── embed 槽鼠标转发 (T3) ──
+
+    /// 记录收到的鼠标事件 (供 embed 转发测试)。
+    struct MouseRecorder {
+        got: std::rc::Rc<std::cell::Cell<usize>>,
+        pressed_center: std::rc::Rc<std::cell::Cell<bool>>,
+    }
+
+    impl Widget for MouseRecorder {
+        fn sync(&mut self, _: &dyn Any) {}
+        fn layout(&mut self, c: Constraints, _: &mut TextBatch) -> Size {
+            c.constrain(Size::new(120.0, 32.0))
+        }
+        fn paint(&self, _: Rect, _: &mut RectBatch, _: &mut TextBatch) {}
+        fn event(&mut self, event: &Event, _: Rect, _: &mut MsgQueue) -> EventResult {
+            self.got.set(self.got.get() + 1);
+            if let Event::MouseInput { pressed: true, .. } = event {
+                self.pressed_center.set(true);
+            }
+            EventResult::Consumed
+        }
+        fn children(&self) -> &[Node] {
+            &[]
+        }
+        fn children_mut(&mut self) -> &mut [Node] {
+            &mut []
+        }
+    }
+
+    fn recorder_bar(got: std::rc::Rc<std::cell::Cell<usize>>) -> (TitleBar, Rect) {
+        let mut bar = TitleBar::themed(&LightTheme, "丹青日志 POC").embed(MouseRecorder {
+            got,
+            pressed_center: std::rc::Rc::new(std::cell::Cell::new(false)),
+        });
+        let mut texts = TextBatch::new();
+        let area = Rect::from_xywh(0.0, 0.0, 400.0, bar.height);
+        bar.layout(Constraints::tight(area.size), &mut texts);
+        (bar, area)
+    }
+
+    #[test]
+    fn embed_forwards_mouse_press_inside_slot() {
+        let got = std::rc::Rc::new(std::cell::Cell::new(0));
+        let (mut bar, area) = recorder_bar(std::rc::Rc::clone(&got));
+        let slot = bar.embed_area;
+        let center = Point::new(
+            slot.origin.x + slot.size.width / 2.0,
+            slot.origin.y + slot.size.height / 2.0,
+        );
+        let mut msgs = MsgQueue::new();
+        let result = bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: center,
+            },
+            area,
+            &mut msgs,
+        );
+        assert!(got.get() > 0, "槽内按下应转发到子节点");
+        assert_eq!(
+            result,
+            EventResult::Consumed,
+            "子节点消费则 TitleBar 应消费"
+        );
+    }
+
+    #[test]
+    fn embed_does_not_forward_button_or_title_press() {
+        let got = std::rc::Rc::new(std::cell::Cell::new(0));
+        let (mut bar, area) = recorder_bar(std::rc::Rc::clone(&got));
+
+        // 最小化按钮中心: 不转发到子节点
+        let btn = bar.button_rect(area, ButtonRole::Minimize);
+        let btn_center = Point::new(
+            btn.origin.x + btn.size.width / 2.0,
+            btn.origin.y + btn.size.height / 2.0,
+        );
+        let mut msgs = MsgQueue::new();
+        bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: btn_center,
+            },
+            area,
+            &mut msgs,
+        );
+        assert_eq!(got.get(), 0, "按钮按下不应转发到子节点");
+
+        // 标题区 (logo 右侧、槽左侧): 不转发到子节点
+        let logo_r = bar.logo_rect(area);
+        let title_pt = Point::new(
+            logo_r.origin.x + logo_r.size.width + 4.0,
+            logo_r.origin.y + logo_r.size.height / 2.0,
+        );
+        let mut msgs2 = MsgQueue::new();
+        bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: title_pt,
+            },
+            area,
+            &mut msgs2,
+        );
+        assert_eq!(got.get(), 0, "标题区按下不应转发到子节点");
+    }
+
+    #[test]
+    fn embed_forwards_on_non_zero_origin() {
+        // C1 回归: TitleBar 在非零原点 (经 Padding/Column 嵌套), 槽内按下应命中子节点。
+        let got = std::rc::Rc::new(std::cell::Cell::new(0));
+        let (mut bar, _) = recorder_bar(std::rc::Rc::clone(&got));
+        // layout 时槽为相对 (原点 0); 事件区给非零 origin。
+        let origin_area = Rect::from_xywh(120.0, 60.0, 400.0, bar.height);
+        let slot = bar.embed_area;
+        let abs_center = Point::new(
+            origin_area.origin.x + slot.origin.x + slot.size.width / 2.0,
+            origin_area.origin.y + slot.origin.y + slot.size.height / 2.0,
+        );
+        let mut msgs = MsgQueue::new();
+        bar.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: abs_center,
+            },
+            origin_area,
+            &mut msgs,
+        );
+        assert!(got.get() > 0, "非零原点下槽内按下应命中子节点");
+    }
+
+    #[test]
+    fn embed_slot_zero_width_when_title_overlaps_buttons() {
+        // I1 回归: 长标题 + 窄窗, 标题碰到按钮区 → 槽零宽, 不覆盖按钮。
+        let mut bar = TitleBar::themed(
+            &LightTheme,
+            "一个非常非常长的窗口标题会一路延伸到碰到按钮才停",
+        )
+        .embed(crate::widget::Text::new("x"));
+        let mut texts = TextBatch::new();
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, bar.height);
+        bar.layout(Constraints::tight(area.size), &mut texts);
+        assert!(
+            bar.embed_area.size.width <= 0.0,
+            "标题碰按钮时应零宽槽: {:?}",
+            bar.embed_area
+        );
     }
 }

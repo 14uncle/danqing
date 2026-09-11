@@ -40,29 +40,12 @@ pub(super) fn apply_windows_undecorated_style(window: &winit::window::Window) {
     }
 }
 
-/// 基于可执行文件所在目录构建资源路径。
-///
-/// 打包便携版从非 exe 目录启动时，CWD 不一定是 exe 目录。
-/// 优先用 `current_exe()` 的 parent() 拼接; 若该路径不存在则回退到 CWD,
-/// 保证 `cargo test` 等开发场景也能正常工作。
-fn exe_relative(path: &str) -> std::path::PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join(path);
-            if candidate.exists() {
-                return candidate;
-            }
-        }
-    }
-    std::path::PathBuf::from(path)
-}
-
 /// 加载应用窗口图标。
 ///
-/// 读取 `assets/logo/{name}_256.png`（相对于 exe 所在目录）;
+/// 读取 `assets/logo/{name}_256.png`（经 [`crate::asset::resolve`] 解析）;
 /// 失败时记录警告并返回 `None`, 避免窗口创建因图标问题而 panic。
 pub(super) fn load_window_icon(name: &str) -> Option<Icon> {
-    let path = exe_relative(&format!("assets/logo/{name}_256.png"));
+    let path = crate::asset::resolve(format!("assets/logo/{name}_256.png"));
     match load_icon_from_png(&path) {
         Ok(icon) => Some(icon),
         Err(err) => {
@@ -105,7 +88,7 @@ pub(super) fn with_taskbar_icon(
 /// 返回 tray-icon 自身的 `Icon` 类型 (与 winit Icon 不通用)。
 #[cfg(target_os = "windows")]
 pub(super) fn load_tray_icon(name: &str) -> Option<tray_icon::Icon> {
-    let path = exe_relative(&format!("assets/logo/{name}_16.png"));
+    let path = crate::asset::resolve(format!("assets/logo/{name}_16.png"));
     match image::open(&path) {
         Ok(img) => {
             let rgba = img.into_rgba8();

@@ -66,6 +66,10 @@ pub enum NamedKey {
     Home,
     /// End。
     End,
+    /// 向上翻页。
+    PageUp,
+    /// 向下翻页。
+    PageDown,
     /// Shift。
     Shift,
     /// Ctrl。
@@ -117,6 +121,12 @@ pub enum Event {
         delta: (f32, f32),
         /// 事件发生时光标位置。
         position: Point,
+        /// Shift 是否按下 (产品侧常用于横滚)。
+        shift: bool,
+        /// Ctrl 是否按下 (产品侧常用于缩放语义)。
+        ctrl: bool,
+        /// Alt 是否按下。
+        alt: bool,
     },
     /// 键盘按下 / 抬起。
     Key {
@@ -161,7 +171,7 @@ impl Event {
 ///
 /// 由自绘标题栏等组件产出，经 `window.rs` 的 `Handler` 识别后调用 OS 窗口 API。
 /// 保持纯逻辑，不依赖 `winit`。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WindowAction {
     /// 关闭窗口。
     Close,
@@ -171,4 +181,6 @@ pub enum WindowAction {
     MaximizeOrRestore,
     /// 开始拖拽移动窗口。
     Drag,
+    /// 设置窗口标题 (同步任务栏/Alt-Tab 显示)。
+    SetTitle(String),
 }

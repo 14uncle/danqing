@@ -18,7 +18,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$exe = "target/release/examples/$Example.exe"
+$exe = "..\.cargo-target\release\examples\$Example.exe"  # shared farm target (see .cargo/config.toml)
 
 if (-not (Test-Path $exe)) {
     Write-Host "building $Example (release)..."

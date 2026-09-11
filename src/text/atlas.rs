@@ -182,7 +182,7 @@ mod tests {
     use crate::text::Font;
 
     fn test_font() -> fontdue::Font {
-        Font::embedded_sans().inner().clone()
+        Font::embedded_mono().inner().clone()
     }
 
     #[test]

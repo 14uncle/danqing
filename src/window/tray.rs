@@ -63,11 +63,20 @@ pub fn shortcut_for_id(id: u8) -> &'static str {
 pub struct TrayHandle {
     // TrayIcon 不实现 Send/Sync (内部持有平台特定句柄), 但 Handler 不跨线程,
     // 存为字段即可。
-    _tray: tray_icon::TrayIcon,
+    tray: tray_icon::TrayIcon,
 }
 
 #[cfg(not(target_os = "windows"))]
 pub struct TrayHandle;
+
+impl TrayHandle {
+    /// 整体替换托盘菜单。动作 (托盘点击/全局热键) 改变勾选态后由 Handler
+    /// 重建, 保持勾选项与 App 状态一致。
+    pub fn set_menu(&self, _menu: tray_icon::menu::Menu) {
+        #[cfg(target_os = "windows")]
+        self.tray.set_menu(Some(Box::new(_menu)));
+    }
+}
 
 /// 安装系统托盘 (图标 + 菜单)。
 ///
@@ -86,7 +95,7 @@ pub fn install_tray(icon: tray_icon::Icon, menu: tray_icon::menu::Menu) -> Optio
     {
         Ok(tray) => {
             log::info!("托盘图标已安装 (Windows)");
-            Some(TrayHandle { _tray: tray })
+            Some(TrayHandle { tray })
         }
         Err(err) => {
             log::warn!("托盘图标安装失败: {err}");

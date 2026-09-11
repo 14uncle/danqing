@@ -8,24 +8,45 @@
 //!
 //! 公开 API 一律经本模块 re-export，不允许使用者路径深穿。
 
+mod anim;
 mod app;
+pub mod asset;
+pub mod audio;
+pub mod clipboard;
 pub mod event;
+pub mod fs;
+pub mod image;
+mod job;
 pub mod layout;
 pub mod log;
+/// 应用持久化核心 (config_dir/atomic_save/load_or_default/DirtyFlag/VersionedDoc)。
+/// 仅 `persist` feature 启用: 默认关闭不拉序列化栈, 产品显式开启。
+#[cfg(feature = "persist")]
+pub mod persist;
 mod render;
 mod text;
 pub mod theme;
+pub mod time;
+/// 应用内更新检查核心 (版本对比/缓存/后台检查/GitHub 运输)。
+/// 仅 `update` feature 启用: 默认关闭不拉网络栈, 产品显式开启。
+#[cfg(feature = "update")]
+pub mod update;
 pub mod widget;
 mod window;
 
+pub use anim::{Crossfade, Cue, CueTiming, Pulse, Tween};
 pub use app::{AnimationCtx, App};
+/// 编码检测与转码 (兄弟 crate, 零 UI 依赖)。
+pub use danqing_encoding as encoding;
 pub use event::{Event, ImeEvent, Key, MouseButton, NamedKey, WindowAction};
+pub use job::{AsyncJob, CancelFlag, CancelToken, SearchNav};
 pub use layout::{Color, Constraints, Edges, FlowChild, Point, Rect, Size, distribute};
 pub use render::{
     BackgroundConfig, BackgroundFrame, Context as RenderContext, ImageBatch, RectBatch,
     RenderError, ScaleMode, TextBatch,
 };
-pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo, Line, break_lines};
+pub use text::{AtlasError, Font, FontError, GlyphAtlas, GlyphInfo, Line, break_lines, to_crlf};
+pub use text::{fit, selection};
 pub use theme::{
     Easing, LightTheme, ScenePalette, SceneSpec, SceneTheme, Shadow, Theme, composite_over,
     contrast_ratio, relative_luminance,

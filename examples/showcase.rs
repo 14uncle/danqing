@@ -14,12 +14,14 @@
 )]
 
 use danqing::widget::{
-    self, Box as UiBox, Button, CloseButton, Column, EventResult, IconInput, MsgQueue, MultiPanel,
-    Node, Padding, Row, Scrollable, Switch, Tabs, Text, TextArea, TextInput, TitleBar, Widget,
+    self, Box as UiBox, Button, CloseButton, Column, DragArea, EventResult, IconInput, MsgQueue,
+    MultiPanel, Node, Overlay, Padding, ReachArea, Row, Scrollable, Stack, Switch, Tabs, Text,
+    TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
-    App, BackgroundConfig, Color, Event, Key, LightTheme, NamedKey, Point, Rect, ScaleMode, Size,
-    Theme, WindowAction,
+    App, AsyncJob, BackgroundConfig, Color, Crossfade, Easing, Event, GlobalHotkey, Key,
+    LightTheme, NamedKey, Point, Pulse, Rect, ScaleMode, Size, Theme, Tween, WindowAction,
+    WindowEventSender,
 };
 /// 键盘移动方块的区域尺寸。
 const KEYBOARD_AREA: Size = Size::new(300.0, 180.0);
@@ -27,6 +29,12 @@ const KEYBOARD_AREA: Size = Size::new(300.0, 180.0);
 const SQUARE_SIZE: f32 = 40.0;
 /// 每次按键移动步长 (逻辑像素)。
 const MOVE_STEP: f32 = 20.0;
+/// 点击穿透演示的全局热键 id (showcase 自有, 不用引擎 pomodoro 残留常量)。
+const HOTKEY_CLICK_THROUGH: u8 = 1;
+/// 点击穿透演示的热键主键: K (Virtual-Key 码)。
+const HOTKEY_CLICK_THROUGH_VK: u32 = 0x4B;
+/// 位置记忆演示的落点文件 (target/ 下, gitignore; 演示从简未做防抖)。
+const POSITION_FILE: &str = "target/tmp/showcase-position.txt";
 
 /// 分类导航：与 src/widget/ 子目录一一对应。
 const CATEGORIES: [&str; 5] = [
@@ -55,6 +63,54 @@ struct Showcase {
     selected_tab: usize,
     /// Switch 演示：是否启用通知。
     switch_enabled: bool,
+    /// 点击穿透演示：当前是否处于穿透态。
+    click_through: bool,
+    /// 窗口置顶演示：当前是否置顶 (env DANQING_SHOWCASE_TOPMOST=1 出生即置顶,
+    /// 供脚本验证创建路径的 WS_EX_TOPMOST 落位)。
+    topmost: bool,
+    /// 窗口事件发送器 (点击穿透演示用; run_app 启动时注入)。
+    sender: Option<WindowEventSender>,
+    /// 启动后待开穿透标记 (env DANQING_SHOWCASE_CLICK_THROUGH=1 触发,
+    /// 首次显示回调里生效 —— 供截图验证 LAYERED×wgpu 呈现兼容性)。
+    pending_click_through: bool,
+    /// 时辰调色演示: None = 渐变背景原样; Some(hour) = 切到时辰演示场景
+    /// 并按小时调色 (env DANQING_TOD_DEMO=19.0 可预置, 供脚本截图验证)。
+    tod_hour: Option<f32>,
+    /// 音频演示: 懒初始化播放器 (首次点播放才开设备; 无音频设备环境
+    /// 静默降级不崩)。
+    audio_player: Option<danqing::audio::AudioPlayer>,
+    /// 微事件演示: 萤火虫/闪电包络的触发时刻 (世界时钟 elapsed; None = 未触发)。
+    demo_firefly_at: Option<std::time::Duration>,
+    /// 闪电演示触发时刻。
+    demo_flash_at: Option<std::time::Duration>,
+    /// 最近 tick 的世界时钟 (包络计算基准)。
+    last_elapsed: std::time::Duration,
+    /// 伸手仲裁演示: 最近一次手势协议消息 ("未按" / "已按住" / "已撤防")。
+    reach_state: String,
+    /// 动画原语演示: 补间 (目标由按钮翻转)。
+    anim_tween: Tween,
+    /// 动画原语演示: 补间目标 (0/1 交替)。
+    anim_tween_target: f32,
+    /// 动画原语演示: 补间当前值 (tick 推进)。
+    anim_tween_value: f32,
+    /// 动画原语演示: 一次性脉冲。
+    anim_pulse: Pulse,
+    /// 动画原语演示: 脉冲当前 alpha (tick 推进; None = 未激活/已结束)。
+    anim_pulse_alpha: Option<f32>,
+    /// 动画原语演示: 两态交叉淡化。
+    anim_cross: Crossfade,
+    /// 动画原语演示: 淡化最近帧文本 (tick 推进)。
+    anim_cross_text: String,
+    /// 异步作业演示: 作业本体 (代次防乱序 + panic 护栏)。
+    job_demo: AsyncJob<Result<String, String>>,
+    /// 异步作业演示: 状态回显文本。
+    job_demo_status: String,
+    /// 异步作业演示: 发起轮次号 (连点演示旧轮丢弃)。
+    job_demo_round: u64,
+    /// 模态浮层演示: 浮层开关态。
+    overlay_demo_open: bool,
+    /// 模态浮层演示: 关闭后待回归的焦点锚 (一次性; focus_request/focus_restored)。
+    focus_back: Option<&'static str>,
 }
 
 /// 应用消息。
@@ -83,6 +139,36 @@ enum Msg {
     OpenImage,
     /// Switch 演示：切换开关状态。
     SwitchToggle,
+    /// 点击穿透演示：切换穿透态 (Switch 与全局热键 Ctrl+Shift+K 双入口)。
+    ClickThroughToggle,
+    /// 窗口置顶演示：切换置顶层级。
+    TopmostToggle,
+    /// 时辰调色演示: 设置演示小时 (None = 复位渐变背景)。
+    SetTod(Option<f32>),
+    /// 音频演示: 播放 440Hz 正弦测试音 (2s)。
+    PlayTestTone,
+    /// 微事件演示: 萤火虫 (8s 包络, 自动切黄昏演示场景)。
+    DemoFirefly,
+    /// 微事件演示: 闪电 (1.6s 双闪脉冲)。
+    DemoFlash,
+    /// 伸手仲裁演示: 按下登记。
+    ReachArm,
+    /// 动画原语演示: 触发脉冲。
+    AnimPulseTrigger,
+    /// 动画原语演示: 翻转补间目标。
+    AnimTweenToggle,
+    /// 动画原语演示: 切换淡化状态。
+    AnimCrossSwitch,
+    /// 异步作业演示: 起 300ms 假作业 (连点演示旧轮丢弃)。
+    JobDemoStart,
+    /// 异步作业演示: 起 panic 作业 (护栏转 Err, 不卡死)。
+    JobDemoPanic,
+    /// 模态浮层演示: 打开浮层。
+    OverlayDemoOpen,
+    /// 模态浮层演示: 关闭浮层 (× / 点遮罩), 焦点回「打开」按钮。
+    OverlayDemoClose,
+    /// 伸手仲裁演示: 撤防 (转拖拽/早抬起)。
+    ReachCancel,
 }
 
 impl App for Showcase {
@@ -124,11 +210,138 @@ impl App for Showcase {
                 }
             }
             Msg::SwitchToggle => self.switch_enabled = !self.switch_enabled,
+            Msg::ClickThroughToggle => {
+                self.click_through = !self.click_through;
+                if let Some(sender) = &self.sender {
+                    sender.set_click_through(self.click_through);
+                }
+            }
+            Msg::TopmostToggle => {
+                self.topmost = !self.topmost;
+                if let Some(sender) = &self.sender {
+                    sender.set_topmost(self.topmost);
+                }
+            }
+            Msg::SetTod(hour) => self.tod_hour = hour,
+            Msg::PlayTestTone => {
+                use rodio::Source;
+                let player = self.audio_player.get_or_insert_with(Default::default);
+                let tone = rodio::source::SineWave::new(440.0)
+                    .take_duration(std::time::Duration::from_secs(2));
+                player.play_source(tone, 0.5);
+            }
+            Msg::DemoFirefly => {
+                self.tod_hour = Some(19.0); // 萤火虫在黄昏演示场景上才可见
+                self.demo_firefly_at = Some(self.last_elapsed);
+            }
+            Msg::DemoFlash => {
+                self.tod_hour = Some(19.0);
+                self.demo_flash_at = Some(self.last_elapsed);
+            }
+            Msg::ReachArm => self.reach_state = "已按住 (待产品长按判定)".into(),
+            Msg::ReachCancel => self.reach_state = "已撤防 (转拖拽/早抬起)".into(),
+            Msg::AnimPulseTrigger => self.anim_pulse.trigger(self.last_elapsed),
+            Msg::AnimTweenToggle => {
+                self.anim_tween_target = if self.anim_tween_target == 0.0 {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
+            Msg::AnimCrossSwitch => {
+                let next = 1 - self.anim_cross.current();
+                self.anim_cross.switch_to(next, self.last_elapsed);
+            }
+            Msg::JobDemoStart => {
+                self.job_demo_round += 1;
+                let round = self.job_demo_round;
+                self.job_demo_status = format!("第 {round} 轮在途 (300ms)…");
+                self.job_demo.launch_catched(
+                    move || {
+                        std::thread::sleep(std::time::Duration::from_millis(300));
+                        Ok(format!("第 {round} 轮完成"))
+                    },
+                    || "worker panic".to_string(),
+                );
+            }
+            Msg::JobDemoPanic => {
+                self.job_demo_status = "panic 作业在途…".into();
+                self.job_demo.launch_catched(
+                    || -> Result<String, String> { panic!("showcase 演示 panic") },
+                    || "panic 已被护栏转为 Err (应用不卡 Loading)".to_string(),
+                );
+            }
+            Msg::OverlayDemoOpen => self.overlay_demo_open = true,
+            Msg::OverlayDemoClose => {
+                self.overlay_demo_open = false;
+                // 关闭后焦点回「打开」按钮 (App::focus_request 协议演示)。
+                self.focus_back = Some("overlay-demo-open");
+            }
         }
     }
 
     fn view(&self) -> Node {
         build_tree()
+    }
+
+    /// 模态浮层演示: 关闭后焦点回「打开」按钮 (一次性请求, 应用后框架回调清除)。
+    fn focus_request(&self) -> Option<&'static str> {
+        self.focus_back
+    }
+
+    fn focus_restored(&mut self) {
+        self.focus_back = None;
+    }
+
+    /// 时辰调色演示: 每帧产出背景状态 (场景 0 渐变 / 场景 1 时辰演示图)。
+    /// tod_hour 为 None 时输出恒等帧 (与不设 background_frame 视觉一致)。
+    fn background_frame(&self) -> Option<danqing::BackgroundFrame> {
+        let frame = danqing::BackgroundFrame::new(0, 0, 0.0, theme().background());
+        let Some(hour) = self.tod_hour else {
+            return Some(frame);
+        };
+        let (tint, brightness, saturation, sky, glow) = tod_params(hour);
+        let mut frame = danqing::BackgroundFrame::new(1, 1, 0.0, theme().background())
+            .with_time_of_day(tint, brightness, saturation)
+            .with_sky_amount(sky)
+            .with_glow_amount(glow);
+        // 微事件演示包络 (萤火虫 8s 淡入淡出 / 闪电双闪脉冲)。
+        if let Some(t0) = self.demo_firefly_at {
+            let dt = self.last_elapsed.saturating_sub(t0).as_secs_f32();
+            frame = frame.with_event_firefly(firefly_envelope(dt));
+        }
+        if let Some(t0) = self.demo_flash_at {
+            let dt = self.last_elapsed.saturating_sub(t0).as_secs_f32();
+            frame = frame.with_flash(flash_pulse(dt));
+        }
+        Some(frame)
+    }
+
+    /// 微事件演示包络到期自清 (tick 驱动; background_frame 是 &self 不可变)。
+    fn tick(&mut self, ctx: &danqing::AnimationCtx) {
+        self.last_elapsed = ctx.elapsed;
+        if let Some(t0) = self.demo_firefly_at {
+            if ctx.elapsed.saturating_sub(t0).as_secs_f32() > 8.0 {
+                self.demo_firefly_at = None;
+            }
+        }
+        if let Some(t0) = self.demo_flash_at {
+            if ctx.elapsed.saturating_sub(t0).as_secs_f32() > 1.6 {
+                self.demo_flash_at = None;
+            }
+        }
+        // 动画原语演示: 三原语经 tick 心跳推进 (时间注入, 不读 wall-clock)。
+        self.anim_tween_value = self.anim_tween.value(ctx.elapsed, self.anim_tween_target);
+        self.anim_pulse_alpha = self.anim_pulse.progress(ctx.elapsed);
+        let (from, to, fade) = self.anim_cross.frame(ctx.elapsed, Easing::EaseInOut);
+        self.anim_cross_text = format!("场景 {from} → {to} · fade {fade:.2}");
+        // 异步作业演示: 每帧拾取 (旧代次乱序结果被代次闸门丢弃)。
+        if let Some(result) = self.job_demo.poll() {
+            self.job_demo_status = match result {
+                Ok(s) => s,
+                Err(e) => format!("Err: {e}"),
+            };
+        }
     }
 
     fn event(&mut self, event: &Event) {
@@ -163,6 +376,36 @@ impl App for Showcase {
 
     fn maximized_changed(&mut self, is_maximized: bool) {
         self.is_maximized = is_maximized;
+    }
+
+    fn attach_window_sender(&mut self, sender: WindowEventSender) {
+        self.sender = Some(sender);
+    }
+
+    fn visibility_changed(&mut self, visible: bool) {
+        // env 触发 (DANQING_SHOWCASE_CLICK_THROUGH=1): 首次显示后自动开穿透。
+        // 窗口创建前发送会被丢弃, 故挂在首次可见回调上。
+        if visible && self.pending_click_through {
+            self.pending_click_through = false;
+            self.update(Msg::ClickThroughToggle);
+        }
+    }
+
+    fn hotkey(&mut self, id: u8) -> Option<Msg> {
+        (id == HOTKEY_CLICK_THROUGH).then_some(Msg::ClickThroughToggle)
+    }
+
+    /// 位置记忆演示 (ShowPlacement::Remember): 从落点文件恢复。
+    fn load_window_position(&self) -> Option<(i32, i32)> {
+        let text = std::fs::read_to_string(POSITION_FILE).ok()?;
+        let (x, y) = text.trim().split_once(',')?;
+        Some((x.parse().ok()?, y.parse().ok()?))
+    }
+
+    /// 位置记忆演示: 拖动即写文件 (演示从简未防抖; 产品侧应防抖落盘)。
+    fn save_window_position(&mut self, x: i32, y: i32) {
+        let _ = std::fs::create_dir_all("target/tmp");
+        let _ = std::fs::write(POSITION_FILE, format!("{x},{y}"));
     }
 }
 
@@ -410,6 +653,74 @@ fn switch_card(t: &LightTheme) -> impl Widget + 'static {
         )
 }
 
+/// 点击穿透区：窗口行为演示 (desk-window 模块)。
+/// 开启后鼠标事件直达下层窗口, 点本窗口无效 —— 切回用全局热键 Ctrl+Shift+K。
+fn passthrough_card(t: &LightTheme) -> impl Widget + 'static {
+    Row::new()
+        .gap(t.spacing_lg())
+        .cross_center()
+        .child(
+            Row::new()
+                .gap(2.0)
+                .cross_center()
+                .child(
+                    Text::new("点击穿透：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Switch::new()
+                        .bind(|s: &Showcase| s.click_through)
+                        .on_toggle(|| Msg::ClickThroughToggle),
+                ),
+        )
+        .child(
+            Text::bind(|s: &Showcase| {
+                if s.click_through {
+                    "已开启 —— 点我无效, 按 Ctrl+Shift+K 切回".to_string()
+                } else {
+                    "已关闭 (或按 Ctrl+Shift+K 开启)".to_string()
+                }
+            })
+            .font_size(t.font_size_body())
+            .color(t.text_primary()),
+        )
+}
+
+/// 窗口置顶区：窗口行为演示 (desk-window 模块)。
+/// 开启后窗口恒在普通窗口之上; 关闭后回到普通层级。
+fn topmost_card(t: &LightTheme) -> impl Widget + 'static {
+    Row::new()
+        .gap(t.spacing_lg())
+        .cross_center()
+        .child(
+            Row::new()
+                .gap(2.0)
+                .cross_center()
+                .child(
+                    Text::new("窗口置顶：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Switch::new()
+                        .bind(|s: &Showcase| s.topmost)
+                        .on_toggle(|| Msg::TopmostToggle),
+                ),
+        )
+        .child(
+            Text::bind(|s: &Showcase| {
+                if s.topmost {
+                    "已置顶 —— 普通窗口压不住我".to_string()
+                } else {
+                    "普通层级".to_string()
+                }
+            })
+            .font_size(t.font_size_body())
+            .color(t.text_primary()),
+        )
+}
+
 /// 键盘区：方向键 /WASD 移动方块，并回显最后按下的字符键。
 fn keyboard_card(t: &LightTheme) -> impl Widget + 'static {
     Row::new()
@@ -495,6 +806,98 @@ impl Widget for Positioned {
     }
 }
 
+/// 渲染分层演示: 底层文字 + 高层浮层卡 (RectBatch/TextBatch::push_layer)。
+///
+/// 验收点两个: ① 浮层卡必须盖住其下的底层文字 (矩形/文本分批次渲染下同层
+/// 文本恒在矩形之上, 遮盖只能靠分层); ② 浮层之外的底层文字与斑马底必须
+/// 完整 (wgpu 的 write_buffer 统一在 submit 的全部 pass 之前执行, 实现若
+/// 退化为逐层上传, 底层实例序列头部会被高层数据顶掉 —— 本页让这类缺损
+/// 肉眼可见)。
+struct LayerDemo {
+    accent: Color,
+    text: Color,
+    zebra: Color,
+}
+
+impl LayerDemo {
+    fn new() -> Self {
+        let t = theme();
+        Self {
+            accent: t.accent(),
+            text: t.text_primary(),
+            zebra: Color::rgba(0.0, 0.0, 0.0, 0.05),
+        }
+    }
+}
+
+impl Widget for LayerDemo {
+    fn sync(&mut self, _state: &dyn std::any::Any) {}
+
+    fn layout(
+        &mut self,
+        constraints: danqing::Constraints,
+        _texts: &mut danqing::TextBatch,
+    ) -> Size {
+        Size::new(constraints.max().width, 120.0)
+    }
+
+    fn paint(&self, area: Rect, rects: &mut danqing::RectBatch, texts: &mut danqing::TextBatch) {
+        const PX: u16 = 14;
+        let x = area.origin.x;
+        let w = area.size.width;
+        // ── 层 0: 三行文字, 中行垫斑马底 ──
+        for (i, line) in [
+            "分层之前的文字: 同层文本恒在矩形之上",
+            "浮层盖不住我, 除非开新层",
+            "高层矩形盖低层文本, 本层完整",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let row_y = area.origin.y + 8.0 + i as f32 * 36.0;
+            if i == 1 {
+                rects.push_rect(Rect::from_xywh(x, row_y - 4.0, w, 28.0), self.zebra, 4.0);
+            }
+            texts.push_text(
+                line,
+                x + 8.0,
+                row_y + texts.ascent(f32::from(PX)),
+                PX,
+                self.text,
+            );
+        }
+        // ── 层 1: 浮层卡 (白底 + 玉色描边) 压住中行 ──
+        rects.push_layer();
+        texts.push_layer();
+        let card = Rect::from_xywh(x + w / 2.0 - 110.0, area.origin.y + 30.0, 220.0, 52.0);
+        rects.push_rect(card, self.accent, 8.0);
+        rects.push_rect(card.inset(1.5), Color::WHITE, 7.0);
+        let label = "浮层 (layer 1)";
+        let lw = texts.measure(label, PX);
+        texts.push_text(
+            label,
+            card.origin.x + (card.size.width - lw) / 2.0,
+            card.origin.y
+                + (card.size.height - texts.line_height(f32::from(PX))) / 2.0
+                + texts.ascent(f32::from(PX)),
+            PX,
+            self.accent,
+        );
+    }
+
+    fn event(&mut self, _event: &Event, _area: Rect, _msgs: &mut MsgQueue) -> EventResult {
+        EventResult::Ignored
+    }
+
+    fn children(&self) -> &[Node] {
+        &[]
+    }
+
+    fn children_mut(&mut self) -> &mut [Node] {
+        &mut []
+    }
+}
+
 /// 页面包装：Scrollable + Padding + 页标题 + 内容。
 fn page(t: &LightTheme, heading: &str, content: impl Widget + 'static) -> impl Widget + 'static {
     Scrollable::themed(
@@ -524,7 +927,18 @@ fn page_base(t: &LightTheme) -> impl Widget + 'static {
             .gap(t.spacing_lg())
             .cross_stretch()
             .child(card(t, "按钮与计数", counter_row(t)))
-            .child(card(t, "Image 组件", ImageDemo::new())),
+            .child(card(t, "Image 组件", ImageDemo::new()))
+            .child(card(t, "渲染分层 (push_layer)", LayerDemo::new()))
+            .child(card(
+                t,
+                "TitleBar 内嵌输入槽",
+                TitleBar::themed(t, "搜索/过滤进标题栏").embed(
+                    TextInput::themed(t)
+                        .font_size(t.font_size_body())
+                        .chromeless()
+                        .placeholder("在标题栏内输入...", t.text_secondary()),
+                ),
+            )),
     )
 }
 
@@ -670,8 +1084,307 @@ fn page_layout(t: &LightTheme) -> impl Widget + 'static {
     page(
         t,
         "布局 layout — 盒模型与流式排布",
-        card(t, "品牌色与圆角", palette_and_rounded_card(t)),
+        Column::new()
+            .gap(t.spacing_lg())
+            .cross_stretch()
+            .child(card(t, "品牌色与圆角", palette_and_rounded_card(t)))
+            .child(card(t, "DragArea 拖拽层", drag_area_card(t)))
+            .child(card(t, "时辰调色 + 双蒙版", tod_card(t)))
+            .child(card(t, "音频 (audio)", audio_card(t)))
+            .child(card(t, "动画原语 (anim)", anim_card(t)))
+            .child(card(t, "异步作业 (job)", job_card(t)))
+            .child(card(t, "模态浮层 (Overlay)", overlay_card(t)))
+            .child(card(t, "伸手仲裁 ReachArea", reach_area_card(t))),
     )
+}
+
+/// 音频演示: danqing::audio 输出路径端到端 (440Hz 正弦 2s, 免资产)。
+fn audio_card(t: &LightTheme) -> impl Widget + 'static {
+    Button::themed(
+        t,
+        Text::new("播放测试音 (440Hz × 2s)")
+            .font_size(t.font_size_body())
+            .color(Color::WHITE),
+    )
+    .on_click(|| Msg::PlayTestTone)
+}
+
+/// 动画原语演示: Tween / Pulse / Crossfade 经 tick 心跳推进 (以用代测)。
+/// 数值实时回显; 视觉消费实例 = mixer (Tween) 与 switch (Tween)。
+fn anim_card(t: &LightTheme) -> impl Widget + 'static {
+    let label = |text: &'static str| {
+        Text::new(text)
+            .font_size(t.font_size_body())
+            .color(Color::WHITE)
+    };
+    let readout = |f: fn(&Showcase) -> String| {
+        Text::bind(move |s: &Showcase| f(s))
+            .font_size(t.font_size_body())
+            .color(t.text_primary())
+    };
+    Column::new()
+        .gap(t.spacing_sm())
+        .cross_stretch()
+        .child(
+            Row::new()
+                .gap(t.spacing_lg())
+                .cross_center()
+                .child(Button::themed(t, label("翻转补间目标")).on_click(|| Msg::AnimTweenToggle))
+                .child(readout(|s| {
+                    format!(
+                        "Tween 值 {:.2} → 目标 {:.0} (800ms EaseInOut)",
+                        s.anim_tween_value, s.anim_tween_target
+                    )
+                })),
+        )
+        .child(
+            Row::new()
+                .gap(t.spacing_lg())
+                .cross_center()
+                .child(Button::themed(t, label("触发脉冲")).on_click(|| Msg::AnimPulseTrigger))
+                .child(readout(|s| match s.anim_pulse_alpha {
+                    Some(a) => format!("Pulse alpha {a:.2} (600ms 线性衰减)"),
+                    None => "Pulse 未激活/已结束".to_string(),
+                })),
+        )
+        .child(
+            Row::new()
+                .gap(t.spacing_lg())
+                .cross_center()
+                .child(Button::themed(t, label("切换淡化")).on_click(|| Msg::AnimCrossSwitch))
+                .child(readout(|s| s.anim_cross_text.clone())),
+        )
+}
+
+/// 异步作业演示: AsyncJob 代次防乱序 + panic 护栏 (以用代测)。
+/// 连点「起作业」旧轮结果永不上屏; 「起 panic 作业」Err 文案落屏, 应用不卡死。
+/// 注: panic 护栏仅 panic=unwind 构建 (dev/test) 生效; release (panic="abort")
+/// 下点「起 panic 作业」会整体 abort —— 本卡验收请在 dev 构建下进行。
+fn job_card(t: &LightTheme) -> impl Widget + 'static {
+    let label = |text: &'static str| {
+        Text::new(text)
+            .font_size(t.font_size_body())
+            .color(Color::WHITE)
+    };
+    Column::new()
+        .gap(t.spacing_sm())
+        .cross_stretch()
+        .child(
+            Row::new()
+                .gap(t.spacing_lg())
+                .cross_center()
+                .child(
+                    Button::themed(t, label("起 300ms 作业 (可连点)"))
+                        .on_click(|| Msg::JobDemoStart),
+                )
+                .child(Button::themed(t, label("起 panic 作业")).on_click(|| Msg::JobDemoPanic)),
+        )
+        .child(
+            Text::bind(|s: &Showcase| s.job_demo_status.clone())
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+}
+
+/// 模态浮层演示卡: 打开按钮 (焦点锚)。浮层本体盖在根 Stack 顶 (见 overlay_demo)。
+fn overlay_card(t: &LightTheme) -> impl Widget + 'static {
+    Column::new()
+        .gap(t.spacing_sm())
+        .cross_stretch()
+        .child(
+            Text::new("open 绑定驱动; 点遮罩或 × 关闭; 关闭后焦点回本按钮; 关态时本页全部可点。")
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+        .child(
+            Button::themed(
+                t,
+                Text::new("打开模态浮层")
+                    .font_size(t.font_size_body())
+                    .color(Color::WHITE),
+            )
+            .id("overlay-demo-open")
+            .on_click(|| Msg::OverlayDemoOpen),
+        )
+}
+
+/// 模态浮层演示本体: 盖顶常驻 (根 Stack 末位), open 绑定 + 点遮罩关闭。
+/// 关态零尺寸不拦事件 (反证: 关着时本页按钮照常可点)。
+fn overlay_demo(t: &LightTheme) -> impl Widget + 'static {
+    Overlay::new(
+        UiBox::new(t.surface())
+            .radius(t.radius_lg())
+            .child(Padding::all(
+                t.spacing_xl(),
+                Column::new()
+                    .gap(t.spacing_sm())
+                    .cross_stretch()
+                    .child(
+                        Row::new()
+                            .cross_center()
+                            .child(
+                                Text::new("模态浮层")
+                                    .font_size(t.font_size_heading())
+                                    .color(t.text_primary()),
+                            )
+                            .fill(UiBox::new(Color::TRANSPARENT), 1)
+                            .child(CloseButton::new().on_click(|| Msg::OverlayDemoClose)),
+                    )
+                    .child(
+                        Text::new("scrim 遮罩吞掉底层事件; 卡片自开渲染新层盖住文本。")
+                            .font_size(t.font_size_body())
+                            .color(t.text_primary()),
+                    ),
+            )),
+    )
+    .bind_open(|s: &Showcase| s.overlay_demo_open)
+    .on_scrim_click(|| Msg::OverlayDemoClose)
+}
+
+/// 萤火虫演示包络 (8s): 1.5s 淡入 → 保持 → 1.5s 淡出。
+fn firefly_envelope(t: f32) -> f32 {
+    let ss = |x: f32| {
+        let t = x.clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    ss(t / 1.5) * (1.0 - ss((t - 6.5) / 1.5))
+}
+
+/// 闪电双闪脉冲 (1.6s): 主闪快衰 → 间隙微光 → 次闪较弱 → 灭。
+/// 形状是产品口味 (桌景闪电同款语义), 引擎只收强度。
+fn flash_pulse(t: f32) -> f32 {
+    if t < 0.0 {
+        0.0
+    } else if t < 0.12 {
+        1.0 - t / 0.12 * 0.55
+    } else if t < 0.22 {
+        0.15
+    } else if t < 0.5 {
+        0.65 * (1.0 - (t - 0.22) / 0.28)
+    } else {
+        0.0
+    }
+}
+
+/// 时辰演示迷你曲线 (演示级 6 帧线性插值; 产品级 8 帧 smoothstep
+/// 曲线归 danqing-deskscape scene-world Task 5)。
+/// 返回 (色调 RGB, 亮度, 饱和度, 天空蒙版量, 发光蒙版量)。
+fn tod_params(hour: f32) -> ([f32; 3], f32, f32, f32, f32) {
+    // (时辰, 色调, 亮度, 饱和度, 天空量, 发光量)
+    const KEYS: [(f32, [f32; 3], f32, f32, f32, f32); 6] = [
+        (0.0, [0.70, 0.78, 1.00], 0.50, 0.72, 0.95, 1.00), // 深夜
+        (6.0, [1.00, 0.88, 0.72], 0.92, 0.90, 0.25, 0.20), // 清晨
+        (12.0, [1.00, 1.00, 1.00], 1.08, 1.02, 0.00, 0.00), // 正午
+        (17.0, [1.00, 0.90, 0.70], 1.00, 0.98, 0.05, 0.05), // 金时
+        (19.0, [0.98, 0.72, 0.52], 0.82, 0.90, 0.45, 0.60), // 黄昏
+        (21.0, [0.80, 0.82, 1.00], 0.62, 0.80, 0.80, 1.00), // 入夜
+    ];
+    let h = hour.rem_euclid(24.0);
+    // 找 h 所在的关键帧区间 (环形: 21 点之后回绕到次日 0 点)。
+    let mut i = KEYS.len() - 1;
+    for (k, key) in KEYS.iter().enumerate() {
+        if h >= key.0 {
+            i = k;
+        }
+    }
+    let a = KEYS[i];
+    let b = KEYS[(i + 1) % KEYS.len()];
+    let span = (b.0 - a.0).rem_euclid(24.0).max(0.001);
+    let t = ((h - a.0).rem_euclid(24.0) / span).clamp(0.0, 1.0);
+    let lerp = |x: f32, y: f32| x + (y - x) * t;
+    (
+        [
+            lerp(a.1[0], b.1[0]),
+            lerp(a.1[1], b.1[1]),
+            lerp(a.1[2], b.1[2]),
+        ],
+        lerp(a.2, b.2),
+        lerp(a.3, b.3),
+        lerp(a.4, b.4),
+        lerp(a.5, b.5),
+    )
+}
+
+/// 时辰调色 + 双蒙版演示卡: 按钮切演示小时 (窗口背景即画布;
+/// env DANQING_TOD_DEMO=19.0 可预置, 供脚本截图验证)。
+fn tod_card(t: &LightTheme) -> impl Widget + 'static {
+    let btn = |label: &'static str, hour: Option<f32>| {
+        Button::themed(
+            t,
+            Text::new(label)
+                .font_size(t.font_size_body())
+                .color(Color::WHITE),
+        )
+        .on_click(move || Msg::SetTod(hour))
+    };
+    Row::new()
+        .gap(t.spacing_sm())
+        .cross_center()
+        .child(
+            Text::new("背景时辰 →")
+                .font_size(t.font_size_body())
+                .color(t.text_secondary()),
+        )
+        .child(btn("清晨", Some(7.0)))
+        .child(btn("正午", Some(12.0)))
+        .child(btn("黄昏", Some(19.0)))
+        .child(btn("深夜", Some(23.0)))
+        .child(btn("复位", None))
+        .child(
+            Text::new("微事件 →")
+                .font_size(t.font_size_body())
+                .color(t.text_secondary()),
+        )
+        .child(
+            Button::themed(
+                t,
+                Text::new("萤火虫")
+                    .font_size(t.font_size_body())
+                    .color(Color::WHITE),
+            )
+            .on_click(|| Msg::DemoFirefly),
+        )
+        .child(
+            Button::themed(
+                t,
+                Text::new("闪电")
+                    .font_size(t.font_size_body())
+                    .color(Color::WHITE),
+            )
+            .on_click(|| Msg::DemoFlash),
+        )
+}
+
+/// ReachArea 演示: 伸手手势的空间仲裁协议 (arm/cancel) ——
+/// 长按 600ms 的时间判定在产品 tick (引擎 widget 无周期消息通道)。
+fn reach_area_card(t: &LightTheme) -> impl Widget + 'static {
+    Column::new()
+        .gap(t.spacing_sm())
+        .child(
+            Text::bind(|s: &Showcase| format!("手势状态: {}", s.reach_state))
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+        .child(
+            ReachArea::new(
+                Text::new("按住我: 微抖=保持, 拖动=转拖拽移窗, 早抬=撤防")
+                    .font_size(t.font_size_body())
+                    .color(t.text_secondary()),
+            )
+            .on_arm(|_| Msg::ReachArm)
+            .on_cancel(|| Msg::ReachCancel),
+        )
+}
+
+/// DragArea 演示: 无边框窗口的背景拖拽层 —— 按住卡片内容区空白
+/// 左键拖动即移动整个窗口 (消息经 WindowAction::Drag 到 Handler)。
+fn drag_area_card(t: &LightTheme) -> impl Widget + 'static {
+    DragArea::new(Padding::all(
+        t.spacing_md(),
+        Text::new("按住本卡片空白拖动 → 移动整个窗口")
+            .font_size(t.font_size_body())
+            .color(t.text_secondary()),
+    ))
 }
 
 /// 表单页：单行与多行文本输入。
@@ -713,7 +1426,13 @@ fn page_view(t: &LightTheme) -> impl Widget + 'static {
                 t,
                 "键盘响应 (自定义 Positioned 组件)",
                 keyboard_card(t),
-            )),
+            ))
+            .child(card(
+                t,
+                "点击穿透 (窗口行为, 热键 Ctrl+Shift+K)",
+                passthrough_card(t),
+            ))
+            .child(card(t, "窗口置顶 (窗口行为)", topmost_card(t))),
     )
 }
 
@@ -908,37 +1627,44 @@ fn sidebar(t: &LightTheme) -> impl Widget + 'static {
 fn build_tree() -> Node {
     let t = theme();
     widget::node(
-        Column::new()
+        Stack::new()
             .child(
-                TitleBar::themed(&t, "danqing 丹青")
-                    .bind_maximized(|s: &Showcase| s.is_maximized)
-                    .on_close(|| WindowAction::Close)
-                    .on_minimize(|| WindowAction::Minimize)
-                    .on_maximize(|| WindowAction::MaximizeOrRestore)
-                    .on_drag(|| WindowAction::Drag),
-            )
-            .fill(
-                Row::new()
-                    .child(Padding::all(t.spacing_lg(), sidebar(&t)))
-                    // 分类面板：四个页面常驻实例化，MultiPanel 只切换可见性。
+                Column::new()
+                    .child(
+                        TitleBar::themed(&t, "danqing 丹青")
+                            .bind_maximized(|s: &Showcase| s.is_maximized)
+                            .on_close(|| WindowAction::Close)
+                            .on_minimize(|| WindowAction::Minimize)
+                            .on_maximize(|| WindowAction::MaximizeOrRestore)
+                            .on_drag(|| WindowAction::Drag),
+                    )
                     .fill(
-                        MultiPanel::new()
-                            .child(page_base(&t))
-                            .child(page_layout(&t))
-                            .child(page_form(&t))
-                            .child(page_nav(&t))
-                            .child(page_view(&t))
-                            .bind(|s: &Showcase| s.selected),
+                        Row::new()
+                            .child(Padding::all(t.spacing_lg(), sidebar(&t)))
+                            // 分类面板：四个页面常驻实例化，MultiPanel 只切换可见性。
+                            .fill(
+                                MultiPanel::new()
+                                    .child(page_base(&t))
+                                    .child(page_layout(&t))
+                                    .child(page_form(&t))
+                                    .child(page_nav(&t))
+                                    .child(page_view(&t))
+                                    .bind(|s: &Showcase| s.selected),
+                                1,
+                            ),
                         1,
                     ),
-                1,
-            ),
+            )
+            // 模态浮层演示: 盖顶 (Stack 末位), open 绑定驱动。
+            .child(overlay_demo(&t)),
     )
 }
 
 fn main() -> anyhow::Result<()> {
     danqing::log::init_log();
 
+    // env DANQING_SHOWCASE_TOPMOST=1: 出生即置顶 (验证创建路径 WS_EX_TOPMOST 落位)。
+    let topmost_at_boot = std::env::var_os("DANQING_SHOWCASE_TOPMOST").is_some();
     let mut app = Showcase {
         count: 0,
         square_pos: Point::ZERO,
@@ -951,17 +1677,67 @@ fn main() -> anyhow::Result<()> {
         image_data: None,
         selected_tab: 0,
         switch_enabled: false,
+        click_through: false,
+        topmost: topmost_at_boot,
+        sender: None,
+        pending_click_through: std::env::var_os("DANQING_SHOWCASE_CLICK_THROUGH").is_some(),
+        // env DANQING_TOD_DEMO=19.0: 预置时辰演示小时 (脚本截图验证用,
+        // 合成鼠标点击不到达组件 —— 见 danqing-visual-debug-tooling 记忆)。
+        tod_hour: std::env::var("DANQING_TOD_DEMO")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok()),
+        audio_player: None,
+        // 微事件演示: env DANQING_EVENT_DEMO=firefly|flash 启动即触发
+        // (脚本截图验证用, 同 DANQING_TOD_DEMO 的注入理由)。
+        demo_firefly_at: match std::env::var("DANQING_EVENT_DEMO").as_deref() {
+            Ok("firefly") => Some(std::time::Duration::ZERO),
+            _ => None,
+        },
+        demo_flash_at: match std::env::var("DANQING_EVENT_DEMO").as_deref() {
+            Ok("flash") => Some(std::time::Duration::ZERO),
+            _ => None,
+        },
+        last_elapsed: std::time::Duration::ZERO,
+        reach_state: "未按".into(),
+        anim_tween: Tween::new(std::time::Duration::from_millis(800), Easing::EaseInOut),
+        anim_tween_target: 0.0,
+        anim_tween_value: 0.0,
+        anim_pulse: Pulse::default(),
+        anim_pulse_alpha: None,
+        anim_cross: Crossfade::new(0, std::time::Duration::from_millis(800)),
+        anim_cross_text: "场景 0 → 0 · fade 1.00".into(),
+        job_demo: AsyncJob::new(),
+        job_demo_status: "未发起".into(),
+        job_demo_round: 0,
+        overlay_demo_open: false,
+        focus_back: None,
     };
 
     let t = theme();
-    let background = BackgroundConfig::with_image("assets/background/gradient.png")
-        .scale(ScaleMode::Cover)
-        .with_glow("assets/background/glow.png", 0.25)
-        .with_noise("assets/background/noise.png", 0.06);
+    // 场景 0 = 渐变 (默认原样) / 场景 1 = 时辰演示图 (tod-demo, 中性日光底
+    // + 天空/发光双蒙版); 蒙版未点亮时 (amount=0) 对渐变场景零影响。
+    let background = BackgroundConfig::with_scenes([
+        "assets/background/gradient.png",
+        "assets/background/tod-demo.png",
+    ])
+    .scale(ScaleMode::Cover)
+    .with_glow("assets/background/glow.png", 0.25)
+    .with_noise("assets/background/noise.png", 0.06)
+    .with_sky_mask("assets/background/tod-demo-sky.png")
+    .with_glow_mask("assets/background/tod-demo-glow.png");
     let config = danqing::WindowConfig {
         title: "danqing showcase".into(),
         clear_color: t.background(),
         background,
+        topmost: topmost_at_boot,
+        // 位置记忆演示: 记住上次拖到的位置, 重启复原 (落点文件 target/tmp/)。
+        placement: danqing::ShowPlacement::Remember,
+        // 点击穿透演示的热键 (覆盖默认的番茄钟语义热键 —— showcase 本就不用它们,
+        // 覆盖后不再白白全局吞掉 Ctrl+Shift+P/S/Q)。
+        hotkeys: vec![GlobalHotkey::ctrl_shift(
+            HOTKEY_CLICK_THROUGH,
+            HOTKEY_CLICK_THROUGH_VK,
+        )],
         ..danqing::WindowConfig::default()
     };
     danqing::run_app(config, &mut app)?;

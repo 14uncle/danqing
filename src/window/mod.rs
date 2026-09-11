@@ -9,18 +9,24 @@
 //! 子模块：
 //! - `event`      应用 → Handler 事件通道 + winit → 内部事件适配
 //! - `foreground` 窗口抢前台 / 顶层 (Windows AttachThreadInput)
+//! - `frame_budget` Adaptive 帧率决策 (纯逻辑: 活动/降帧/全屏暂停)
+//! - `fullscreen`   前台全屏应用检测 (QUNS + 矩形覆盖双路线, Windows)
 //! - `icon`       窗口 / 托盘图标加载 + Windows 无边框样式
 //! - `hotkey`     全局热键 ID 常量 + Windows 注册线程
 //! - `placement`  窗口显示落位 (跟随鼠标光标) + 钳制数学
+//! - `passthrough` 点击穿透 (桌面常驻陪伴形态)
 //! - `tray`       托盘菜单项 ID + 快捷键 label 单一来源 + 跨平台托盘
 //! - `handler`    ApplicationHandler 实现 (本模块最大，单独拆出)
 
 mod event;
 #[cfg(target_os = "windows")]
 pub mod foreground;
+mod frame_budget;
+mod fullscreen;
 mod handler;
 mod hotkey;
 mod icon;
+mod passthrough;
 mod placement;
 pub mod startup;
 pub mod tray;
@@ -94,6 +100,12 @@ pub enum WindowMode {
     /// 持续渲染：隐藏态仍保持 `WaitUntil(16ms)` ≈ 60fps tick。
     /// 适用于需要持续动画/音频的应用 (番茄钟等)。
     Continuous,
+    /// 自适应帧率: 活动时 ~60fps, 无事件无交互 30s 后降至 5fps, 前台有
+    /// 其它应用的全屏窗口 (游戏/全屏视频) 时暂停渲染仅低频轮询。
+    /// 适用于桌面常驻氛围应用 (桌景) —— 常驻产品的电费税最低形态。
+    /// 微事件播放期产品可经 [`WindowEventSender::boost_frames`] 临时升帧。
+    /// 判定逻辑见 `frame_budget` (纯函数, 可单测), 全屏检测见 `fullscreen`。
+    Adaptive,
 }
 
 /// 窗口初始配置。
@@ -123,8 +135,12 @@ pub struct WindowConfig {
     /// 番茄钟等需要持续动画的应用应设为 [`WindowMode::Continuous`]。
     pub mode: WindowMode,
     /// 重新显示时的落位策略：默认 [`ShowPlacement::Center`] (原位显示)。
-    /// 热键唤起的工具面板 (剪贴板管理器等) 应设为 [`ShowPlacement::Cursor`]。
+    /// 热键唤起的工具面板 (剪贴板管理器等) 应设为 [`ShowPlacement::Cursor`];
+    /// 常驻陪伴形态 (桌景) 应设为 [`ShowPlacement::Remember`] (位置记忆)。
     pub placement: ShowPlacement,
+    /// 置顶层级: true = 恒在普通窗口之上 (桌面常驻陪伴形态); 默认 `false`。
+    /// 运行时可经 [`WindowEventSender::set_topmost`] 切换。
+    pub topmost: bool,
     /// 全局热键声明集合：空 = 不注册不启动热键线程。
     /// 默认沿袭首个消费者 (番茄钟) 的 Ctrl+Shift+P/S/Q;
     /// 新产品必须显式声明自己的热键，否则与番茄钟冲突 (后注册者失败)。
@@ -148,6 +164,7 @@ impl Default for WindowConfig {
             maximized: false,
             mode: WindowMode::OnDemand,
             placement: ShowPlacement::Center,
+            topmost: false,
             hotkeys: vec![
                 GlobalHotkey::ctrl_shift(hotkey_ids::TOGGLE_VISIBLE, 0x50), // P
                 GlobalHotkey::ctrl_shift(hotkey_ids::START_PAUSE, 0x53),    // S
@@ -226,6 +243,13 @@ mod tests {
     #[test]
     fn default_config_is_not_maximized() {
         assert!(!WindowConfig::default().maximized);
+    }
+
+    /// 默认不置顶: 既有产品 (番茄钟/剪贴板) 的窗口层级行为不变。
+    /// 常驻陪伴形态 (桌景) 显式设 `topmost: true`。
+    #[test]
+    fn default_config_is_not_topmost() {
+        assert!(!WindowConfig::default().topmost);
     }
 
     /// 冒烟测试：仅创建事件循环 (链接触发 shim 生成的导入库)。

@@ -21,7 +21,7 @@ use winit::{
     event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow},
     keyboard::{KeyCode, ModifiersState, PhysicalKey},
-    window::{Window as WinitWindow, WindowAttributes, WindowId},
+    window::{Window as WinitWindow, WindowAttributes, WindowId, WindowLevel},
 };
 
 use crate::app::{AnimationCtx, App};
@@ -103,8 +103,26 @@ pub(super) struct Handler<'a, A: App> {
     /// 热键主键吞键守卫 (热键触发时置入, 主键抬起 / 失焦时清除)。
     /// 详见 [`hotkey_swallow_filter`]。
     swallow_hotkey_key: Option<KeyCode>,
+    /// 指针捕获: 最近一次被组件消费的按下坐标; 配对抬起重定向到该坐标
+    /// (按下态不泄漏, 见 [`pointer_capture`])。
+    mouse_capture: Option<Point>,
     /// 图像纹理收集器 (每帧清空，paint 阶段填充)。
     images: ImageBatch,
+    /// ── Adaptive 帧率治理状态 (仅 WindowMode::Adaptive 使用) ──
+    /// 当前帧率档缓存 (decide 输出, 变化时记日志; render_frame 尾据此门控续链)。
+    frame_rate: super::frame_budget::FrameRate,
+    /// 上次活动时刻 (窗口输入/托盘热键动作/应用事件; Adaptive 帧率判定输入)。
+    last_activity: Instant,
+    /// 事件升帧截止时刻 (产品经 boost_frames 请求; None = 未升帧)。
+    boost_until: Option<Instant>,
+    /// 上次全屏检测轮询时刻 (500ms 一探, 纯查询系统调用不每帧跑)。
+    last_fullscreen_poll: Instant,
+    /// 前台全屏应用检测缓存 (true = 渲染暂停, 仅低频轮询)。
+    fullscreen_suspended: bool,
+    /// 上次同步到窗口的标题 (避免每帧 set_title 系统调用)。
+    last_window_title: String,
+    /// 文件对话框后强制重设标题的剩余帧数 (Windows rfd 模态消息循环干扰)。
+    force_title_frames: u8,
 }
 
 impl<'a, A: App> Handler<'a, A> {
@@ -126,6 +144,7 @@ impl<'a, A: App> Handler<'a, A> {
         window_event_rx: Receiver<WindowAppEvent>,
         boot: Instant,
     ) -> Self {
+        let last_window_title = config.title.clone();
         Self {
             config,
             window: None,
@@ -149,7 +168,16 @@ impl<'a, A: App> Handler<'a, A> {
             has_os_focus: false,
             last_real_size: PhysicalSize::new(0, 0),
             swallow_hotkey_key: None,
+            mouse_capture: None,
             images: ImageBatch::new(),
+            frame_rate: super::frame_budget::FrameRate::Full,
+            last_activity: boot,
+            boost_until: None,
+            // 首次轮询立即执行 (减 1s 使首个 about_to_wait 即检测全屏态)。
+            last_fullscreen_poll: boot - Duration::from_secs(1),
+            fullscreen_suspended: false,
+            last_window_title,
+            force_title_frames: 0,
         }
     }
 }
@@ -162,6 +190,38 @@ use super::{CloseBehavior, WindowConfig};
 /// (此时 `has_os_focus == false`); 用户主动遍历只发生在持有 OS 焦点期间。
 fn tab_traverse_allowed(has_os_focus: bool) -> bool {
     has_os_focus
+}
+
+/// 焦点组件未消费的按下事件是否回退应用层。
+///
+/// 组件已消费必不回退 (防 TextInput 处理过的字符重复到达 app.event);
+/// 未消费时由应用经 [`crate::App::propagate_unhandled_keys`] opt-in 决定,
+/// 默认关 = 既有应用零波及。用途: 大面积只读组件 (如日志查看器) 持焦后,
+/// 应用级导航键 (j/k/翻页) 不失灵。
+fn key_falls_back_to_app(consumed: bool, propagate: bool) -> bool {
+    !consumed && propagate
+}
+
+/// 指针捕获配对: 返回 (新捕获态, 抬起重定向坐标)。
+///
+/// 消费了按下的组件必须收到配对抬起 —— MouseInput 按位置命中分发,
+/// 抬起落在其他区域 (拖出组件/窗外释放) 时按下组件永远收不到,
+/// 按下态泄漏 (danqing-log 框选粘滞, 2026-09-08 评审 R1)。
+/// 实现 = 捕获「按下坐标」, 抬起时重定向回该坐标 (同坐标 = 同命中路径,
+/// 布局在按下-抬起间剧变的极端情形属可接受近似)。
+fn pointer_capture(
+    capture: Option<Point>,
+    pressed: bool,
+    consumed: bool,
+    pos: Point,
+) -> (Option<Point>, Option<Point>) {
+    if pressed {
+        // 已消费按下才捕获 (未消费 = 树无人认领, 无配对义务);
+        // 捕获存续期的新按下不覆盖 (多键同按的罕见情形, 先按先配)。
+        (if consumed { Some(pos) } else { capture }, None)
+    } else {
+        (None, capture)
+    }
 }
 
 /// Windows 虚拟键码 → winit KeyCode (仅覆盖字母与数字键; 其他键不吞, 返回 None)。
@@ -355,19 +415,20 @@ impl<A: App> Handler<'_, A> {
             return;
         }
 
-        let Some(path) = self.focus.current().map(|p| p.to_vec()) else {
-            // 无焦点时回退到应用层
-            self.app.event(event);
-            return;
-        };
-
-        // 键盘前置过滤: 应用层在焦点分发前拦截 (如无修饰字母键触发收藏)
+        // 键盘前置过滤: 应用层在焦点分发前拦截 (如 Ctrl+O 打开文件, Ctrl+T 切模式)
+        // 无论有无焦点均执行, 保证全局快捷键在任何状态下生效。
         if let Event::Key { pressed: true, .. } = event {
             if let Some(msg) = self.app.app_key_filter(event) {
                 self.msgs.push(Box::new(msg));
                 return;
             }
         }
+
+        let Some(path) = self.focus.current().map(|p| p.to_vec()) else {
+            // 无焦点时回退到应用层
+            self.app.event(event);
+            return;
+        };
 
         match event {
             Event::Key { key, pressed, .. } if *pressed => {
@@ -398,7 +459,16 @@ impl<A: App> Handler<'_, A> {
                     }
                     _ => {}
                 }
-                event_at_path(&mut self.tree, &path, event, self.root_area, &mut self.msgs);
+                let result =
+                    event_at_path(&mut self.tree, &path, event, self.root_area, &mut self.msgs);
+                // 焦点组件未消费且应用 opt-in 开启时回退应用层
+                // (大面积只读组件持焦后, 应用级导航键不失灵)。
+                if key_falls_back_to_app(
+                    result == crate::widget::EventResult::Consumed,
+                    self.app.propagate_unhandled_keys(),
+                ) {
+                    self.app.event(event);
+                }
             }
             Event::Ime(_) => {
                 event_at_path(&mut self.tree, &path, event, self.root_area, &mut self.msgs);
@@ -516,6 +586,10 @@ impl<A: App> Handler<'_, A> {
                     log::warn!("拖拽窗口失败：{err}");
                 }
             }
+            WindowAction::SetTitle(title) => {
+                window.set_title(&title);
+                self.config.title = title;
+            }
         }
     }
 
@@ -527,7 +601,9 @@ impl<A: App> Handler<'_, A> {
         let path = match self.focus.current() {
             Some(p) => p,
             None => {
-                window.set_ime_allowed(false);
+                // 无焦点: 应用层自行处理输入时经 App::wants_ime 声明 IME 需求
+                // (默认 false = 关 IME, 与既有焦点应用行为一致)。
+                window.set_ime_allowed(self.app.wants_ime());
                 return;
             }
         };
@@ -564,6 +640,22 @@ impl<A: App> Handler<'_, A> {
             let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
             // 每帧心跳先行：计时 / 过渡动画推进后，绑定闭包在 sync 中读到新状态。
             self.app.tick(&ctx);
+            // 动态窗口标题: 应用层返回 Some 且与上次不同才 set_title (避系统调用开销)。
+            // Windows: rfd 原生文件对话框的模态消息循环可能干扰 winit 的 set_title,
+            // 首次变更后连续两帧强制重设 (第二帧兜底)。
+            if let Some(title) = self.app.window_title() {
+                if title != self.last_window_title || self.force_title_frames > 0 {
+                    if let Some(w) = self.window.as_ref() {
+                        w.set_title(&title);
+                    }
+                    if title != self.last_window_title {
+                        self.force_title_frames = 2;
+                    } else {
+                        self.force_title_frames -= 1;
+                    }
+                    self.last_window_title = title;
+                }
+            }
             self.tree.sync(self.app);
             self.tree.animate(&ctx);
             self.focus.rebuild(&self.tree);
@@ -615,7 +707,13 @@ impl<A: App> Handler<'_, A> {
             log::info!("预渲染首帧耗时：{:?}", frame_start.elapsed());
         }
         if let Some(window) = &self.window {
-            window.request_redraw();
+            // Adaptive 降帧/暂停态不续渲染链 (由 about_to_wait 按档单驱),
+            // 否则自续链会把降帧架空回全速。
+            if self.config.mode != super::WindowMode::Adaptive
+                || super::frame_budget::should_continue_render_chain(self.frame_rate)
+            {
+                window.request_redraw();
+            }
         }
     }
 }
@@ -658,6 +756,13 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 全平台使用自绘标题栏 (按钮布局样式由 TitleBar 按平台适配，
         // 参见 docs/specs/title-bar-cross-platform.md)。
         let attrs = attrs.with_decorations(false);
+        // 置顶层级: 常驻陪伴形态 (桌景) 置顶于普通窗口之上; 默认 Normal,
+        // 既有产品 (番茄钟/剪贴板) 层级行为不变。
+        let attrs = attrs.with_window_level(if self.config.topmost {
+            WindowLevel::AlwaysOnTop
+        } else {
+            WindowLevel::Normal
+        });
         let window = match event_loop.create_window(attrs) {
             Ok(window) => Arc::new(window),
             Err(err) => {
@@ -670,6 +775,15 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
 
         #[cfg(target_os = "windows")]
         apply_windows_undecorated_style(&window);
+
+        // 位置记忆: 创建后 (显示前) 恢复到上次位置, 钳进所在/最近显示器
+        // 工作区; 最大化由系统管理位置, 跳过。无存储 (默认钩子) 时保持居中。
+        #[cfg(target_os = "windows")]
+        if self.config.placement == super::ShowPlacement::Remember && !self.config.maximized {
+            if let Some(saved) = self.app.load_window_position() {
+                super::placement::restore_position(&window, saved, window.inner_size());
+            }
+        }
 
         // 同步 inline 初始化 GPU 上下文 (实例 + surface + 适配器 + 设备 + 管线)。
         // request_adapter 传 `compatible_surface: Some(&surface)` 让 DX12 后端
@@ -705,6 +819,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // maximized (那会让窗口在 GPU 初始化期间全屏白屏)。最大化过程有内容, 无白屏。
         if self.config.maximized {
             window.set_maximized(true);
+            // 同步通知应用层 (与 MaximizeOrRestore/maximize_window 两路径一致):
+            // 漏掉则 TitleBar 最大化图标停在 □, 与真实最大化状态相反。
+            self.app.maximized_changed(true);
         }
         log::info!("窗口已显示");
         // 初始可见性同步: visibility_changed 的契约是「可见性变化后必回调」,
@@ -766,6 +883,28 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         ) {
             // 鼠标事件
             if let Some(internal) = convert_event(&event, self.cursor, self.modifiers) {
+                Self::note_activity(self.config.mode, &mut self.last_activity);
+                // 指针捕获配对: 抬起重定向到捕获的按下坐标, 保证消费按下的
+                // 组件收到配对抬起 (按下态不泄漏; 布局剧变属可接受近似)
+                let mut internal = internal;
+                if let Event::MouseInput {
+                    pressed: false,
+                    position,
+                    button,
+                } = internal
+                {
+                    let (cap, redirect) =
+                        pointer_capture(self.mouse_capture, false, false, position);
+                    self.mouse_capture = cap;
+                    if let Some(p) = redirect {
+                        // 同参数仅换坐标: 抬起重定向回捕获的按下位置
+                        internal = Event::MouseInput {
+                            button,
+                            pressed: false,
+                            position: p,
+                        };
+                    }
+                }
                 let result = self.tree.event(&internal, self.root_area, &mut self.msgs);
                 if let Event::MouseInput {
                     pressed: true,
@@ -773,6 +912,13 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     ..
                 } = &internal
                 {
+                    let (cap, _) = pointer_capture(
+                        self.mouse_capture,
+                        true,
+                        result == crate::widget::EventResult::Consumed,
+                        *position,
+                    );
+                    self.mouse_capture = cap;
                     let prev = self.focus.current().map(|p| p.to_vec());
                     self.focus.set_by_click(&self.tree, *position);
                     let curr = self.focus.current().map(|p| p.to_vec());
@@ -785,6 +931,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             }
         } else if let Some(internal) = convert_event(&event, self.cursor, self.modifiers) {
             // 键盘 /IME 事件经焦点路由
+            Self::note_activity(self.config.mode, &mut self.last_activity);
             self.dispatch_focused_event(&internal);
         }
 
@@ -822,6 +969,21 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     context.resize(size.width, size.height);
                 }
             }
+            WindowEvent::Moved(position) => {
+                // 位置记忆: 拖动后回报物理坐标 (产品侧防抖落盘)。
+                // 最大化/最小化位置由系统管理, 不记 —— 最大化位污染还原位;
+                // 最小化窗口被挪到幻影坐标 (-32000,-32000), 记忆会被冲掉。
+                if self.config.placement == super::ShowPlacement::Remember
+                    && self.window.as_ref().is_some_and(|w| {
+                        super::placement::should_remember_position(
+                            w.is_maximized(),
+                            w.is_minimized().unwrap_or(false),
+                        )
+                    })
+                {
+                    self.app.save_window_position(position.x, position.y);
+                }
+            }
             WindowEvent::RedrawRequested => {
                 self.render_frame(event_loop);
             }
@@ -839,8 +1001,12 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             self.app.tick(&ctx);
         }
         // 全局热键通道轮询
+        // 热键与托盘动作都可能改变勾选态 (穿透/置顶等): 任一通道有派发就在
+        // 本帧末尾重建托盘菜单, 保持勾选项与 App 状态一致。
+        let mut tray_menu_dirty = false;
         if let Some(rx) = &self.hotkey_rx {
             while let Ok(id) = rx.try_recv() {
+                Self::note_activity(self.config.mode, &mut self.last_activity);
                 // 记下热键主键: 按住热键时主键的按下事件会漏进刚唤起的窗口
                 // (见 hotkey_swallow_filter), 抬起前这些按下必须吞掉。
                 // 仅当主键此刻仍被物理按住才武装守卫 (见 vk_still_held)。
@@ -854,6 +1020,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 if let Some(msg) = self.app.hotkey(id) {
                     self.app.update(msg);
                 }
+                tray_menu_dirty = true;
             }
         }
         // 托盘菜单事件轮询 (muda 内部维护的全局通道)。每个 MenuId 是字符串
@@ -862,14 +1029,26 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         let tray_rx = tray_icon::menu::MenuEvent::receiver();
         while let Ok(event) = tray_rx.try_recv() {
             if let Ok(id) = event.id.0.parse::<u8>() {
+                Self::note_activity(self.config.mode, &mut self.last_activity);
                 if let Some(msg) = self.app.tray_action(id) {
                     self.app.update(msg);
                 }
+                tray_menu_dirty = true;
             }
         }
         // 窗口事件通道轮询
         while let Ok(event) = self.window_event_rx.try_recv() {
-            self.apply_window_event(event, event_loop);
+            Self::note_activity(self.config.mode, &mut self.last_activity);
+            if self.apply_window_event(event, event_loop) {
+                tray_menu_dirty = true;
+            }
+        }
+        // 动作 (托盘点击/全局热键/经 sender 的状态变更) 可能改了勾选态:
+        // 重建托盘菜单 (tray_menu 从 App 状态现查, 幂等)。
+        if tray_menu_dirty {
+            if let Some(tray) = &self.tray {
+                tray.set_menu(self.app.tray_menu());
+            }
         }
         // 焦点事件流对账 (Windows): AttachThreadInput 抢前台后, Windows 的
         // 焦点消息投递可能整体失真 (WM_SETFOCUS / WM_NCACTIVATE / WM_KILLFOCUS
@@ -892,12 +1071,18 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         //     跑模态消息循环，期间 winit 事件循环被冻结; 菜单关闭后必须主动
         //     重发 RedrawRequested, 否则 pending 的 paint 消息可能被模态循环
         //     过滤/丢弃, UI 卡在旧值不更新 (读秒停止、按钮 label 不切)。
-        let control_flow = self.control_flow_for_current_state();
-        if self.is_visible {
-            if let Some(window) = &self.window {
-                window.request_redraw();
+        //   Adaptive (桌景等常驻氛围应用): 帧率治理接管 —— 全屏检测轮询 +
+        //     活动/升帧判定, 按帧率档驱动重绘与轮询间隔 (见 adaptive_frame_pacing)。
+        let control_flow = if self.config.mode == super::WindowMode::Adaptive {
+            self.adaptive_frame_pacing()
+        } else {
+            if self.is_visible {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
             }
-        }
+            self.control_flow_for_current_state()
+        };
         event_loop.set_control_flow(control_flow);
     }
 }
@@ -916,6 +1101,60 @@ impl<A: App> Handler<'_, A> {
                 ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100))
             }
             _ => ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16)),
+        }
+    }
+
+    /// Adaptive 模式帧率驱动: 全屏检测低频轮询 → 帧率决策 → 按档发重绘。
+    /// 降帧/暂停态 render_frame 尾不续链 (门控见 render_frame), 由本函数
+    /// 按轮询间隔单驱 —— 降帧生效的关键。
+    fn adaptive_frame_pacing(&mut self) -> ControlFlow {
+        let now = Instant::now();
+        if !self.is_visible {
+            // 隐藏态: 与 OnDemand 隐藏同款低频轮询 (保热键响应),
+            // 零渲染零检测 (隐藏本就不渲染, 全屏检测无意义)。
+            return ControlFlow::WaitUntil(now + Duration::from_millis(100));
+        }
+        // 全屏检测 500ms 一探 (纯查询式系统调用, 不每帧跑)。
+        if now.duration_since(self.last_fullscreen_poll) >= Duration::from_millis(500) {
+            self.last_fullscreen_poll = now;
+            let fullscreen = super::fullscreen::fullscreen_app_foreground();
+            if fullscreen != self.fullscreen_suspended {
+                self.fullscreen_suspended = fullscreen;
+                log::info!(
+                    "前台全屏应用: {} → 渲染{}",
+                    if fullscreen { "检出" } else { "退出" },
+                    if fullscreen { "暂停" } else { "恢复" }
+                );
+                // 渲染暂停同步给应用层 (声音沉降等 —— 性能洁癖的听觉一半)。
+                self.app.render_suspended(fullscreen);
+            }
+        }
+        let rate = super::frame_budget::decide(
+            now.duration_since(self.last_activity),
+            self.boost_until
+                .map(|until| until.saturating_duration_since(now))
+                .unwrap_or(Duration::ZERO),
+            self.fullscreen_suspended,
+        );
+        if rate != self.frame_rate {
+            log::info!("帧率档 {:?} → {:?}", self.frame_rate, rate);
+            self.frame_rate = rate;
+        }
+        if rate != super::frame_budget::FrameRate::Suspended {
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+        ControlFlow::WaitUntil(now + super::frame_budget::poll_interval(rate))
+    }
+
+    /// 活动戳记 (Adaptive 帧率判定输入): 窗口输入/托盘热键动作/应用事件
+    /// 都算活动。仅 Adaptive 模式戳 (其它模式零开销, 不读时钟)。
+    /// 关联函数形态 (不借整个 self): 调用点可能正持有其它字段的借用
+    /// (如 hotkey_rx 轮询循环), 字段级错位借用才能编译。
+    fn note_activity(mode: super::WindowMode, last_activity: &mut Instant) {
+        if mode == super::WindowMode::Adaptive {
+            *last_activity = Instant::now();
         }
     }
 
@@ -1002,7 +1241,8 @@ impl<A: App> Handler<'_, A> {
     }
 
     /// 处理 App 经 WindowEventSender 主动发来的事件。
-    fn apply_window_event(&mut self, event: WindowAppEvent, event_loop: &ActiveEventLoop) {
+    /// 返回 true = 该事件改了托盘菜单勾选项相关状态 (调用方据此刻意重建菜单)。
+    fn apply_window_event(&mut self, event: WindowAppEvent, event_loop: &ActiveEventLoop) -> bool {
         match event {
             WindowAppEvent::ToggleVisible => {
                 // Handler 是 is_visible 唯一事实源：翻转后立即应用到 winit 窗口。
@@ -1013,6 +1253,7 @@ impl<A: App> Handler<'_, A> {
                     self.hide_window();
                 }
                 self.app.visibility_changed(self.is_visible);
+                false
             }
             WindowAppEvent::ShowWindow => {
                 // 仅显示窗口 (不切换)。用于 focus_lost 等场景。
@@ -1021,6 +1262,7 @@ impl<A: App> Handler<'_, A> {
                     self.show_window();
                     self.app.visibility_changed(true);
                 }
+                false
             }
             WindowAppEvent::HideWindow => {
                 // 仅隐藏窗口 (不切换)。用于 focus_lost 和关闭按钮。
@@ -1029,8 +1271,12 @@ impl<A: App> Handler<'_, A> {
                     self.hide_window();
                     self.app.visibility_changed(false);
                 }
+                false
             }
-            WindowAppEvent::Quit => event_loop.exit(),
+            WindowAppEvent::Quit => {
+                event_loop.exit();
+                false
+            }
             WindowAppEvent::PhaseAdvanced => {
                 // 隐藏态时阶段流转 → 自动呼出 (用户可能没在电脑前，或在另一 app)，
                 // 默认最大化呼出 (沉浸主界面)。手动 ToggleVisible 不强制最大化。
@@ -1040,12 +1286,82 @@ impl<A: App> Handler<'_, A> {
                     self.show_window();
                     self.maximize_window();
                 }
+                false
             }
             WindowAppEvent::SetClearColor(color) => {
                 self.config.clear_color = color;
                 if let Some(ctx) = self.context.as_mut() {
                     ctx.set_clear_color(color);
                 }
+                false
+            }
+            WindowAppEvent::BoostFrames(secs) => {
+                // 事件升帧: 微事件播放期临时全帧率 (后发覆盖先到)。
+                // 帧率判定在 adaptive_frame_pacing 消费 boost_until, 到期自动回落。
+                self.boost_until = Some(Instant::now() + Duration::from_secs_f32(secs.max(0.0)));
+                false
+            }
+            WindowAppEvent::ReadClipboard => {
+                // App 层无剪贴板直连: 读后回送 IME Commit (与聚焦组件粘贴路径同构,
+                // 见 handle_clipboard)。空剪贴板回送空串 = 无副作用。
+                let text = self.get_clipboard().unwrap_or_default();
+                self.app
+                    .event(&Event::Ime(ImeEvent::Commit { value: text }));
+                false
+            }
+            WindowAppEvent::SetClickThrough(enabled) => {
+                // 穿透只改命中测试, 不动可见性与焦点; 底层实现幂等。
+                // 窗口未创建时 (resumed 前) 丢弃 —— 调用方应经
+                // visibility_changed 等回调确认窗口就绪后再发。
+                if let Some(window) = &self.window {
+                    super::passthrough::set_click_through(window, enabled);
+                }
+                true
+            }
+            WindowAppEvent::SetTopmost(topmost) => {
+                self.config.topmost = topmost;
+                if let Some(window) = &self.window {
+                    window.set_window_level(if topmost {
+                        WindowLevel::AlwaysOnTop
+                    } else {
+                        WindowLevel::Normal
+                    });
+                }
+                true
+            }
+            WindowAppEvent::SetInnerSize(size) => {
+                let Some(window) = &self.window else {
+                    return true; // 窗口未创建时丢弃 (resumed 前)
+                };
+                if window.is_maximized() {
+                    // request_inner_size 会清最大化标志 (见 show_window 注释),
+                    // 最大化态的尺寸请求静默丢弃。
+                    log::info!("最大化态忽略尺寸请求 {}x{}", size.width, size.height);
+                    return true;
+                }
+                // 与创建路径同约定: 逻辑像素。
+                let logical = LogicalSize::new(f64::from(size.width), f64::from(size.height));
+                if self.is_visible {
+                    // winit 异步生效 (Windows 上通常返回 None), 实际尺寸以随后的
+                    // Resized 事件为准; 渲染表面经既有 Resized 流程自动跟随。
+                    let _ = window.request_inner_size(logical);
+                } else {
+                    // 隐藏态不直接改窗口: Windows 会对隐藏窗口补发 WM_SIZE,
+                    // 但隐藏态 Resized 一律不信 (幻影 160x28 防护), 显示时
+                    // show_window 又以 last_real_size 自愈回滚 —— 窗口会弹回
+                    // 旧尺寸而产品配置已变更 (三态不一致, desk-window review
+                    // 实证)。只更新信标: 显示时自愈路径把窗口做到新尺寸并
+                    // 触发真实 WM_SIZE (表面经 Resized 流程跟随)。
+                    let physical: PhysicalSize<f64> = logical.to_physical(window.scale_factor());
+                    self.last_real_size =
+                        PhysicalSize::new(physical.width as u32, physical.height as u32);
+                    log::info!(
+                        "隐藏态尺寸请求记入信标 {}x{}, 显示时落位",
+                        self.last_real_size.width,
+                        self.last_real_size.height
+                    );
+                }
+                true
             }
         }
     }
@@ -1054,7 +1370,11 @@ impl<A: App> Handler<'_, A> {
 #[cfg(test)]
 mod tests {
     use super::super::WindowMode;
-    use super::{hotkey_swallow_filter, tab_traverse_allowed, vk_to_key_code};
+    use super::{
+        hotkey_swallow_filter, key_falls_back_to_app, pointer_capture, tab_traverse_allowed,
+        vk_to_key_code,
+    };
+    use crate::Point;
     use winit::event::ElementState;
     use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -1126,6 +1446,63 @@ mod tests {
     fn tab_with_os_focus_traverses() {
         // 持有 OS 焦点期间的 Tab 是用户主动遍历, 必须放行。
         assert!(tab_traverse_allowed(true));
+    }
+
+    /// 组件已消费的键永不回退应用层 —— 否则 TextInput 处理过的字符
+    /// 会重复到达 app.event (双触发)。开关状态无关。
+    #[test]
+    fn consumed_key_never_falls_back() {
+        assert!(!key_falls_back_to_app(true, true));
+        assert!(!key_falls_back_to_app(true, false));
+    }
+
+    /// 未消费 + 应用 opt-in 开启 = 回退 (日志查看器 LogView 持焦后
+    /// j/k/翻页等应用级导航键不失灵, 2026-09-08 文本选区特性引入)。
+    #[test]
+    fn unconsumed_key_falls_back_when_propagate_enabled() {
+        assert!(key_falls_back_to_app(false, true));
+    }
+
+    /// 未消费 + 默认关闭 = 维持现状丢弃, 既有应用零波及。
+    #[test]
+    fn unconsumed_key_dropped_by_default() {
+        assert!(!key_falls_back_to_app(false, false));
+    }
+
+    /// 按下被消费 → 记入捕获 (配对抬起的重定向坐标)。
+    /// 日志视图框选粘滞根因修复 (2026-09-08 R1): 抬起落在其他区域时
+    /// 按下组件收不到配对事件, 按下态泄漏。
+    #[test]
+    fn consumed_press_captures_position() {
+        let p = Point::new(10.0, 20.0);
+        let (cap, redirect) = pointer_capture(None, true, true, p);
+        assert_eq!(cap, Some(p));
+        assert_eq!(redirect, None);
+    }
+
+    /// 按下未消费 → 不产生捕获 (树无人认领, 无配对义务)。
+    #[test]
+    fn unconsumed_press_does_not_capture() {
+        let p = Point::new(10.0, 20.0);
+        let (cap, _) = pointer_capture(None, true, false, p);
+        assert_eq!(cap, None);
+    }
+
+    /// 抬起 → 取出捕获坐标作为重定向目标, 捕获清零 (一次性配对)。
+    #[test]
+    fn release_redirects_to_captured_press_position() {
+        let p = Point::new(10.0, 20.0);
+        let (cap, redirect) = pointer_capture(Some(p), false, false, Point::new(999.0, 999.0));
+        assert_eq!(cap, None);
+        assert_eq!(redirect, Some(p));
+    }
+
+    /// 无捕获的抬起 → 不重定向 (正常按位置分发)。
+    #[test]
+    fn release_without_capture_passes_through() {
+        let (cap, redirect) = pointer_capture(None, false, false, Point::new(1.0, 1.0));
+        assert_eq!(cap, None);
+        assert_eq!(redirect, None);
     }
 
     /// 按需渲染模式: 隐藏态应使用 Wait (零唤醒)。
