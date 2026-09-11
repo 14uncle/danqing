@@ -406,7 +406,8 @@ impl Theme for DarkTheme {
 
     fn selection(&self) -> Color {
         // 跟随 accent 的 30% 透明选区。
-        Color::rgba(15.0 / 255.0, 118.0 / 255.0, 110.0 / 255.0, 0.30)
+        let a = self.accent();
+        Color::rgba(a.r, a.g, a.b, 0.30)
     }
 
     fn caret(&self) -> Color {
