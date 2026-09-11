@@ -352,6 +352,160 @@ impl Theme for LightTheme {
     }
 }
 
+/// 深色主题。
+///
+/// 深灰偏蓝背景 + 暗玻璃表面 + 玉色 accent 不变。
+/// 分割线/边框跟随文字色自动变亮。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DarkTheme;
+
+impl Theme for DarkTheme {
+    fn background(&self) -> Color {
+        // 深灰偏蓝，比纯黑柔和。
+        Color::from_srgb8(25, 25, 32)
+    }
+
+    fn surface(&self) -> Color {
+        // 暗玻璃：白色低透明度。
+        Color::rgba(1.0, 1.0, 1.0, 0.08)
+    }
+
+    fn surface_input(&self) -> Color {
+        // 输入区略实，保证文字可读。
+        Color::rgba(1.0, 1.0, 1.0, 0.12)
+    }
+
+    fn surface_variant(&self) -> Color {
+        // 悬停/次级表面。
+        Color::rgba(1.0, 1.0, 1.0, 0.10)
+    }
+
+    fn accent(&self) -> Color {
+        // 亮玉色，深色背景下对比度 ~5.3:1 (WCAG AA)。
+        Color::from_srgb8(26, 158, 138)
+    }
+
+    fn text_primary(&self) -> Color {
+        // 近白。
+        Color::from_srgb8(229, 229, 234)
+    }
+
+    fn text_secondary(&self) -> Color {
+        // 中灰。
+        Color::from_srgb8(142, 142, 147)
+    }
+
+    fn divider(&self) -> Color {
+        // 跟随文字色变亮。
+        Color::rgba(229.0 / 255.0, 229.0 / 255.0, 234.0 / 255.0, 0.15)
+    }
+
+    fn border(&self) -> Color {
+        Color::rgba(229.0 / 255.0, 229.0 / 255.0, 234.0 / 255.0, 0.28)
+    }
+
+    fn selection(&self) -> Color {
+        // 跟随 accent 的 30% 透明选区。
+        Color::rgba(15.0 / 255.0, 118.0 / 255.0, 110.0 / 255.0, 0.30)
+    }
+
+    fn caret(&self) -> Color {
+        self.accent()
+    }
+
+    fn danger(&self) -> Color {
+        LightTheme.danger()
+    }
+
+    fn traffic_close(&self) -> Color {
+        LightTheme.traffic_close()
+    }
+
+    fn traffic_minimize(&self) -> Color {
+        LightTheme.traffic_minimize()
+    }
+
+    fn traffic_maximize(&self) -> Color {
+        LightTheme.traffic_maximize()
+    }
+
+    fn scrim(&self) -> Color {
+        LightTheme.scrim()
+    }
+
+    fn font_size_small(&self) -> u16 {
+        LightTheme.font_size_small()
+    }
+
+    fn font_size_body(&self) -> u16 {
+        LightTheme.font_size_body()
+    }
+
+    fn font_size_heading(&self) -> u16 {
+        LightTheme.font_size_heading()
+    }
+
+    fn control_height(&self) -> f32 {
+        LightTheme.control_height()
+    }
+
+    fn spacing_xs(&self) -> f32 {
+        LightTheme.spacing_xs()
+    }
+
+    fn spacing_sm(&self) -> f32 {
+        LightTheme.spacing_sm()
+    }
+
+    fn spacing_md(&self) -> f32 {
+        LightTheme.spacing_md()
+    }
+
+    fn spacing_lg(&self) -> f32 {
+        LightTheme.spacing_lg()
+    }
+
+    fn spacing_xl(&self) -> f32 {
+        LightTheme.spacing_xl()
+    }
+
+    fn radius_sm(&self) -> f32 {
+        LightTheme.radius_sm()
+    }
+
+    fn radius_md(&self) -> f32 {
+        LightTheme.radius_md()
+    }
+
+    fn radius_lg(&self) -> f32 {
+        LightTheme.radius_lg()
+    }
+
+    fn radius_xl(&self) -> f32 {
+        LightTheme.radius_xl()
+    }
+
+    fn shadow_sm(&self) -> Shadow {
+        LightTheme.shadow_sm()
+    }
+
+    fn shadow_md(&self) -> Shadow {
+        LightTheme.shadow_md()
+    }
+
+    fn shadow_lg(&self) -> Shadow {
+        LightTheme.shadow_lg()
+    }
+
+    fn easing_standard(&self) -> Easing {
+        LightTheme.easing_standard()
+    }
+
+    fn easing_accelerate(&self) -> Easing {
+        LightTheme.easing_accelerate()
+    }
+}
+
 /// 场景调色板。
 ///
 /// 由场景生成管线随场景大图一并产出 (见 `tools/export-scenes.py`);
@@ -961,5 +1115,65 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ---- DarkTheme 测试 ----
+
+    #[test]
+    fn dark_theme_implements_theme() {
+        fn assert_theme<T: Theme>() {}
+        assert_theme::<DarkTheme>();
+    }
+
+    #[test]
+    fn dark_theme_colors_are_visible() {
+        let theme = DarkTheme;
+        assert!(theme.background().a > 0.0);
+        assert!(theme.surface().a > 0.0);
+        assert!(theme.accent().a > 0.0);
+        assert!(theme.text_primary().a > 0.0);
+        assert!(theme.text_secondary().a > 0.0);
+        assert!(theme.divider().a > 0.0);
+        assert!(theme.border().a > 0.0);
+        assert!(theme.selection().a > 0.0);
+        assert!(theme.caret().a > 0.0);
+        assert!(theme.danger().a > 0.0);
+        assert!(theme.scrim().a > 0.0);
+    }
+
+    #[test]
+    fn dark_theme_text_primary_vs_background_contrast() {
+        // WCAG AAA: 正文 vs 背景 ≥ 7:1
+        let theme = DarkTheme;
+        let ratio = contrast_ratio(theme.text_primary(), theme.background());
+        assert!(
+            ratio >= 7.0,
+            "深色主题 text_primary vs background 对比度应 ≥7:1, 实际 {ratio:.2}"
+        );
+    }
+
+    #[test]
+    fn dark_theme_accent_vs_background_contrast() {
+        // WCAG AA: 强调色 vs 背景 ≥ 4.5:1
+        let theme = DarkTheme;
+        let ratio = contrast_ratio(theme.accent(), theme.background());
+        assert!(
+            ratio >= 4.5,
+            "深色主题 accent vs background 对比度应 ≥4.5:1, 实际 {ratio:.2}"
+        );
+    }
+
+    #[test]
+    fn dark_theme_non_color_tokens_match_light_theme() {
+        let dark = DarkTheme;
+        let light = LightTheme;
+        assert_eq!(dark.font_size_small(), light.font_size_small());
+        assert_eq!(dark.font_size_body(), light.font_size_body());
+        assert_eq!(dark.font_size_heading(), light.font_size_heading());
+        assert_eq!(dark.control_height(), light.control_height());
+        assert_eq!(dark.spacing_md(), light.spacing_md());
+        assert_eq!(dark.radius_lg(), light.radius_lg());
+        assert_eq!(dark.scrim(), light.scrim());
+        assert_eq!(dark.danger(), light.danger());
     }
 }
