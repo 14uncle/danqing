@@ -665,9 +665,9 @@ impl<A: App> Handler<'_, A> {
             // 避免残留请求在用户稍后清焦 (Esc/点空白) 时误把焦点拉回按钮。
             if let Some(id) = self.app.focus_request() {
                 self.app.focus_restored();
-                if self.focus.current().is_none() {
-                    self.focus.set_focus_by_id(id);
-                }
+                // 焦点请求强制接管：不论当前有无焦点均切到目标
+                // (如 Ctrl+F 从 LogView 持焦状态切回搜索栏)。
+                self.focus.set_focus_by_id(id);
             }
             let prev = self.focus.previous().map(|p| p.to_vec());
             let curr = self.focus.current().map(|p| p.to_vec());
