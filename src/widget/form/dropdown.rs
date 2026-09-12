@@ -382,7 +382,7 @@ impl Widget for Dropdown {
                 1.0,
                 self.control_height - self.list_pad * 2.0,
             ),
-            self.border_color,
+            border,
             0.0,
         );
         let cx = arrow_x + ARROW_W / 2.0;
@@ -714,6 +714,23 @@ mod tests {
     fn focus_event(dd: &mut Dropdown, event: Event) -> EventResult {
         let mut msgs = MsgQueue::new();
         dd.event(&event, Rect::default(), &mut msgs)
+    }
+
+    /// 右侧区**分隔线**的颜色: 1px 宽、纵向成段、且落在 `x + w − ARROW_W` 处。
+    ///
+    /// 按 x 定位而非「纵向描边里有没有 accent」—— 控件自身的左右竖边本来就是
+    /// 焦点色, 后者分不清是哪一条, 会给「分隔线漏了焦点色」放行。
+    fn zone_divider_color(dd: &Dropdown) -> [f32; 4] {
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        dd.paint(control(), &mut rects, &mut texts);
+        let divider_x = control().origin.x + control().size.width - ARROW_W;
+        let rects_of_batch = rects.instance_rects();
+        let idx = rects_of_batch
+            .iter()
+            .position(|r| r.size.width == 1.0 && r.size.height > 1.0 && r.origin.x == divider_x)
+            .expect("右侧区分隔线应被绘制");
+        rects.instance_colors()[idx]
     }
 
     #[test]
@@ -1173,6 +1190,38 @@ mod tests {
             control_border_colors(&dd).iter().all(|c| *c == resting),
             "失焦后: 须复原常规边框色"
         );
+    }
+
+    #[test]
+    fn focus_also_recolors_the_right_zone_divider() {
+        // 与 IconInput 对齐 (icon_input.rs:308 起): 焦点时右侧区那条竖分隔线
+        // 也跟随外框转 accent。原先它固定用 `border_color`, 聚焦后外框变色而
+        // 紧挨着的这条线不变 —— 两个组件同一位置的观感不一致。
+        let mut dd = dropdown();
+        layout_at(&mut dd);
+
+        let resting = rgba_of(theme().border());
+        let focused = rgba_of(theme().accent());
+        assert_ne!(
+            resting, focused,
+            "前提: 两个 token 必须不同, 否则本测试无法证伪"
+        );
+
+        assert_eq!(
+            zone_divider_color(&dd),
+            resting,
+            "静默态: 分隔线用常规边框色"
+        );
+
+        focus_event(&mut dd, Event::FocusIn);
+        assert_eq!(
+            zone_divider_color(&dd),
+            focused,
+            "焦点态: 分隔线须跟随外框转 accent"
+        );
+
+        focus_event(&mut dd, Event::FocusOut);
+        assert_eq!(zone_divider_color(&dd), resting, "失焦后: 分隔线复原");
     }
 
     #[test]

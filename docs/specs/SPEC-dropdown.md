@@ -306,3 +306,14 @@ impl Widget for Dropdown {
 3. **`scrollable.rs` 坐标系修复单独提交** —— 采纳，不入本次方向（T6）。
 4. **本次 plan / todo 落 `tasks/plan-dropdown.md` + `tasks/todo-dropdown.md`** —— 与原待裁决 4 的担忧不同，`docs/tasks/` 是磁盘分析器按 `danqing-disk/CLAUDE.md` 明文规定占用的位置，框架计划一直在 `tasks/`（`plan-overlay.md` 同族），两者不冲突。#4 系勘察失误，已作废。
 5. **鼠标选中后焦点掉落** —— 裁为 **(a) 接受为 v1 已知限制**，写进组件 doc。纯键盘路径不受影响；受影响的是「先鼠标选、再键盘导航」这一条次要流。改动面收在本次范围内，不拖入焦点系统。
+6. **右侧图标/图形区不抽基类** —— 采纳「不抽」（2026-09-12 就「IconInput 与 Dropdown 右侧都带图标/图形，是否能提取基类」的提问裁决，落定于本次工作之后）。**只统一取色策略，不做任何抽象。**
+
+   **共享的实体只有三样**，且都不构成抽象的单位：右侧区矩形公式 `from_xywh(x + w − ZONE_W, y, ZONE_W, h)`；位于 `x + w − ZONE_W` 的 1px 竖分隔线；图形本身由既有基元绘制（`push_diagonal` / `push_rounded_border`）。连这三样的入参都不齐 —— 区宽 `32.0` vs `24.0`，纵向内缩一个用字面量 `4.0`、一个用 token `list_pad`。
+
+   **差异才是主体，且全为语义性**：命中区与消息（IconInput 有独立命中区 + `on_icon_click`；Dropdown 无独立命中区，整控件开合）、颜色（`bind_icon_color` / `bind_icon_hover_color` 可绑应用状态 vs 固定 `theme.accent()`）、状态（hover 底 + pressed 缩放 vs 无）、图形（放大镜 vs 展开时翻转的折线）。
+
+   **决定性证据：没有第三个用例。** 全 `src/widget/` 搜过（内嵌 `CloseButton`、清空按钮、`ARROW_W` / `ICON_W` 一类常量），框架内右侧图形区仅此两个；`danqing-log` / `danqing-pomodoro` / `danqing-disk` / `danqing-tile` 四个产品仓库按 `push_diagonal` / `icon_rect` / `ICON_AREA` / `ARROW_W` / `arrow_x` 搜过，无命中。按「不到第三个用例不抽象」，此时抽是在猜未来的形状。
+
+   **重新评估的触发条件**：出现第三个用例即重裁 —— 例如带清空 ✕ 的输入框、带单位后缀的数字框、带状态图标的下拉。届时若确要抽，倾向 `pub(crate)` 几何助手（`zone_rect` + `paint_zone_divider`）而非类型基类，因为两者间没有 vtable 级行为可共享。
+
+   **本裁决附带的实修**：对比同一位置时发现 Dropdown 的竖分隔线写死 `self.border_color`，而 `icon_input.rs:308` / `:319` 复用的是已按焦点选色的局部变量 —— 聚焦后外框转 accent 而紧邻的这条线不变，同位置观感不一致。已改为复用 `border`，并补 `focus_also_recolors_the_right_zone_divider`（按 x 坐标定位该竖段；「纵向描边里有没有 accent」那种写法会给此漏项放行，因为控件自身左右竖边本就是焦点色）。变异测试：改回 `self.border_color` 时仅此一条失败。
