@@ -295,6 +295,51 @@ mod tests {
         Rect::from_xywh(0.0, 0.0, TRACK_WIDTH, TRACK_HEIGHT)
     }
 
+    /// 主题 token 的原始 RGBA —— 与 `RectBatch::instance_colors` 同一表示。
+    fn rgba_of(c: Color) -> [f32; 4] {
+        [c.r, c.g, c.b, c.a]
+    }
+
+    /// 焦点环**上直边**的颜色; 无焦点环则 `None`。
+    ///
+    /// 焦点环与轨道同为 accent 家族, 故按几何定位: 环的直边是 2px 厚、贴区域顶边、
+    /// 横向成段 (`width > 2.0` 用以排除圆角处同样 2×2 的圆点, 它们也落在顶边)。
+    fn focus_ring_top_color(sw: &mut Switch) -> Option<[f32; 4]> {
+        let a = switch_area();
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        sw.paint(a, &mut rects, &mut texts);
+        let colors = rects.instance_colors();
+        rects
+            .instance_rects()
+            .iter()
+            .position(|r| r.origin.y == a.origin.y && r.size.height == 2.0 && r.size.width > 2.0)
+            .map(|i| colors[i])
+    }
+
+    #[test]
+    fn focus_in_draws_an_accent_ring_and_focus_out_removes_it() {
+        // Switch 的焦点视觉是**加性**的 (多画一圈 2px 环), 不是换边框色 ——
+        // 与 TextInput/TextArea/IconInput 的换色不同, 故断言「环在 / 环不在」。
+        let mut sw = Switch::new();
+        assert_eq!(focus_ring_top_color(&mut sw), None, "静默态: 不画焦点环");
+
+        let mut msgs = MsgQueue::new();
+        assert_eq!(
+            sw.event(&Event::FocusIn, switch_area(), &mut msgs),
+            EventResult::Consumed,
+            "FocusIn 应被消费"
+        );
+        assert_eq!(
+            focus_ring_top_color(&mut sw),
+            Some(rgba_of(LightTheme.accent())),
+            "焦点态: 焦点环为 accent"
+        );
+
+        sw.event(&Event::FocusOut, switch_area(), &mut msgs);
+        assert_eq!(focus_ring_top_color(&mut sw), None, "失焦后: 焦点环消失");
+    }
+
     #[test]
     fn layout_returns_fixed_size() {
         let mut sw = Switch::new();

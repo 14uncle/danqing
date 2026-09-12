@@ -16,8 +16,9 @@
 //! - 键盘 (聚焦后经焦点路由直达): ↑↓ 移动 hover / Enter·Space 选中 /
 //!   Esc 收起; 收起态 ↑↓ 与 Enter·Space 均展开。Esc 在收起态返回 `Ignored`,
 //!   留给 app 级 Esc 协议 (与 Overlay 同一约定)。
-//! - 焦点态边框转 `theme.accent()` (由框架的 `FocusIn` / `FocusOut` 驱动),
-//!   与其他表单组件 (TextInput / TextArea / Switch / IconInput) 同一约定。
+//! - 焦点既驱动边框 (转 `theme.accent()`，与其他表单组件 TextInput / TextArea /
+//!   Switch / IconInput 同一约定), 也驱动展开态: **失焦即收起**, 故 Tab 移焦后
+//!   弹层不会留在屏上无人认领。
 //!
 //! 不做什么：
 //! - 长列表滚动 (v1; 超长列表请自行控制选项数)
@@ -480,16 +481,16 @@ impl Widget for Dropdown {
             Event::Key {
                 key, pressed: true, ..
             } => self.handle_key(key, msgs),
-            // 焦点只驱动边框色, 不驱动展开态: 收起由控件点击、Esc、点外按下三条
-            // 路径负责 (见 `dismiss_popup_at`)。代价是 Tab 移焦时弹层留在屏上 ——
-            // v1 未做 Tab 在弹层内的遍历与移焦收起, 与「键盘仅 ↑↓/Enter/Space/Esc」
-            // 的范围一致。
+            // 焦点既驱动边框色, 也驱动展开态: 失焦即收起 (2026-09-12 裁决, 与
+            // `reset_focus` 同语义)。否则 Tab 移焦后弹层会留在屏上无人认领 ——
+            // 点外收起只覆盖鼠标按下, 键盘移焦不产生按下事件。
             Event::FocusIn => {
                 self.focused = true;
                 EventResult::Consumed
             }
             Event::FocusOut => {
                 self.focused = false;
+                self.collapse();
                 EventResult::Consumed
             }
             _ => EventResult::Ignored,
@@ -1222,6 +1223,73 @@ mod tests {
 
         focus_event(&mut dd, Event::FocusOut);
         assert_eq!(zone_divider_color(&dd), resting, "失焦后: 分隔线复原");
+    }
+
+    #[test]
+    fn focus_out_collapses_an_open_popup() {
+        // 键盘展开后 Tab 移焦 —— 失焦即收起 (2026-09-12 裁决)。这条必须自己
+        // 覆盖: 点外收起走的是鼠标按下, 而键盘移焦**不产生按下事件**, 所以
+        // 没有别的机制会把留在屏上的弹层收掉。
+        let mut dd = dropdown();
+        layout_at(&mut dd);
+        let mut msgs = MsgQueue::new();
+
+        focus_event(&mut dd, Event::FocusIn);
+        key_press(&mut dd, NamedKey::ArrowDown, &mut msgs);
+        assert!(dd.is_expanded(), "前提: 收起态按 ↓ 应展开");
+
+        assert_eq!(
+            focus_event(&mut dd, Event::FocusOut),
+            EventResult::Consumed,
+            "FocusOut 应被消费"
+        );
+        assert!(!dd.is_expanded(), "失焦须收起弹层");
+        assert_eq!(dd.popup_area(), None, "收起后不应再有弹层区域");
+    }
+
+    #[test]
+    fn focus_out_after_a_mouse_selection_keeps_it_and_does_not_reopen() {
+        // 时序复刻鼠标点选项的真实链路: 弹层内按下 → 选中并收起 → 框架随后
+        // `set_by_click` 用**已收起**的命中区复判, 焦点落到别处 → FocusOut 到达。
+        //
+        // 这条**不**负责锁「失焦即收起」: 它跑在已收起的组件上, 把 FocusOut 里的
+        // `collapse()` 删掉它照样全绿 (实测过)。那一半由
+        // `focus_out_collapses_an_open_popup` 锁。本条锁的是另一件事 —— 这次
+        // FocusOut 是幂等的: 既不重开弹层, 也不把刚选中的项弄丢。
+        let mut dd = dropdown();
+        layout_at(&mut dd);
+        let mut msgs = MsgQueue::new();
+        click_control(&mut dd, &mut msgs);
+        msgs.clear();
+        click_option(&mut dd, 2, &mut msgs);
+        assert_eq!(
+            msgs.first()
+                .and_then(|m| m.downcast_ref::<usize>().copied()),
+            Some(2),
+            "前提: 已选中第 2 项"
+        );
+
+        focus_event(&mut dd, Event::FocusOut);
+
+        assert!(!dd.is_expanded(), "不得因失焦而重新展开");
+        assert_eq!(dd.popup_area(), None, "不得因失焦而重新展开");
+        assert_eq!(
+            zone_divider_color(&dd),
+            rgba_of(theme().border()),
+            "边框回到静默态"
+        );
+
+        // 选中项是否仍在, 用行为读回而非读私有字段: 收起态 Enter 会展开并把
+        // hover 落到选中项, 再 Enter 即选中该 hover 项。若 `selected` 被
+        // FocusOut 重置为 0, 这里会读到 0 而不是 2。
+        msgs.clear();
+        key_press(&mut dd, NamedKey::Enter, &mut msgs);
+        key_press(&mut dd, NamedKey::Enter, &mut msgs);
+        assert_eq!(
+            msgs.last().and_then(|m| m.downcast_ref::<usize>().copied()),
+            Some(2),
+            "选中项须仍为第 2 项"
+        );
     }
 
     #[test]

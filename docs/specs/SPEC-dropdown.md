@@ -317,3 +317,10 @@ impl Widget for Dropdown {
    **重新评估的触发条件**：出现第三个用例即重裁 —— 例如带清空 ✕ 的输入框、带单位后缀的数字框、带状态图标的下拉。届时若确要抽，倾向 `pub(crate)` 几何助手（`zone_rect` + `paint_zone_divider`）而非类型基类，因为两者间没有 vtable 级行为可共享。
 
    **本裁决附带的实修**：对比同一位置时发现 Dropdown 的竖分隔线写死 `self.border_color`，而 `icon_input.rs:308` / `:319` 复用的是已按焦点选色的局部变量 —— 聚焦后外框转 accent 而紧邻的这条线不变，同位置观感不一致。已改为复用 `border`，并补 `focus_also_recolors_the_right_zone_divider`（按 x 坐标定位该竖段；「纵向描边里有没有 accent」那种写法会给此漏项放行，因为控件自身左右竖边本就是焦点色）。变异测试：改回 `self.border_color` 时仅此一条失败。
+7. **失焦即收起弹层（含 Tab 移焦）** —— 采纳（2026-09-12）。`FocusOut` 现兼收起，与 `reset_focus` 同语义。收起入口至此为四条：控件点击 / 键盘 Esc / 点外按下 / 失焦。
+
+   **这是把原先记为「v1 已知边界」的东西改判为漏洞。** 原表述是「Tab 移焦后弹层留在屏上无人认领，属 v1 范围外」。但要害在于：`dismiss_popup_at` 挂在 `MouseInput { pressed: true }` 上（`window/handler.rs:914`），而**键盘移焦不产生鼠标按下事件** —— 也就是说那个弹层不再有任何机制会收掉它。一个不可关闭的浮层不是「边界」，是缺陷；边界应当是「我不做某功能」，不是「我做了但收不掉」。故改判。
+
+   **同批闭合的一项覆盖缺口**：焦点边框此前在框架内**零测试覆盖**（五个表单组件都只有 `focusable_returns_true` 一类，无一条断言过颜色），Dropdown 是第一个被肉眼抓到的。现五个组件（TextInput / TextArea / Switch / IconInput / Dropdown）各有一条焦点视觉测试。四家机制并不相同，故未照抄：TextInput / TextArea 是 1px 边框换色；Switch 是**加性** 2px 焦点环（断言环在/环不在）；IconInput 的焦点是**派生**的（`event` 把 FocusIn 转交内部 TextInput，`sync` 再从 `input.is_focused()` 取回），测试须走完「转交 → sync → paint」整条链路。五条断言一律按几何定位取值，不写「批次里出现过 accent」—— 该色同时用于光标/选区（TextInput / TextArea）与图标/箭头（IconInput），那种写法在焦点取色失效时照样全绿。变异验证：四处 paint 的焦点判断分别摘掉后，对应测试各自失败。
+
+   **一条方法论留档**：本次 `focus_out_leaves_the_selection_...` 初版是**白过的** —— 它跑在已收起的组件上，摘掉 `collapse()` 依然全绿，却在名字里声称验证了选中项。已改名 `focus_out_after_a_mouse_selection_keeps_it_and_does_not_reopen` 并用公开行为读回选中项（收起态 Enter 展开并把 hover 落到选中项，再 Enter 即选中它），同时在测试内注明它**不**负责锁「失焦即收起」，那一半归 `focus_out_collapses_an_open_popup`。取向与 `tasks/todo-dropdown.md` 的「变异测试（验证锁是真锁，不是装饰）」一节相同：名字声称锁 A、实际只锁 B 的测试，比没有测试更危险。

@@ -475,6 +475,69 @@ mod tests {
         Rect::from_xywh(0.0, 0.0, 200.0, 32.0)
     }
 
+    /// 主题 token 的原始 RGBA —— 与 `RectBatch::instance_colors` 同一表示。
+    fn rgba_of(c: Color) -> [f32; 4] {
+        [c.r, c.g, c.b, c.a]
+    }
+
+    /// 外框**上边**那条 1px 描边段的颜色。
+    ///
+    /// 按几何定位而非「批次里出现过 accent」: accent 同时是图标与箭头色, 后者在
+    /// 焦点取色失效时照样存在 —— 那种写法会让本测试因错误的原因变绿。放大镜的
+    /// 2px 描边与 2×2 圆点、1px 宽的竖分隔线都因尺寸不符被排除。
+    fn frame_top_border_color(ii: &mut IconInput) -> [f32; 4] {
+        let a = icon_input_area();
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        ii.paint(a, &mut rects, &mut texts);
+        let colors = rects.instance_colors();
+        let idx = rects
+            .instance_rects()
+            .iter()
+            .position(|r| r.origin.y == a.origin.y && r.size.height == 1.0 && r.size.width > 1.0)
+            .expect("外框上边应被绘制");
+        colors[idx]
+    }
+
+    #[test]
+    fn focus_in_turns_the_frame_border_accent_through_the_inner_input() {
+        // IconInput 的焦点态是**派生**的, 不是自己收 FocusIn 得来的: `event` 把
+        // FocusIn/FocusOut 转给内部 TextInput (`icon_input.rs:430`), `sync` 再从
+        // `input.is_focused()` 取回 (`:242`), paint 才据此选色。所以本测试必须走
+        // 「转交 → sync → paint」整条链路 —— 只给 IconInput 单独置位测不到真实路径。
+        let mut ii = IconInput::new().width(200.0);
+        let resting = rgba_of(LightTheme.border());
+        let focused = rgba_of(LightTheme.accent());
+        assert_ne!(
+            resting, focused,
+            "前提: 两个 token 必须不同, 否则本测试无法证伪"
+        );
+
+        ii.sync(&());
+        assert_eq!(
+            frame_top_border_color(&mut ii),
+            resting,
+            "静默态: 常规边框色"
+        );
+
+        let mut msgs = MsgQueue::new();
+        ii.event(&Event::FocusIn, icon_input_area(), &mut msgs);
+        ii.sync(&());
+        assert_eq!(
+            frame_top_border_color(&mut ii),
+            focused,
+            "焦点态: 外框转 accent (经内部 TextInput 转交)"
+        );
+
+        ii.event(&Event::FocusOut, icon_input_area(), &mut msgs);
+        ii.sync(&());
+        assert_eq!(
+            frame_top_border_color(&mut ii),
+            resting,
+            "失焦后: 复原常规边框色"
+        );
+    }
+
     #[test]
     fn layout_respects_width() {
         let mut icon_input = IconInput::new().width(200.0);

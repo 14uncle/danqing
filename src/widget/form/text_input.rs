@@ -682,6 +682,61 @@ mod tests {
     use super::*;
     use crate::LightTheme;
 
+    /// 主题 token 的原始 RGBA —— 与 `RectBatch::instance_colors` 同一表示。
+    fn rgba_of(c: Color) -> [f32; 4] {
+        [c.r, c.g, c.b, c.a]
+    }
+
+    /// 外框**上边**那条描边段的颜色。
+    ///
+    /// 按几何定位而非「批次里出现过 accent」: accent 同时用于光标与选区, 后者在
+    /// 焦点取色失效时照样存在 —— 那种写法会让本测试因错误的原因变绿。
+    fn top_border_color(input: &mut TextInput) -> [f32; 4] {
+        let area = Rect::from_xywh(0.0, 0.0, 200.0, LightTheme.control_height());
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        input.paint(area, &mut rects, &mut texts);
+        let colors = rects.instance_colors();
+        let idx = rects
+            .instance_rects()
+            .iter()
+            .position(|r| r.origin.y == area.origin.y && r.size.height == 1.0 && r.size.width > 1.0)
+            .expect("外框上边应被绘制");
+        colors[idx]
+    }
+
+    #[test]
+    fn focus_in_turns_the_border_accent_and_focus_out_restores_it() {
+        let mut input = TextInput::new();
+        let resting = rgba_of(LightTheme.border());
+        let focused = rgba_of(LightTheme.accent());
+        assert_ne!(
+            resting, focused,
+            "前提: 两个 token 必须不同, 否则本测试无法证伪"
+        );
+
+        assert_eq!(top_border_color(&mut input), resting, "静默态: 常规边框色");
+
+        let mut msgs = MsgQueue::new();
+        assert_eq!(
+            input.event(&Event::FocusIn, Rect::default(), &mut msgs),
+            EventResult::Consumed,
+            "FocusIn 应被消费"
+        );
+        assert_eq!(
+            top_border_color(&mut input),
+            focused,
+            "焦点态: 边框转 accent"
+        );
+
+        input.event(&Event::FocusOut, Rect::default(), &mut msgs);
+        assert_eq!(
+            top_border_color(&mut input),
+            resting,
+            "失焦后: 复原常规边框色"
+        );
+    }
+
     #[test]
     fn text_input_uses_theme_defaults() {
         let input = TextInput::new();

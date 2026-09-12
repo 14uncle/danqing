@@ -676,6 +676,53 @@ mod tests {
         Rect::from_xywh(0.0, 0.0, 500.0, 500.0)
     }
 
+    /// 主题 token 的原始 RGBA —— 与 `RectBatch::instance_colors` 同一表示。
+    fn rgba_of(c: Color) -> [f32; 4] {
+        [c.r, c.g, c.b, c.a]
+    }
+
+    /// 外框**上边**那条描边段的颜色。
+    ///
+    /// 按几何定位而非「批次里出现过 accent」: accent 同时用于光标与选区, 后者在
+    /// 焦点取色失效时照样存在 —— 那种写法会让本测试因错误的原因变绿。
+    fn top_border_color(ta: &mut TextArea) -> [f32; 4] {
+        let a = area();
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        ta.paint(a, &mut rects, &mut texts);
+        let colors = rects.instance_colors();
+        let idx = rects
+            .instance_rects()
+            .iter()
+            .position(|r| r.origin.y == a.origin.y && r.size.height == 1.0 && r.size.width > 1.0)
+            .expect("外框上边应被绘制");
+        colors[idx]
+    }
+
+    #[test]
+    fn focus_in_turns_the_border_accent_and_focus_out_restores_it() {
+        let mut ta = TextArea::new();
+        let resting = rgba_of(LightTheme.border());
+        let focused = rgba_of(LightTheme.accent());
+        assert_ne!(
+            resting, focused,
+            "前提: 两个 token 必须不同, 否则本测试无法证伪"
+        );
+
+        assert_eq!(top_border_color(&mut ta), resting, "静默态: 常规边框色");
+
+        let mut msgs = MsgQueue::new();
+        assert_eq!(
+            ta.event(&Event::FocusIn, area(), &mut msgs),
+            EventResult::Consumed,
+            "FocusIn 应被消费"
+        );
+        assert_eq!(top_border_color(&mut ta), focused, "焦点态: 边框转 accent");
+
+        ta.event(&Event::FocusOut, area(), &mut msgs);
+        assert_eq!(top_border_color(&mut ta), resting, "失焦后: 复原常规边框色");
+    }
+
     #[test]
     fn height_builder_sets_min_height() {
         let mut texts = TextBatch::new();
