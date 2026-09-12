@@ -145,6 +145,29 @@ impl Scrollable {
         self.scroll_offset.y = self.scroll_offset.y.clamp(0.0, max.y);
     }
 
+    /// 交给子组件的矩形: 原点「视口原点 − 滚动偏移」, 尺寸取内容尺寸。
+    ///
+    /// **`paint` / `paint_image` / `event` 三处必须走这一个函数** —— 子组件在 paint
+    /// 里缓存这个矩形、在 event 里拿它做命中判定 (`Button`/`Switch`/`Dropdown` 都
+    /// 写 `area.contains(pos)`), 三处一旦不同源就会「滚过去点不中」。
+    ///
+    /// 事件坐标因此**保持屏幕坐标, 不做任何变换**: 屏幕点落在这个被上移了偏移的
+    /// 矩形里, 恰好等价于内容坐标下压中的那条像素。若改成传内容坐标系的
+    /// `(0, 0, child_size)`, 视口原点不为零时 (showcase 表单页 origin.x ≈ 250) 整个
+    /// 容器会瞬间失去全部交互。
+    ///
+    /// 2026-09-12 修此 bug 时前后两版写法都错过, 全过程记在 `tasks/todo-dropdown.md`
+    /// T6 —— 抽成函数就是为了让「逐字一致」成为函数级保证, 而不是注释级约定。
+    fn child_area(&self, area: Rect) -> Rect {
+        Rect::new(
+            Point::new(
+                area.origin.x - self.scroll_offset.x,
+                area.origin.y - self.scroll_offset.y,
+            ),
+            self.child_size,
+        )
+    }
+
     fn child_constraints(&self) -> Constraints {
         match self.axis {
             ScrollAxis::Vertical => {
@@ -154,45 +177,6 @@ impl Scrollable {
                 Constraints::loose(Size::new(MAX_CONTENT_SIZE, self.viewport_size.height))
             }
             ScrollAxis::Both => Constraints::loose(Size::new(MAX_CONTENT_SIZE, MAX_CONTENT_SIZE)),
-        }
-    }
-
-    fn transform_event(&self, event: &Event) -> Option<Event> {
-        match event {
-            Event::CursorMoved(p) => Some(Event::CursorMoved(Point::new(
-                p.x + self.scroll_offset.x,
-                p.y + self.scroll_offset.y,
-            ))),
-            Event::MouseInput {
-                button,
-                pressed,
-                position,
-            } => Some(Event::MouseInput {
-                button: *button,
-                pressed: *pressed,
-                position: Point::new(
-                    position.x + self.scroll_offset.x,
-                    position.y + self.scroll_offset.y,
-                ),
-            }),
-            Event::MouseWheel {
-                delta,
-                position,
-                shift,
-                ctrl,
-                alt,
-            } => Some(Event::MouseWheel {
-                delta: *delta,
-                position: Point::new(
-                    position.x + self.scroll_offset.x,
-                    position.y + self.scroll_offset.y,
-                ),
-                shift: *shift,
-                ctrl: *ctrl,
-                alt: *alt,
-            }),
-            // 无位置事件直接转发。
-            _ => Some(event.clone()),
         }
     }
 
@@ -312,14 +296,7 @@ impl Widget for Scrollable {
         rects.push_clip(area);
         texts.push_clip(area);
 
-        let child_area = Rect::new(
-            Point::new(
-                area.origin.x - self.scroll_offset.x,
-                area.origin.y - self.scroll_offset.y,
-            ),
-            self.child_size,
-        );
-        self.child.paint(child_area, rects, texts);
+        self.child.paint(self.child_area(area), rects, texts);
 
         texts.pop_clip();
         rects.pop_clip();
@@ -331,14 +308,7 @@ impl Widget for Scrollable {
     fn paint_image(&self, area: Rect, images: &mut crate::render::ImageBatch) {
         // 与 paint 一致: 图像同样裁剪到视口, 滚出视口的不进批次
         images.push_clip(area);
-        let child_area = Rect::new(
-            Point::new(
-                area.origin.x - self.scroll_offset.x,
-                area.origin.y - self.scroll_offset.y,
-            ),
-            self.child_size,
-        );
-        self.child.paint_image(child_area, images);
+        self.child.paint_image(self.child_area(area), images);
         images.pop_clip();
     }
 
@@ -349,9 +319,11 @@ impl Widget for Scrollable {
             None => false,
         };
 
+        let child_area = self.child_area(area);
+
         match event {
             Event::CursorLeft => {
-                self.child.event(event, area, msgs);
+                self.child.event(event, child_area, msgs);
                 return EventResult::Ignored;
             }
             Event::MouseWheel { delta, .. } if inside => {
@@ -365,14 +337,9 @@ impl Widget for Scrollable {
             return EventResult::Ignored;
         }
 
-        let transformed = match self.transform_event(event) {
-            Some(e) => e,
-            None => return EventResult::Ignored,
-        };
-
         // 对鼠标按键,只有真正落在子组件内容区(含滚动偏移)才消费;
         // 否则仍视为在视口内点击,消费事件防止冒泡到应用层。
-        let child_result = self.child.event(&transformed, area, msgs);
+        let child_result = self.child.event(event, child_area, msgs);
         if child_result == EventResult::Consumed {
             child_result
         } else {
@@ -420,7 +387,10 @@ impl Scrollable {
 mod tests {
     use super::*;
     use crate::Color;
+    use crate::event::MouseButton;
     use crate::widget::Box as UiBox;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[test]
     fn scrollable_uses_theme_defaults() {
@@ -568,5 +538,95 @@ mod tests {
         let mut images = crate::render::ImageBatch::new();
         scroll.paint_image(viewport, &mut images);
         assert_eq!(images.len(), 1, "滚入视口的图像应保留");
+    }
+
+    /// 探针: 记录子组件在 event 中收到的 (矩形, 事件坐标) 与在 paint 中收到的
+    /// 矩形, 并模拟真实子组件的自命中判定 (`area.contains(pos)` —— Button /
+    /// Switch / Dropdown 都是这么写的)。
+    struct AreaProbe {
+        seen: Rc<RefCell<(Option<Rect>, Option<Point>)>>,
+        self_hit: Rc<Cell<bool>>,
+        paint_area: Rc<Cell<Rect>>,
+    }
+
+    impl Widget for AreaProbe {
+        fn layout(&mut self, _c: Constraints, _t: &mut TextBatch) -> Size {
+            Size::new(100.0, 1000.0)
+        }
+
+        fn paint(&self, area: Rect, _r: &mut RectBatch, _t: &mut TextBatch) {
+            self.paint_area.set(area);
+        }
+
+        fn event(&mut self, event: &Event, area: Rect, _m: &mut MsgQueue) -> EventResult {
+            let pos = event.position();
+            *self.seen.borrow_mut() = (Some(area), pos);
+            let hit = pos.is_some_and(|p| area.contains(p));
+            self.self_hit.set(hit);
+            if hit {
+                EventResult::Consumed
+            } else {
+                EventResult::Ignored
+            }
+        }
+    }
+
+    /// 回归锁 (2026-09-12): 子组件在 event 中收到的矩形必须与 `paint` 给它的
+    /// **逐字一致**, 且事件坐标**保持屏幕坐标不做变换**。
+    ///
+    /// 三条断言各自锁一个曾经坏过的点:
+    /// 1. `area == paint 的 area` —— 子组件拿 paint 缓存的矩形做命中, 两处
+    ///    一旦不同源就全盘错位;
+    /// 2. 坐标为屏幕坐标 —— 曾把事件坐标改成内容坐标 (加偏移), 与矩形差 2×offset;
+    /// 3. 视口**不在原点** —— showcase 表单页视口 origin.x ≈ 250 (侧栏右侧),
+    ///    任何把子组件矩形当 `(0,0,child_size)` 的写法在这里当场翻车 (2026-09-12
+    ///    真实踩过: 整个表单页交互失灵, 下拉点不开)。
+    ///
+    /// 这个 bug 的恶毒之处: 视口在原点且未滚动时一切正常, 只有两个条件之一被打破
+    /// 才暴露 —— 极易被当成玄学。
+    #[test]
+    fn child_event_area_matches_paint_area_at_any_viewport_origin() {
+        let mut texts = TextBatch::new();
+        let seen = Rc::new(RefCell::new((None, None)));
+        let self_hit = Rc::new(Cell::new(false));
+        let paint_area = Rc::new(Cell::new(Rect::default()));
+        let mut scroll = Scrollable::new(AreaProbe {
+            seen: Rc::clone(&seen),
+            self_hit: Rc::clone(&self_hit),
+            paint_area: Rc::clone(&paint_area),
+        });
+        scroll.layout(Constraints::tight(Size::new(100.0, 100.0)), &mut texts);
+
+        // 视口刻意不在原点 (侧栏右侧的表单页几何)。
+        let viewport = Rect::from_xywh(250.0, 40.0, 100.0, 100.0);
+        scroll.handle_wheel((0.0, -900.0 / 25.0)); // 每单位 25px → 滚 900
+        assert!((scroll.scroll_offset.y - 900.0).abs() < f32::EPSILON);
+
+        // 先取绘制期交给子组件的矩形 (子组件会缓存它做命中判定)。
+        let mut rects = RectBatch::new();
+        scroll.paint(viewport, &mut rects, &mut texts);
+        let painted = paint_area.get();
+
+        // 视口内 (300, 90) 按下 → 内容坐标 y = 90 - (40 - 900) = 950 (子组件高 1000)
+        scroll.event(
+            &Event::MouseInput {
+                button: MouseButton::Left,
+                pressed: true,
+                position: Point::new(300.0, 90.0),
+            },
+            viewport,
+            &mut Vec::new(),
+        );
+
+        let (area, pos) = *seen.borrow();
+        let area = area.expect("子组件应收到事件");
+        let pos = pos.expect("事件应带坐标");
+        assert_eq!(area, painted, "event 的矩形必须与 paint 的逐字一致");
+        assert_eq!(pos, Point::new(300.0, 90.0), "事件坐标保持屏幕坐标");
+        assert!(
+            area.contains(pos),
+            "屏幕按下点必须落在该矩形内 (area={area:?}, pos={pos:?})"
+        );
+        assert!(self_hit.get(), "子组件的自命中判定必须成立");
     }
 }
