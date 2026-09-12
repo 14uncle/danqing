@@ -14,9 +14,9 @@
 )]
 
 use danqing::widget::{
-    self, Box as UiBox, Button, CloseButton, Column, DragArea, EventResult, IconInput, MsgQueue,
-    MultiPanel, Node, Overlay, Padding, ReachArea, Row, Scrollable, Stack, Switch, Tabs, Text,
-    TextArea, TextInput, TitleBar, Widget,
+    self, Box as UiBox, Button, CloseButton, Column, DragArea, Dropdown, EventResult, IconInput,
+    MsgQueue, MultiPanel, Node, Overlay, Padding, ReachArea, Row, Scrollable, Stack, Switch, Tabs,
+    Text, TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
     App, AsyncJob, BackgroundConfig, Color, Crossfade, Easing, Event, GlobalHotkey, Key,
@@ -107,6 +107,8 @@ struct Showcase {
     job_demo_status: String,
     /// 异步作业演示: 发起轮次号 (连点演示旧轮丢弃)。
     job_demo_round: u64,
+    /// Dropdown 演示: 当前选中的选项索引 (展开态/hover 由组件自管)。
+    dropdown_selected: usize,
     /// 模态浮层演示: 浮层开关态。
     overlay_demo_open: bool,
     /// 模态浮层演示: 关闭后待回归的焦点锚 (一次性; focus_request/focus_restored)。
@@ -163,6 +165,8 @@ enum Msg {
     JobDemoStart,
     /// 异步作业演示: 起 panic 作业 (护栏转 Err, 不卡死)。
     JobDemoPanic,
+    /// Dropdown 演示: 选中选项 (开合/键盘导航/点外收起均由组件自管)。
+    DropdownSelect(usize),
     /// 模态浮层演示: 打开浮层。
     OverlayDemoOpen,
     /// 模态浮层演示: 关闭浮层 (× / 点遮罩), 焦点回「打开」按钮。
@@ -271,6 +275,7 @@ impl App for Showcase {
                     || "panic 已被护栏转为 Err (应用不卡 Loading)".to_string(),
                 );
             }
+            Msg::DropdownSelect(idx) => self.dropdown_selected = idx,
             Msg::OverlayDemoOpen => self.overlay_demo_open = true,
             Msg::OverlayDemoClose => {
                 self.overlay_demo_open = false;
@@ -562,6 +567,51 @@ fn icon_input_row(t: &LightTheme) -> impl Widget + 'static {
                     "点击右侧图标搜索".to_string()
                 } else {
                     format!("搜索：{}", s.icon_input_value)
+                }
+            })
+            .font_size(t.font_size_body())
+            .color(t.text_primary()),
+        )
+}
+
+/// Dropdown 演示选项 (控件与回显共用)。
+///
+/// v1 弹层无滚动、无空间不足翻转 (见 `docs/specs/SPEC-dropdown.md` 非目标),
+/// 故演示列表克制在 6 项, 保证弹层不越出窗口底部。
+const DROPDOWN_OPTIONS: [&str; 6] = ["Rust", "TypeScript", "Python", "Go", "C++", "Zig"];
+
+/// 下拉选择器区:自足组件演示。
+///
+/// 展开、hover、键盘导航、点外收起**全部由组件自管**, 应用侧只留一个选中回调。
+/// 旧版在这里背过 4 个 Msg + 3 个状态字段 + `on_key` 里 20 行导航 + 下面一整个
+/// `dropdown_overlay()` 装配函数 —— 全部已随弹层通道下沉删除。
+fn dropdown_card(t: &LightTheme) -> impl Widget + 'static {
+    let options: Vec<String> = DROPDOWN_OPTIONS.iter().map(|s| s.to_string()).collect();
+    Row::new()
+        .gap(t.spacing_lg())
+        .cross_center()
+        .child(
+            Row::new()
+                .gap(2.0)
+                .cross_center()
+                .child(
+                    Text::new("语言：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Dropdown::themed(t, options)
+                        .width(200.0)
+                        .bind_selected::<Showcase>(|s| s.dropdown_selected)
+                        .on_select(Msg::DropdownSelect),
+                ),
+        )
+        .child(
+            Text::bind(|s: &Showcase| {
+                if s.dropdown_selected < DROPDOWN_OPTIONS.len() {
+                    format!("已选择：{}", DROPDOWN_OPTIONS[s.dropdown_selected])
+                } else {
+                    String::new()
                 }
             })
             .font_size(t.font_size_body())
@@ -1398,6 +1448,7 @@ fn page_form(t: &LightTheme) -> impl Widget + 'static {
             .child(card(t, "单行输入", input_row(t)))
             .child(card(t, "图标输入", icon_input_row(t)))
             .child(card(t, "多行输入", textarea_card(t)))
+            .child(card(t, "下拉选择器", dropdown_card(t)))
             .child(card(t, "滑动开关", switch_card(t))),
     )
 }
@@ -1656,6 +1707,7 @@ fn build_tree() -> Node {
                     ),
             )
             // 模态浮层演示: 盖顶 (Stack 末位), open 绑定驱动。
+            // (Dropdown 的弹层已由框架弹层通道在根绘制末尾统一绘制, 无需在此挂载。)
             .child(overlay_demo(&t)),
     )
 }
@@ -1709,6 +1761,7 @@ fn main() -> anyhow::Result<()> {
         job_demo: AsyncJob::new(),
         job_demo_status: "未发起".into(),
         job_demo_round: 0,
+        dropdown_selected: 0,
         overlay_demo_open: false,
         focus_back: None,
     };

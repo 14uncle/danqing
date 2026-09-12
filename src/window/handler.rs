@@ -28,8 +28,8 @@ use crate::app::{AnimationCtx, App};
 use crate::event::{Event, ImeEvent, Key, NamedKey, WindowAction};
 use crate::render::{Context, ImageBatch, RectBatch, TextBatch};
 use crate::widget::{
-    FocusManager, MsgQueue, Node, event_at_path, ime_area_at_path, selected_text_at_path,
-    wants_ime_at_path,
+    FocusManager, MsgQueue, Node, dismiss_popup_at, dispatch_popup_event, event_at_path,
+    ime_area_at_path, paint_popups, selected_text_at_path, wants_ime_at_path,
 };
 use crate::{Point, Rect, Size};
 
@@ -678,6 +678,10 @@ impl<A: App> Handler<'_, A> {
                 .layout(crate::Constraints::tight(screen), &mut self.texts);
             self.root_area = Rect::new(Point::ZERO, size);
             self.tree.paint(self.root_area, &mut rects, &mut self.texts);
+            // 弹层趟: 主树绘制完毕后统一绘制, 层号最大 → 弹层恒在最上。
+            // 树中间的组件自己 push_layer 盖不住后续兄弟 (它们会落进同一新层),
+            // 必须集中到这里画, 见 `paint_popups` 的文档。
+            paint_popups(&self.tree, &mut rects, &mut self.texts);
             self.tree.paint_image(self.root_area, &mut self.images);
             // 无边框窗口下自绘边框与圆角。
             if self.config.border_thickness > 0.0 {
@@ -905,7 +909,22 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                         };
                     }
                 }
-                let result = self.tree.event(&internal, self.root_area, &mut self.msgs);
+                // 点外收起: 按下落在弹层区域与其持有者控件之外时先收起弹层;
+                // 本次事件照常继续分发 (点别处的按钮 = 先收起 + 按钮生效)。
+                if let Event::MouseInput {
+                    pressed: true,
+                    position,
+                    ..
+                } = &internal
+                {
+                    dismiss_popup_at(&mut self.tree, *position);
+                }
+                // 弹层优先: 命中弹层则直达其持有者 (盖在弹层下的同层兄弟不得
+                // 抢走按下); 未命中才走常规的树内命中分发。
+                let result = match dispatch_popup_event(&mut self.tree, &internal, &mut self.msgs) {
+                    Some(result) => result,
+                    None => self.tree.event(&internal, self.root_area, &mut self.msgs),
+                };
                 if let Event::MouseInput {
                     pressed: true,
                     position,

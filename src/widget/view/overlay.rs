@@ -209,6 +209,13 @@ impl Widget for Overlay {
         }
     }
 
+    /// 开态即**模态屏障**: 弹层通道据此把弹层语义收束到本子树内, 使模态不被
+    /// 底层展开的弹层击穿 (弹层绘制晚于 scrim, 否则会盖在模态之上并抢走点击)。
+    /// 见 [`Widget::modal_barrier`] —— 这是 Overlay 模态语义在弹层通道上的对应物。
+    fn modal_barrier(&self) -> bool {
+        self.open
+    }
+
     fn children(&self) -> &[Node] {
         if self.open {
             std::slice::from_ref(&self.content)

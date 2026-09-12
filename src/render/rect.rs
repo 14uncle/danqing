@@ -382,63 +382,6 @@ impl RectBatch {
         }
     }
 
-    /// 添加一条线段 (以旋转的细圆角矩形表示)。
-    ///
-    /// 从 `p1` 绘制到 `p2`, 线宽为 `thickness`; 端点带圆角，过渡自然。
-    /// 利用实例的 `rotation` 字段让细矩形沿线段方向摆放，因此可绘制
-    /// 任意角度的直线，用于标题栏按钮符号等几何图形。
-    pub fn push_line(&mut self, p1: crate::Point, p2: crate::Point, thickness: f32, color: Color) {
-        if thickness <= 0.0 {
-            return;
-        }
-        let dx = p2.x - p1.x;
-        let dy = p2.y - p1.y;
-        let length_sq = dx * dx + dy * dy;
-        if length_sq < 1e-12 {
-            return;
-        }
-        let length = length_sq.sqrt();
-        let angle = dy.atan2(dx);
-        let half = thickness * 0.5;
-
-        // 线段的轴对齐包围盒 (含端点半径), 用于与裁剪区求交。
-        let min_x = p1.x.min(p2.x) - half;
-        let max_x = p1.x.max(p2.x) + half;
-        let min_y = p1.y.min(p2.y) - half;
-        let max_y = p1.y.max(p2.y) + half;
-        let bbox = Rect::from_xywh(min_x, min_y, max_x - min_x, max_y - min_y);
-
-        let (clip_min, clip_max) = match self.current_clip() {
-            Some(clip) => match clip.intersect(&bbox) {
-                Some(intersection) => (
-                    [intersection.origin.x, intersection.origin.y],
-                    [
-                        intersection.origin.x + intersection.size.width,
-                        intersection.origin.y + intersection.size.height,
-                    ],
-                ),
-                None => return,
-            },
-            None => (NO_CLIP_MIN, NO_CLIP_MAX),
-        };
-
-        // 细矩形中心与线段中心重合，尺寸为 (length + thickness) × thickness,
-        // 旋转后两端自然形成半圆端点。
-        let size = crate::Size::new(length + thickness, thickness);
-        let center = crate::Point::new((p1.x + p2.x) * 0.5, (p1.y + p2.y) * 0.5);
-        let pos = crate::Point::new(center.x - size.width * 0.5, center.y - size.height * 0.5);
-
-        self.instances.push(RectInstance {
-            pos: [pos.x, pos.y],
-            size: [size.width, size.height],
-            color: [color.r, color.g, color.b, color.a],
-            radii: [half; 4],
-            rotation: angle,
-            clip_min,
-            clip_max,
-        });
-    }
-
     /// 矩形数量。
     pub fn len(&self) -> usize {
         self.instances.len()
