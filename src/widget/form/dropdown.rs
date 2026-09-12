@@ -16,6 +16,8 @@
 //! - 键盘 (聚焦后经焦点路由直达): ↑↓ 移动 hover / Enter·Space 选中 /
 //!   Esc 收起; 收起态 ↑↓ 与 Enter·Space 均展开。Esc 在收起态返回 `Ignored`,
 //!   留给 app 级 Esc 协议 (与 Overlay 同一约定)。
+//! - 焦点态边框转 `theme.accent()` (由框架的 `FocusIn` / `FocusOut` 驱动),
+//!   与其他表单组件 (TextInput / TextArea / Switch / IconInput) 同一约定。
 //!
 //! 不做什么：
 //! - 长列表滚动 (v1; 超长列表请自行控制选项数)
@@ -97,6 +99,11 @@ pub struct Dropdown {
     popup_bg_color: Color,
     /// 边框色。
     border_color: Color,
+    /// 焦点态边框色 (accent)。与 TextInput / TextArea / Switch / IconInput 同一
+    /// 约定: 取 `theme.accent()`，焦点态由框架的 `FocusIn` / `FocusOut` 驱动。
+    focus_border_color: Color,
+    /// 是否持有焦点。
+    focused: bool,
     /// 正文色。
     text_color: Color,
     /// hover 行底色。
@@ -135,6 +142,8 @@ impl Dropdown {
             bg_color: theme.surface_input(),
             popup_bg_color: theme.surface_input(),
             border_color: theme.border(),
+            focus_border_color: theme.accent(),
+            focused: false,
             text_color: theme.text_primary(),
             hover_color: theme.surface_variant(),
             selected_color: theme.selection(),
@@ -343,7 +352,12 @@ impl Widget for Dropdown {
         self.area.set(control);
 
         rects.push_rect(control, self.bg_color, self.radius);
-        rects.push_rounded_border(control, self.border_color, self.radius, 1.0);
+        let border = if self.focused {
+            self.focus_border_color
+        } else {
+            self.border_color
+        };
+        rects.push_rounded_border(control, border, self.radius, 1.0);
 
         let px = self.font_size as f32;
         if let Some(text) = self.options.get(self.selected) {
@@ -466,6 +480,18 @@ impl Widget for Dropdown {
             Event::Key {
                 key, pressed: true, ..
             } => self.handle_key(key, msgs),
+            // 焦点只驱动边框色, 不驱动展开态: 收起由控件点击、Esc、点外按下三条
+            // 路径负责 (见 `dismiss_popup_at`)。代价是 Tab 移焦时弹层留在屏上 ——
+            // v1 未做 Tab 在弹层内的遍历与移焦收起, 与「键盘仅 ↑↓/Enter/Space/Esc」
+            // 的范围一致。
+            Event::FocusIn => {
+                self.focused = true;
+                EventResult::Consumed
+            }
+            Event::FocusOut => {
+                self.focused = false;
+                EventResult::Consumed
+            }
             _ => EventResult::Ignored,
         }
     }
@@ -475,8 +501,12 @@ impl Widget for Dropdown {
     }
 
     /// 容器隐藏本子树时由框架调用：收起弹层，别把展开态带进下一次显示。
+    ///
+    /// 同时清焦点标记 —— 子树隐藏时框架未必补发 `FocusOut` (Switch 同一处理)，
+    /// 不清则下次显示会带着上一轮的焦点边框。
     fn reset_focus(&mut self) {
         self.collapse();
+        self.focused = false;
     }
 
     /// 控件矩形; 展开时并入弹层 —— 否则点选项时焦点复判落空，键盘导航中断。
@@ -526,7 +556,9 @@ impl Widget for Dropdown {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Column, dismiss_popup_at, dispatch_popup_event, node};
+    use crate::widget::{
+        Column, FocusManager, dismiss_popup_at, dispatch_popup_event, event_at_path, node,
+    };
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -647,6 +679,41 @@ mod tests {
             Rect::default(),
             msgs,
         )
+    }
+
+    /// 主题 token 的原始 RGBA —— 与 `RectBatch::instance_colors` 同一表示。
+    fn rgba_of(c: Color) -> [f32; 4] {
+        [c.r, c.g, c.b, c.a]
+    }
+
+    /// 批次中所有**横向描边段**的颜色 (1px 厚、横向成段)。
+    ///
+    /// 按几何筛取而非「批次里有没有出现过 accent」: 箭头的折线色同为
+    /// `theme.accent()`, 后者在把焦点判断整个删掉之后依然全绿 —— 属于自证。
+    /// 1px 厚这一条同时排除了折线的 1.6×1.6 圆点、1px 宽的箭头分隔线与左右竖边。
+    fn horizontal_border_colors(rects: &RectBatch) -> Vec<[f32; 4]> {
+        let colors = rects.instance_colors();
+        rects
+            .instance_rects()
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.size.height == 1.0 && r.size.width > 1.0)
+            .map(|(i, _)| colors[i])
+            .collect()
+    }
+
+    /// 单画一帧控件, 取横向描边段的颜色。
+    fn control_border_colors(dd: &Dropdown) -> Vec<[f32; 4]> {
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        dd.paint(control(), &mut rects, &mut texts);
+        horizontal_border_colors(&rects)
+    }
+
+    /// 焦点事件 (焦点路由路径: area 为根区域)。
+    fn focus_event(dd: &mut Dropdown, event: Event) -> EventResult {
+        let mut msgs = MsgQueue::new();
+        dd.event(&event, Rect::default(), &mut msgs)
     }
 
     #[test]
@@ -1068,6 +1135,115 @@ mod tests {
                 .and_then(|m| m.downcast_ref::<usize>().copied()),
             Some(1),
             "选中弹层第 1 行"
+        );
+    }
+
+    #[test]
+    fn focus_in_turns_the_control_border_accent_and_focus_out_restores_it() {
+        let mut dd = dropdown();
+        layout_at(&mut dd);
+
+        let resting = rgba_of(theme().border());
+        let focused = rgba_of(theme().accent());
+        assert_ne!(
+            resting, focused,
+            "前提: 两个 token 必须不同, 否则本测试无法证伪"
+        );
+
+        let before = control_border_colors(&dd);
+        assert!(!before.is_empty(), "控件横向描边应被绘制");
+        assert!(before.iter().all(|c| *c == resting), "静默态: 常规边框色");
+
+        assert_eq!(
+            focus_event(&mut dd, Event::FocusIn),
+            EventResult::Consumed,
+            "FocusIn 应被消费"
+        );
+        assert!(
+            control_border_colors(&dd).iter().all(|c| *c == focused),
+            "焦点态: 边框须转 accent"
+        );
+
+        assert_eq!(
+            focus_event(&mut dd, Event::FocusOut),
+            EventResult::Consumed,
+            "FocusOut 应被消费"
+        );
+        assert!(
+            control_border_colors(&dd).iter().all(|c| *c == resting),
+            "失焦后: 须复原常规边框色"
+        );
+    }
+
+    #[test]
+    fn reset_focus_clears_the_focus_border_alongside_collapsing() {
+        let mut dd = dropdown();
+        layout_at(&mut dd);
+        let mut msgs = MsgQueue::new();
+        click_control(&mut dd, &mut msgs);
+        assert!(dd.is_expanded(), "前提: 已展开");
+        focus_event(&mut dd, Event::FocusIn);
+        // 前提: 焦点真的生效了。少了这一条, 断言「重置后是常规色」在 paint 永远
+        // 画常规色的情况下也成立 —— 测试会因为错误的原因变绿。
+        assert!(
+            control_border_colors(&dd)
+                .iter()
+                .all(|c| *c == rgba_of(theme().accent())),
+            "前提: FocusIn 后边框已转 accent"
+        );
+
+        dd.reset_focus();
+
+        assert!(!dd.is_expanded(), "沿用原有的收起语义");
+        assert!(
+            control_border_colors(&dd)
+                .iter()
+                .all(|c| *c == rgba_of(theme().border())),
+            "reset_focus 后边框须复原 (子树隐藏未必补发 FocusOut)"
+        );
+    }
+
+    #[test]
+    fn clicking_the_control_grants_focus_and_the_border_turns_accent() {
+        // **端到端**: 复刻 handler.rs 的点击路径 (常规树分发 → FocusManager::
+        // set_by_click → 把 FocusIn 投到焦点路径)。只单测 `event` 的 FocusIn 分支
+        // 不够 —— 组件若 `focusable()` 返 false 或 `hit_area` 错位, 焦点压根到不了
+        // 它, 那种测试照样全绿, 而界面上边框永远不会变绿 (正是本次上报的现象)。
+        let mut root = node(Column::new().gap(0.0).child(dropdown().width(200.0)));
+        let viewport = Rect::from_xywh(0.0, 0.0, 200.0, 600.0);
+        let mut texts = TextBatch::new();
+        root.layout(Constraints::tight(viewport.size), &mut texts);
+        // 必须先画一帧: `hit_area` 读的是 paint/event 填的几何缓存, 没画过就还是
+        // `Rect::default()`, `set_by_click` 命中不到任何东西 (窗口里 paint 恒在
+        // 点击之前, 故这不是测试的额外要求)。
+        root.paint(viewport, &mut RectBatch::new(), &mut texts);
+
+        let mut focus = FocusManager::new();
+        focus.rebuild(&root);
+        // 先清焦: `rebuild` 首次会**自动**把焦点落在链首 (`focus.rs:54` 的
+        // `did_initial_focus` 只生效一次)。不清的话焦点本来就已是 [0], 点击成了
+        // 旁观者, 这条测试就证明不了「点击把焦点给了 Dropdown」。
+        focus.clear_focus();
+        assert!(focus.current().is_none(), "前提: 焦点已清空");
+
+        focus.set_by_click(&root, Point::new(10.0, 10.0));
+        let path = focus
+            .current()
+            .cloned()
+            .expect("点击控件后焦点应落在 Dropdown 上");
+        assert_eq!(path, vec![0], "路径 = Column 的第 0 个孩子");
+
+        // 焦点变化后框架就地投递 FocusIn (`handler.rs::dispatch_focus_changes`)
+        let mut msgs = MsgQueue::new();
+        event_at_path(&mut root, &path, &Event::FocusIn, viewport, &mut msgs);
+
+        let mut rects = RectBatch::new();
+        root.paint(viewport, &mut rects, &mut texts);
+        let colors = horizontal_border_colors(&rects);
+        assert!(!colors.is_empty(), "控件横向描边应被绘制");
+        assert!(
+            colors.iter().all(|c| *c == rgba_of(theme().accent())),
+            "走完真实焦点链路后, 控件边框应为 accent"
         );
     }
 }
