@@ -6,8 +6,13 @@
 //! 提供 `init_log`：本地时间戳 + level + target + message 格式，
 //! 默认过滤级别 `info`（受 `RUST_LOG` 环境变量覆盖）。
 //!
-//! 日志同时写入 stderr 与可执行文件同级的 `logs/` 目录，
-//! 自动轮转（保留最近 10 个文件），并安装 panic hook 将 panic 信息写入日志文件。
+//! 日志同时写入 stderr 与日志目录，自动轮转（保留最近 10 个文件），
+//! 并安装 panic hook 将 panic 信息写入日志文件。
+//!
+//! 日志目录按以下顺序取第一个**写得进去**的：
+//! 1. exe 同级 `logs/`（便携包默认，解压即用）
+//! 2. `%LOCALAPPDATA%\<exe 名>\logs`（**MSIX 商店版靠这一步**，见 [`user_logs_dir`]）
+//! 3. 当前工作目录 `logs/`（兜底）
 //!
 //! # 用法
 //!
@@ -234,22 +239,62 @@ fn install_panic_hook(file: Arc<Mutex<File>>) {
     }));
 }
 
+/// 用户数据目录下的 `logs/` —— Windows 上是 `%LOCALAPPDATA%\<exe 名>\logs`。
+///
+/// **为什么要有这一级 (2026-09-13)**: MSIX 商店版的 exe 装在
+/// `C:\Program Files\WindowsApps\<包名>\`, 那里**只读**; 而 MSIX 应用的进程
+/// 工作目录是 `C:\Windows\System32` (不是 exe 目录), 写进去同样失败。于是
+/// 「exe 同级」与「CWD」**两级全都落空**, 而本框架的窗口是
+/// `windows_subsystem = "windows"`、没有控制台 —— 商店用户**一条日志都没有**,
+/// 出了 bug 无从向他要日志。这条由 danqing-pomodoro 在 2026-09-01 商店上架时撞上,
+/// 当时记为「框架侧待办: 日志目录回退」, 一直挂着。
+///
+/// 取 **Local** 而非 Roaming: 日志是机器本地数据, 不该跟着漫游配置跑。
+/// MSIX 下这个路径本身会被重定向到包的私有目录 (`...\Packages\<包名>\LocalCache\...`),
+/// 那正是我们想要的落点。
+///
+/// **非 Windows 返回 `None`**: 这一级的动机是 Windows/MSIX 专有的, 其余平台
+/// 维持「exe 同级 → CWD」两级不变, 不引入新的平台假设。
+#[cfg(windows)]
+fn user_logs_dir(stem: &str) -> Option<PathBuf> {
+    let base = env::var_os("LOCALAPPDATA")?;
+    if base.is_empty() {
+        return None;
+    }
+    Some(Path::new(&base).join(stem).join("logs"))
+}
+
+#[cfg(not(windows))]
+fn user_logs_dir(_stem: &str) -> Option<PathBuf> {
+    None
+}
+
 fn try_create_log(timestamp: &str, pid: u32) -> Result<PreparedLog, String> {
-    // 优先 exe 同级 logs/ 目录。
+    let exe_stem = env::current_exe().ok().and_then(|executable| {
+        executable
+            .file_stem()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string_lossy().into_owned())
+    });
+    // 1) 优先 exe 同级 logs/ 目录 —— 便携包的默认位置 (解压即用, 日志跟着程序走)。
     if let Ok(executable) = env::current_exe() {
         if let Some(directory) = logs_dir_for(&executable) {
-            if let Some(stem) = executable
-                .file_stem()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string_lossy().into_owned())
-            {
-                if let Ok(log) = create_log_file_in(&directory, &stem, timestamp, pid) {
+            if let Some(stem) = &exe_stem {
+                if let Ok(log) = create_log_file_in(&directory, stem, timestamp, pid) {
                     return Ok(log);
                 }
             }
         }
     }
-    // 兜底：当前工作目录的 logs/ 子目录。
+    // 2) 用户数据目录 —— **商店版靠这一步** (见 `user_logs_dir`)。
+    if let Some(stem) = &exe_stem {
+        if let Some(directory) = user_logs_dir(stem) {
+            if let Ok(log) = create_log_file_in(&directory, stem, timestamp, pid) {
+                return Ok(log);
+            }
+        }
+    }
+    // 3) 兜底：当前工作目录的 logs/ 子目录。
     let cwd = env::current_dir().map_err(|err| format!("无法确定当前目录：{err}"))?;
     let directory = cwd.join("logs");
     let stem = String::from("app");
@@ -315,6 +360,24 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::{LogFile, log_file_name, logs_dir_for, select_logs_to_delete};
+
+    /// 商店版那条兜底必须落在**用户数据目录**下 —— 既不是 exe 目录 (MSIX 下只读),
+    /// 也不是 CWD (MSIX 下是 System32)。
+    #[test]
+    #[cfg(windows)]
+    fn user_logs_dir_lands_under_local_app_data() {
+        let dir = super::user_logs_dir("danqing-log").expect("Windows 上应能取到 LOCALAPPDATA");
+        let base = std::env::var_os("LOCALAPPDATA").expect("测试环境应有 LOCALAPPDATA");
+        assert!(
+            dir.starts_with(Path::new(&base)),
+            "应落在 %LOCALAPPDATA% 下, 实得 {dir:?}"
+        );
+        assert_eq!(
+            dir,
+            Path::new(&base).join("danqing-log").join("logs"),
+            "落点必须是 <LOCALAPPDATA>\\<exe 名>\\logs"
+        );
+    }
 
     #[test]
     fn logs_dir_uses_executable_parent() {
