@@ -7,7 +7,14 @@
 //! 值类型 (`Color`/`Point`/`Size`/`Rect`/`Edges`) 是渲染与布局两条车道的公共契约;
 //! 布局算法 (`Constraints` 等) 在后续任务中补充。
 
-/// RGBA 颜色，各分量取值 0.0~1.0(线性空间，提交 GPU 前不做伽马转换)。
+/// RGBA 颜色，各分量取值 0.0~1.0，**sRGB 编码**（与 [`Self::from_srgb8`] 的存储语义一致）。
+///
+/// **不是线性空间** —— 送进 GPU 前必须经 [`srgb_to_linear`] 解码（渲染层由
+/// [`crate::render::LinearRgba`] 承担），否则会被 sRGB 渲染目标再次编码（双重 gamma）。
+/// WCAG 计算（[`crate::theme::relative_luminance`]）同样先解码。
+///
+/// 这两句曾经与 `layout.rs` 的另一处说法矛盾（一说线性、一说 sRGB 编码），
+/// 害得 GPU 通路信了错的那句 —— 改这句之前先读 `render/linear.rs` 模块头。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Color {
     /// 红色分量。
@@ -81,6 +88,26 @@ impl Color {
             self.b + (0.5 - self.b) * factor,
             self.a,
         )
+    }
+}
+
+/// sRGB 编码分量 → 线性空间分量的**唯一**转换实现。
+///
+/// [`Color`] 的分量是 **sRGB 编码**值（与 [`Color::from_srgb8`] 的存储语义一致），
+/// 而渲染目标是 sRGB 格式、硬件会在写入时做 linear→sRGB 编码 —— 于是送进 GPU 前
+/// 必须先把 sRGB 解码成线性，否则会被编码两次（双重 gamma：暗色主题的近黑背景
+/// 会显示成中灰、正文与背景糊成一片）。
+///
+/// 本函数是这份数学的**规范定义**：GPU 边界（`render::linear`）与 WCAG 计算
+/// （[`crate::theme::relative_luminance`]）共用它。
+/// **不要再抄第二份** —— 两处各写一份且说法矛盾，正是双重 gamma 事故的成因。
+///
+/// 单通道输入，定义域 `0.0~1.0`；分段点 `0.04045` 两侧连续。
+pub fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
     }
 }
 
@@ -366,6 +393,42 @@ pub fn distribute(main_max: f32, gap: f32, children: &[FlowChild]) -> FlowResult
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn srgb_to_linear_endpoints_are_fixed() {
+        assert_eq!(srgb_to_linear(0.0), 0.0, "黑解码后仍是 0");
+        assert_eq!(srgb_to_linear(1.0), 1.0, "白解码后仍是 1");
+    }
+
+    #[test]
+    fn srgb_to_linear_midpoint_matches_known_value() {
+        // ((0.5 + 0.055) / 1.055)^2.4 ≈ 0.21404
+        assert!(
+            (srgb_to_linear(0.5) - 0.21404).abs() < 1e-4,
+            "0.5 应解码到 ≈0.2140, 实得 {}",
+            srgb_to_linear(0.5)
+        );
+    }
+
+    #[test]
+    fn srgb_to_linear_is_continuous_at_breakpoint() {
+        // 分段点 0.04045 两侧必须衔接, 否则中灰附近会出现可见台阶。
+        let lo = srgb_to_linear(0.04044);
+        let hi = srgb_to_linear(0.04046);
+        assert!((hi - lo).abs() < 1e-5, "分段点两侧应连续, 实得 {lo} / {hi}");
+        assert!(
+            (lo - 0.003131).abs() < 1e-5,
+            "分段点值应 ≈0.003131, 实得 {lo}"
+        );
+    }
+
+    #[test]
+    fn srgb_to_linear_decodes_dark_theme_background() {
+        // 暗色主题背景 #191920 的作者态分量: 25/255 与 32/255。
+        // 这条同时是事故的回归守卫 —— 解码前它们会被抬成中灰。
+        assert!((srgb_to_linear(25.0 / 255.0) - 0.00972).abs() < 1e-4);
+        assert!((srgb_to_linear(32.0 / 255.0) - 0.01445).abs() < 1e-4);
+    }
 
     #[test]
     fn desaturate_factor_zero_is_identity() {

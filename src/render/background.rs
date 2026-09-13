@@ -13,6 +13,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use crate::render::DrawTarget;
+use crate::render::LinearRgba;
 
 /// 背景图缩放模式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -840,12 +841,8 @@ impl BackgroundPipeline {
                 view: target.view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: f64::from(frame.clear_color.r),
-                        g: f64::from(frame.clear_color.g),
-                        b: f64::from(frame.clear_color.b),
-                        a: f64::from(frame.clear_color.a),
-                    }),
+                    // sRGB → linear: 同 rect 侧, 清屏值是「颜色进 GPU」的一条独立通路。
+                    load: wgpu::LoadOp::Clear(LinearRgba::from(frame.clear_color).to_clear_value()),
                     store: wgpu::StoreOp::Store,
                 },
                 depth_slice: None,

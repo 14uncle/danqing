@@ -60,15 +60,14 @@ impl Easing {
 ///
 /// 输入视为 sRGB 编码 (与 [`Color::from_srgb8`] 的存储语义一致),
 /// 先逐通道解码为线性，再按 Rec.709 权重加权。
+///
+/// 解码复用 [`crate::layout::srgb_to_linear`]，**不要在这里另写一份** ——
+/// 它同时是 GPU 边界的转换实现；两处各写一份且说法矛盾，正是双重 gamma 事故的成因。
 pub fn relative_luminance(color: Color) -> f32 {
-    fn decode(c: f32) -> f32 {
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    }
-    0.2126 * decode(color.r) + 0.7152 * decode(color.g) + 0.0722 * decode(color.b)
+    use crate::layout::srgb_to_linear;
+    0.2126 * srgb_to_linear(color.r)
+        + 0.7152 * srgb_to_linear(color.g)
+        + 0.0722 * srgb_to_linear(color.b)
 }
 
 /// 计算两颜色的 WCAG 对比度 (1.0 ~ 21.0)。

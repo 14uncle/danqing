@@ -40,7 +40,9 @@ pub use app::{AnimationCtx, App};
 pub use danqing_encoding as encoding;
 pub use event::{Event, ImeEvent, Key, MouseButton, NamedKey, WindowAction};
 pub use job::{AsyncJob, CancelFlag, CancelToken, SearchNav};
-pub use layout::{Color, Constraints, Edges, FlowChild, Point, Rect, Size, distribute};
+pub use layout::{
+    Color, Constraints, Edges, FlowChild, Point, Rect, Size, distribute, srgb_to_linear,
+};
 pub use render::{
     BackgroundConfig, BackgroundFrame, Context as RenderContext, ImageBatch, RectBatch,
     RenderError, ScaleMode, TextBatch,

@@ -8,11 +8,13 @@
 
 mod background;
 mod image;
+mod linear;
 mod rect;
 mod text;
 
 pub use background::{BackgroundConfig, BackgroundFrame, BackgroundPipeline, ScaleMode};
 pub use image::{ImageBatch, ImagePipeline};
+pub use linear::LinearRgba;
 pub use rect::{DrawTarget, RectBatch, RectPipeline};
 pub use text::{TextBatch, TextPipeline};
 

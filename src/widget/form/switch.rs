@@ -295,9 +295,14 @@ mod tests {
         Rect::from_xywh(0.0, 0.0, TRACK_WIDTH, TRACK_HEIGHT)
     }
 
-    /// 主题 token 的原始 RGBA —— 与 `RectBatch::instance_colors` 同一表示。
+    /// 主题 token 在**实例里**的表示 —— 与 `RectBatch::instance_colors` 同一表示。
+    ///
+    /// 实例里存的是**线性空间**值 (GPU 边界做 sRGB→linear, 见 `render/linear.rs`),
+    /// 所以这里必须同样解码。拿 token 的原始 sRGB 分量去比, 断言的是修好双重
+    /// gamma **之前**的旧行为。
     fn rgba_of(c: Color) -> [f32; 4] {
-        [c.r, c.g, c.b, c.a]
+        let l = crate::render::LinearRgba::from(c);
+        [l.r, l.g, l.b, l.a]
     }
 
     /// 焦点环**上直边**的颜色; 无焦点环则 `None`。

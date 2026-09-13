@@ -8,6 +8,7 @@
 
 use std::ops::Range;
 
+use crate::render::LinearRgba;
 use crate::{Color, Rect};
 
 /// 无裁剪时使用的极大安全矩形 (像素坐标)。
@@ -22,8 +23,8 @@ struct RectInstance {
     pos: [f32; 2],
     /// 像素尺寸。
     size: [f32; 2],
-    /// RGBA 颜色。
-    color: [f32; 4],
+    /// RGBA 颜色 (线性空间 —— 由 [`LinearRgba`] 保证, 见 `render/linear.rs`)。
+    color: LinearRgba,
     /// 四角圆角半径 (像素),顺序：左上、右上、右下、左下。
     radii: [f32; 4],
     /// 旋转角度 (弧度), 绕矩形中心顺时针。
@@ -100,7 +101,8 @@ impl RectBatch {
         self.instances.push(RectInstance {
             pos: [rect.origin.x, rect.origin.y],
             size: [rect.size.width, rect.size.height],
-            color: [color.r, color.g, color.b, color.a],
+            // sRGB → linear: 渲染目标是 sRGB 格式, 不在这里解码就会被硬件再编码一次。
+            color: LinearRgba::from(color),
             radii,
             rotation: 0.0,
             clip_min,
@@ -392,10 +394,17 @@ impl RectBatch {
         self.instances.is_empty()
     }
 
-    /// 测试用：读取所有实例的颜色 (不参与公开 API 契约)。
+    /// 测试用：读取所有实例的颜色 —— **GPU 实际收到的四分量, 已是线性空间**
+    /// (不参与公开 API 契约)。
+    ///
+    /// 想与主题 token 比对时, 必须先把 token 经 `LinearRgba::from` 解码再用;
+    /// 直接拿 token 的 sRGB 分量比, 断言的是修好双重 gamma **之前**的旧行为。
     #[doc(hidden)]
     pub fn instance_colors(&self) -> Vec<[f32; 4]> {
-        self.instances.iter().map(|i| i.color).collect()
+        self.instances
+            .iter()
+            .map(|i| [i.color.r, i.color.g, i.color.b, i.color.a])
+            .collect()
     }
 
     /// 测试用：读取所有实例的逐角圆角半径 (不参与公开 API 契约)。
@@ -721,12 +730,8 @@ impl RectPipeline {
             return;
         }
         let load = if clear {
-            wgpu::LoadOp::Clear(wgpu::Color {
-                r: f64::from(target.clear_color.r),
-                g: f64::from(target.clear_color.g),
-                b: f64::from(target.clear_color.b),
-                a: f64::from(target.clear_color.a),
-            })
+            // sRGB → linear: 清屏值写进 sRGB 目标同样会被再编码一次 (见 render/linear.rs)。
+            wgpu::LoadOp::Clear(LinearRgba::from(target.clear_color).to_clear_value())
         } else {
             wgpu::LoadOp::Load
         };
@@ -762,6 +767,41 @@ impl RectPipeline {
 mod tests {
     use super::*;
     use crate::{Color, Rect};
+
+    #[test]
+    fn instance_layout_is_unchanged_by_linear_color() {
+        // 顶点属性按 Float32x4 读颜色 —— 换了颜色类型之后, 实例的**尺寸与各字段偏移
+        // 必须与用 [f32; 4] 时逐字节一致**, 否则偏移全错、画面会花。
+        // 这条是 AD2 换类型的代价所对应的守卫: 不实测就等于假设。
+        assert_eq!(
+            size_of::<LinearRgba>(),
+            size_of::<[f32; 4]>(),
+            "线性色必须与 [f32; 4] 同尺寸"
+        );
+        assert_eq!(
+            align_of::<LinearRgba>(),
+            align_of::<[f32; 4]>(),
+            "线性色必须与 [f32; 4] 同对齐"
+        );
+        // pos(8) + size(8) + color(16) + radii(16) + rotation(4) + clip_min(8) + clip_max(8)
+        assert_eq!(size_of::<RectInstance>(), 68, "实例总布局不得变");
+    }
+
+    #[test]
+    fn push_rect_decodes_color_to_linear() {
+        // sRGB 0.5 解码后 ≈0.2140。实例里存的必须是**解码后**的值 ——
+        // 存原值就会被 sRGB 渲染目标再编码一次 (双重 gamma)。
+        let mut batch = RectBatch::new();
+        batch.push_rect(
+            Rect::from_xywh(0.0, 0.0, 10.0, 10.0),
+            Color::rgb(0.5, 0.5, 0.5),
+            0.0,
+        );
+        let c = batch.instance_colors()[0];
+        assert!((c[0] - 0.21404).abs() < 1e-4, "r 实得 {} (未解码?)", c[0]);
+        assert!((c[1] - 0.21404).abs() < 1e-4);
+        assert_eq!(c[3], 1.0, "alpha 不参与色彩空间转换");
+    }
 
     #[test]
     fn push_rounded_rect_keeps_per_corner_radii() {

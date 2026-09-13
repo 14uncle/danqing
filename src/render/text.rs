@@ -10,6 +10,7 @@ use std::ops::Range;
 
 use crate::Color;
 use crate::render::DrawTarget;
+use crate::render::LinearRgba;
 use crate::text::{Font, GlyphAtlas};
 
 /// 无裁剪时使用的极大安全矩形 (像素坐标)。
@@ -28,8 +29,8 @@ struct GlyphInstance {
     uv_min: [f32; 2],
     /// 图集 uv 右下角 (0..1)。
     uv_max: [f32; 2],
-    /// RGBA 颜色。
-    color: [f32; 4],
+    /// RGBA 颜色 (线性空间 —— 由 [`LinearRgba`] 保证, 见 `render/linear.rs`)。
+    color: LinearRgba,
     /// 裁剪矩形左上角。
     clip_min: [f32; 2],
     /// 裁剪矩形右下角 (不含)。
@@ -170,7 +171,8 @@ impl TextBatch {
                         info.uv_max.0 as f32 / atlas_size,
                         info.uv_max.1 as f32 / atlas_size,
                     ],
-                    color: [color.r, color.g, color.b, color.a],
+                    // sRGB → linear: 字形覆盖率是 alpha, 颜色分量同样会被再编码。
+                    color: LinearRgba::from(color),
                     clip_min,
                     clip_max,
                 });
@@ -210,6 +212,16 @@ impl TextBatch {
     /// 是否为空。
     pub fn is_empty(&self) -> bool {
         self.instances.is_empty()
+    }
+
+    /// 测试用：读取所有字形实例的颜色 —— **GPU 实际收到的分量, 已是线性空间**
+    /// (不参与公开 API 契约)。
+    ///
+    /// 与 `RectBatch::instance_colors` 同一约定: 想与主题 token 比对,
+    /// 必须先把 token 解码 (`LinearRgba::from`)。
+    #[doc(hidden)]
+    pub fn instance_colors(&self) -> Vec<LinearRgba> {
+        self.instances.iter().map(|i| i.color).collect()
     }
 }
 
@@ -508,6 +520,29 @@ impl TextPipeline {
 mod tests {
     use super::*;
     use crate::Rect;
+
+    #[test]
+    fn glyph_layout_is_unchanged_by_linear_color() {
+        // 与 rect 侧同一条守卫: 换了颜色类型后, 实例尺寸与字段偏移必须逐字节不变,
+        // 否则顶点属性偏移错位、文字会花。
+        assert_eq!(
+            size_of::<LinearRgba>(),
+            size_of::<[f32; 4]>(),
+            "线性色必须与 [f32; 4] 同尺寸"
+        );
+        // dst_pos(8)+dst_size(8)+uv_min(8)+uv_max(8)+color(16)+clip_min(8)+clip_max(8)
+        assert_eq!(size_of::<GlyphInstance>(), 64, "实例总布局不得变");
+    }
+
+    #[test]
+    fn push_text_decodes_color_to_linear() {
+        let mut batch = TextBatch::new();
+        batch.push_text("A", 0.0, 20.0, 16, Color::rgb(0.5, 0.5, 0.5));
+        assert_eq!(batch.len(), 1, "先确认字形实例确实产生了");
+        let c = batch.instance_colors()[0];
+        assert!((c.r - 0.21404).abs() < 1e-4, "r 实得 {} (未解码?)", c.r);
+        assert_eq!(c.a, 1.0, "alpha 不参与色彩空间转换");
+    }
 
     #[test]
     fn clip_stack_skips_fully_clipped_glyphs() {

@@ -1194,6 +1194,16 @@ mod tests {
     use super::*;
     use crate::event::WindowAction;
 
+    /// 主题 token 在**实例里**的表示 —— 与 `RectBatch::instance_colors` 同一表示。
+    ///
+    /// 实例里存的是**线性空间**值 (GPU 边界做 sRGB→linear, 见 `render/linear.rs`),
+    /// 所以这里必须同样解码。拿 token 的原始 sRGB 分量去比, 断言的是修好双重
+    /// gamma **之前**的旧行为。
+    fn rgba_of(c: Color) -> [f32; 4] {
+        let l = crate::render::LinearRgba::from(c);
+        [l.r, l.g, l.b, l.a]
+    }
+
     fn title_bar_area() -> Rect {
         Rect::from_xywh(0.0, 0.0, 400.0, 40.0)
     }
@@ -1310,19 +1320,14 @@ mod tests {
             LightTheme.traffic_minimize(),
             LightTheme.traffic_maximize(),
         ] {
-            let expected = [color.r, color.g, color.b, color.a];
+            let expected = rgba_of(color);
             assert!(
                 circles.contains(&expected),
                 "缺少主题色圆形按钮：{expected:?}"
             );
         }
         // 非 hover: 不绘制任何符号。
-        let glyph = [
-            TRAFFIC_GLYPH_COLOR.r,
-            TRAFFIC_GLYPH_COLOR.g,
-            TRAFFIC_GLYPH_COLOR.b,
-            TRAFFIC_GLYPH_COLOR.a,
-        ];
+        let glyph = rgba_of(TRAFFIC_GLYPH_COLOR);
         assert!(!rects.instance_colors().contains(&glyph));
     }
 
@@ -1341,12 +1346,7 @@ mod tests {
         texts.clear();
         bar.paint(area, &mut rects, &mut texts);
 
-        let glyph = [
-            TRAFFIC_GLYPH_COLOR.r,
-            TRAFFIC_GLYPH_COLOR.g,
-            TRAFFIC_GLYPH_COLOR.b,
-            TRAFFIC_GLYPH_COLOR.a,
-        ];
+        let glyph = rgba_of(TRAFFIC_GLYPH_COLOR);
         assert!(
             rects.instance_colors().contains(&glyph),
             "hover 关闭按钮应绘制深色 × 符号"
