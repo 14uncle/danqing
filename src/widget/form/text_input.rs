@@ -5,6 +5,7 @@
 //!
 //! 支持光标、选区、键盘编辑、IME preedit 显示与 commit 插入。
 
+use std::any::Any;
 use std::cell::Cell;
 
 use crate::app::AnimationCtx;
@@ -17,10 +18,50 @@ use crate::{Color, Constraints, Edges, LightTheme, Rect, Size, Theme};
 /// 光标闪烁周期 (秒)。
 const BLINK_PERIOD: f32 = 0.5;
 
+/// 主题绑定：每帧从应用状态产出随主题流动的颜色。
+type ThemeBinding = Box<dyn Fn(&dyn Any) -> TextInputColors>;
+
+/// 随主题流动的输入框颜色子集 (构建后仍可经 [`TextInput::bind_theme`] 每帧刷新)。
+///
+/// **为什么需要它**: 视图树只在启动时构建一次, `themed(&theme)` 烘进去的颜色
+/// 不会跟着运行时切主题走 —— 暗色主题下用浅色主题的正文色打字, 就是
+/// (51,51,51) 压在 (38,38,43) 的栏底上, WCAG 对比度 **1.19**, 等于看不见。
+///
+/// **`placeholder_color` 有意不在其中**: 它在 `themed()` 里是固定的中性灰
+/// `(160,160,160)`, **本来就不随主题走** (中性灰在两个主题上都可用)。把它塞进来
+/// 会顺带改掉所有其它产品的占位色 —— 那不是本次要动的东西。
+///
+/// 形状与 [`crate::widget::TitleBar::bind_theme`] 一致 —— 后续组件要补时请沿用。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TextInputColors {
+    text: Color,
+    background: Color,
+    selection: Color,
+    caret: Color,
+    border: Color,
+    focus_border: Color,
+}
+
+impl TextInputColors {
+    /// 从主题解析 —— `themed` 与 `bind_theme` **共用这一份**, 免得两处各写一套口径。
+    fn from_theme(theme: &impl Theme) -> Self {
+        Self {
+            text: theme.text_primary(),
+            background: theme.surface_input(),
+            selection: theme.selection(),
+            caret: theme.caret(),
+            border: theme.border(),
+            focus_border: theme.accent(),
+        }
+    }
+}
+
 /// 单行文本输入组件。
 pub struct TextInput {
     /// 共享文本编辑状态。
     editor: TextEditor,
+    /// 主题绑定 (每帧刷新随主题流动的颜色; 见 [`TextInput::bind_theme`])。
+    theme_binding: Option<ThemeBinding>,
     /// 是否获得焦点。
     focused: bool,
     /// 字体大小。
@@ -80,18 +121,20 @@ impl TextInput {
 
     /// 使用指定主题创建文本输入框。
     pub fn themed(theme: &impl Theme) -> Self {
+        let colors = TextInputColors::from_theme(theme);
         Self {
             editor: TextEditor::new(),
+            theme_binding: None,
             focused: false,
             font_size: theme.font_size_body(),
-            color: theme.text_primary(),
-            background: theme.surface_input(),
-            selection_color: theme.selection(),
-            caret_color: theme.caret(),
+            color: colors.text,
+            background: colors.background,
+            selection_color: colors.selection,
+            caret_color: colors.caret,
             padding: Edges::symmetric(theme.spacing_md(), theme.spacing_sm()),
             radius: theme.radius_sm(),
-            border_color: theme.border(),
-            focus_border_color: theme.accent(),
+            border_color: colors.border,
+            focus_border_color: colors.focus_border,
             border_width: 1.0,
             chromeless: false,
             width: None,
@@ -107,6 +150,31 @@ impl TextInput {
             placeholder_offset: 0.0,
             control_height: theme.control_height(),
         }
+    }
+
+    /// 绑定主题：每帧从应用状态重取主题，刷新随主题流动的颜色
+    /// (正文/底色/选区/光标/边框/焦点边框); 其余规格 (字号、内边距、圆角、
+    /// 控件高度、占位色) 保持构建时的值 —— 见 [`TextInputColors`] 关于占位色的说明。
+    ///
+    /// **构建态的颜色不会跟随运行时切主题** —— 视图树只建一次。产品侧若要支持
+    /// 明暗切换, 必须挂上这个绑定。形状与 [`crate::widget::TitleBar::bind_theme`] 一致。
+    pub fn bind_theme<S: 'static, T: Theme + 'static>(
+        mut self,
+        f: impl Fn(&S) -> T + 'static,
+    ) -> Self {
+        self.theme_binding = Some(Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("TextInput 主题绑定的状态类型不匹配");
+            TextInputColors::from_theme(&f(state))
+        }));
+        self
+    }
+
+    /// 当前正文色 —— 供产品侧回归锁断言「颜色是否跟着主题走」。
+    #[doc(hidden)]
+    pub fn text_color(&self) -> Color {
+        self.color
     }
 
     /// 设置文本内容。
@@ -365,6 +433,18 @@ impl Default for TextInput {
 }
 
 impl Widget for TextInput {
+    fn sync(&mut self, state: &dyn Any) {
+        if let Some(binding) = &self.theme_binding {
+            let c = binding(state);
+            self.color = c.text;
+            self.background = c.background;
+            self.selection_color = c.selection;
+            self.caret_color = c.caret;
+            self.border_color = c.border;
+            self.focus_border_color = c.focus_border;
+        }
+    }
+
     fn animate(&mut self, ctx: &AnimationCtx) {
         if self.focused {
             let t = ctx.elapsed.as_secs_f32();
@@ -690,6 +770,48 @@ mod tests {
     fn rgba_of(c: Color) -> [f32; 4] {
         let l = crate::render::LinearRgba::from(c);
         [l.r, l.g, l.b, l.a]
+    }
+
+    /// `bind_theme` 必须**每帧重取**主题 —— 视图树只在启动时构建一次,
+    /// 所以 `themed(&theme)` 烘进去的颜色不会跟着运行时切主题走。
+    ///
+    /// 用 `SceneTheme` 作测试主题: `LightTheme` 与 `DarkTheme` 是**两个类型**,
+    /// 而 `bind_theme<S, T>` 要求 `T` 单一, 没法用它们构造「同一类型、两个主题」。
+    /// `SceneTheme` 是「一个类型 + 可换调色板」, 正好。
+    #[test]
+    fn bind_theme_refreshes_colors_each_frame() {
+        use crate::theme::{ScenePalette, SceneTheme};
+
+        fn scene(text_primary: Color, accent: Color) -> SceneTheme {
+            SceneTheme::new(ScenePalette {
+                base: Color::WHITE,
+                accent,
+                text_primary,
+                text_secondary: Color::WHITE,
+                surface: Color::WHITE,
+                surface_input: Color::WHITE,
+                backdrop_light: Color::WHITE,
+                backdrop_dark: Color::WHITE,
+            })
+        }
+        struct S(SceneTheme);
+
+        let mut input = TextInput::themed(&LightTheme).bind_theme(|s: &S| s.0);
+        input.sync(&S(scene(
+            Color::from_srgb8(1, 2, 3),
+            Color::from_srgb8(4, 5, 6),
+        )));
+
+        assert_eq!(
+            input.color,
+            Color::from_srgb8(1, 2, 3),
+            "正文色应来自新主题"
+        );
+        assert_eq!(
+            input.focus_border_color,
+            Color::from_srgb8(4, 5, 6),
+            "焦点边框色 = 新主题的 accent"
+        );
     }
 
     /// 外框**上边**那条描边段的颜色。
