@@ -207,7 +207,21 @@ impl Theme for LightTheme {
 
     fn surface_variant(&self) -> Color {
         // 用于悬停、次级卡片等需要与主 surface 区分的场景 (冷调微青)。
-        Color::from_srgb8(238, 246, 242)
+        //
+        // 原值 `#EEF6F2` 与页面底色 `#F0F8F6` **只差 2/255** (Δ`L*` −0.74) ——
+        // 「次级表面」与底色同色, 等于不存在。2026-09-13 查实它在产品里**有 5 处
+        // 直接压在页面底上** (表头底 / 过滤栏底 / 侧栏生效行 / 关闭按钮 hover /
+        // 链接行 hover), 全部看不见; 唯独 `Dropdown` 弹层 hover 那处是好的
+        // —— 因为那一处压在**近白弹层**上, 同一个值在那里是 Δ`L*` 3.8。
+        // 也就是说: 原值不是「深了浅了」, 是**只对白底成立、对页面底不成立**。
+        //
+        // 新值按**暗色那一支的台阶**取: 暗色 `surface_variant` 对暗底是
+        // Δ`L*` +6.42, 浅色这支取到 **Δ`L*` −5.92** —— 两个主题第一次对齐。
+        // 对近白弹层它变成 Δ`L*` 8.97, 与用户在模块 5 已接受的行 hover (9.12)
+        // 同一量级, 不嫌重。
+        //
+        // 回归锁: `surface_variant_is_a_comparable_step_in_both_themes`。
+        Color::from_srgb8(0xE0, 0xE7, 0xE3)
     }
 
     fn accent(&self) -> Color {
@@ -1003,6 +1017,63 @@ mod tests {
                     "{name} 的 {token} 渲染成了板: 对比度 {ratio:.2} ≥ {SLAB}"
                 );
             }
+        }
+        check("LightTheme", &LightTheme);
+        check("DarkTheme", &DarkTheme);
+    }
+
+    /// 感知明度 (CIELAB `L*`, 0 = 黑, 100 = 白), **输入是已经合成好的亮度**。
+    ///
+    /// 台阶判据用它而**不用 WCAG 对比度**: 对比度是**文字**指标 (小面积、高反差),
+    /// 拿尺子量「大面积底色之间差多少」会**严重低估** —— 浅色 `surface_variant`
+    /// 对底色算出来 1.02, 看着「也行」, 实际 `ΔL*` 只有 0.74, 屏幕上就是没有。
+    /// 这条教训当场踩过: 我先用对比度 1.10 给 `Dropdown` hover 判了「等于没有」,
+    /// 换 `ΔL*` 一量是 3.72 —— **判反了**。
+    ///
+    /// 参数取**亮度**而不是 `Color`: 这支 token 在暗色是**半透明白**,
+    /// 而 `relative_luminance` 按契约忽略 alpha —— 直接喂进去会得到纯白的 `L*` 100,
+    /// 暗色那支算出来 Δ`L*` 90.96 (实测踩过)。半透明色必须先经
+    /// [`composited_luminance`] (线性) 合成。
+    fn l_star_of(y: f32) -> f32 {
+        if y > 0.008856 {
+            116.0 * y.powf(1.0 / 3.0) - 16.0
+        } else {
+            903.3 * y
+        }
+    }
+
+    /// **同一支「次级表面」在两个主题里必须是同一个量级的台阶。**
+    ///
+    /// 回归锁 (2026-09-13, 由 D1 查出): 浅色 `surface_variant` 对底色 `ΔL*` 只有
+    /// **0.74** (差 2/255), 而暗色同一支是 **+6.42** —— 同一个角色差一个量级,
+    /// 这不是设计选择, 是漏了。产品侧有 5 处直接拿它压页面底 (表头 / 过滤栏 /
+    /// 侧栏生效行 / 两处 hover), 浅色下全部看不见。
+    ///
+    /// 区间 `[3.0, 10.0]` 是**导出**的:
+    /// - 下限 3.0 落在「用户明确说过看不见」的 0.74 与「用户已接受的浅色斑马」
+    ///   3.49 之间;
+    /// - 上限 10.0 挡住「次级表面变成一块板」。
+    ///
+    /// **只锁 `surface_variant`, 不锁 `surface` / `surface_input`** —— 那两支是
+    /// **玻璃卡**, 生来就该贴近底色 (浅色 1.06 / 1.08), 角色不同。
+    /// 这正是当初「跨主题一致性守卫」查实后**决定不建**的原因: 照字面一刀切会
+    /// 一上线就误报。现在有了确切的数据与角色边界, 才收窄成这一条。
+    #[test]
+    fn surface_variant_is_a_comparable_step_in_both_themes() {
+        const MIN: f32 = 3.0;
+        const MAX: f32 = 10.0;
+
+        fn check<T: Theme>(name: &str, th: &T) {
+            let bg = th.background();
+            let base = l_star_of(relative_luminance(bg));
+            // 走**线性**合成 —— 暗色这支是半透明白, 不合成量的是纯白。
+            let variant = l_star_of(composited_luminance(th.surface_variant(), bg));
+            let step = (variant - base).abs();
+            assert!(
+                (MIN..=MAX).contains(&step),
+                "{name} 的 surface_variant 对底色 ΔL* 是 {step:.2}, 落在 [{MIN}, {MAX}] 之外 —— \
+                 太小就是「次级表面与底色同色」(看不见), 太大就是一块板"
+            );
         }
         check("LightTheme", &LightTheme);
         check("DarkTheme", &DarkTheme);
