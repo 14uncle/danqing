@@ -17,10 +17,44 @@ use crate::{Color, Constraints, Point, Rect, Size, Theme};
 
 /// active 索引绑定闭包：每帧从应用状态读取。
 type ActiveBinding = Box<dyn Fn(&dyn Any) -> usize>;
+/// 主题绑定闭包：每帧从应用状态产出随主题流动的颜色。
+type ThemeBinding = Box<dyn Fn(&dyn Any) -> TabColors>;
 /// tab 切换时产出的应用消息工厂。
 type ChangeFactory = Box<dyn Fn(usize) -> Box<dyn Any>>;
 /// icon 数据 (RGBA 像素, 宽, 高)。
 type IconData = (Vec<u8>, u32, u32);
+
+/// 随主题流动的 tab 颜色子集 (构建后仍可经 [`Tabs::bind_theme`] 每帧刷新)。
+///
+/// **为什么需要它**: 视图树只在启动时构建一次 (`danqing/src/window/mod.rs` 的
+/// `let tree = app.view();`, 之后整棵交给 Handler 不再重建), 所以
+/// `Tabs::new(&theme)` 烘进去的颜色**不会**跟着运行时切主题走 —— 浅色启动切暗色,
+/// 未选中 tab 会停在浅色主题的 `text_secondary`(深灰) 上, 压在暗色面板上读不了。
+/// `Tabs` 原本只有 `bind(active_index)`, 没有任何主题侧的绑定可用。
+///
+/// 形状与 [`crate::widget::TitleBar::bind_theme`] 一致 (那是框架里第一个、
+/// 此前也是唯一一个 per-frame 主题绑定) —— 后续组件要补时请沿用同一形状,
+/// 不要再发明第二种。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TabColors {
+    active: Color,
+    inactive: Color,
+    indicator: Color,
+    hover: Color,
+}
+
+impl TabColors {
+    /// 从主题解析 —— `new` 与 `bind_theme` **共用这一份**, 免得两处各写一套口径
+    /// (两处各写一份正是本仓漂过的典型)。
+    fn from_theme(theme: &impl Theme) -> Self {
+        Self {
+            active: theme.accent(),
+            inactive: theme.text_secondary(),
+            indicator: theme.accent(),
+            hover: theme.text_primary(),
+        }
+    }
+}
 
 /// 带 tab 栏的多面板切换容器。
 ///
@@ -47,6 +81,8 @@ pub struct Tabs {
     active: usize,
     /// 应用状态绑定闭包。
     binding: Option<ActiveBinding>,
+    /// 主题绑定闭包 (每帧刷新随主题流动的颜色; 见 [`Tabs::bind_theme`])。
+    theme_binding: Option<ThemeBinding>,
     /// tab 栏中各 tab 的区域 (layout 缓存，点击判定用)。
     tab_areas: Vec<Rect>,
     /// 鼠标悬停的 tab 索引。
@@ -92,6 +128,7 @@ impl Tabs {
     /// 创建空 Tabs, 从 theme 读取颜色和字号 token。
     pub fn new(theme: &impl Theme) -> Self {
         let font_size = theme.font_size_body();
+        let colors = TabColors::from_theme(theme);
         // tab 栏高度：字号 + 上下 padding
         let tab_bar_height = font_size as f32 + 16.0;
         Self {
@@ -100,15 +137,16 @@ impl Tabs {
             children: Vec::new(),
             active: 0,
             binding: None,
+            theme_binding: None,
             tab_areas: Vec::new(),
             hovered: None,
             active_size: Size::ZERO,
             on_change: None,
             tab_bar_height,
-            color_active: theme.accent(),
-            color_inactive: theme.text_secondary(),
-            color_indicator: theme.accent(),
-            color_hover: theme.text_primary(),
+            color_active: colors.active,
+            color_inactive: colors.inactive,
+            color_indicator: colors.indicator,
+            color_hover: colors.hover,
             font_size,
             icon_size: 16.0,
             icon_gap: 4.0,
@@ -164,6 +202,26 @@ impl Tabs {
     /// 设置初始 active 索引。
     pub fn active(mut self, active: usize) -> Self {
         self.active = active;
+        self
+    }
+
+    /// 绑定主题：每帧从应用状态重取主题，刷新随主题流动的颜色
+    /// (选中/未选中文字、指示线、hover); 其余规格 (字号、tab 栏高度、面板间距、
+    /// icon 尺寸) 保持构建时的主题值。
+    ///
+    /// **构建态的颜色不会跟随运行时切主题** —— 视图树只建一次。产品侧若要支持
+    /// 明暗切换, 必须挂上这个绑定。形状与 [`crate::widget::TitleBar::bind_theme`]
+    /// 一致。
+    pub fn bind_theme<S: 'static, T: Theme + 'static>(
+        mut self,
+        f: impl Fn(&S) -> T + 'static,
+    ) -> Self {
+        self.theme_binding = Some(Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("Tabs 主题绑定的状态类型不匹配");
+            TabColors::from_theme(&f(state))
+        }));
         self
     }
 
@@ -289,6 +347,13 @@ impl Widget for Tabs {
             child.sync(state);
         }
         // 读取绑定
+        if let Some(binding) = &self.theme_binding {
+            let c = binding(state);
+            self.color_active = c.active;
+            self.color_inactive = c.inactive;
+            self.color_indicator = c.indicator;
+            self.color_hover = c.hover;
+        }
         if let Some(binding) = &self.binding {
             self.active = binding(state);
         }

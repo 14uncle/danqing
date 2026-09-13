@@ -50,6 +50,45 @@ use crate::{Color, Constraints, LightTheme, Point, Rect, Size, Theme};
 type SelectedBinding = Box<dyn Fn(&dyn Any) -> usize>;
 /// 选中消息工厂：选中某项时产出应用消息 (索引)。
 type SelectFactory = Box<dyn Fn(usize) -> Box<dyn Any>>;
+/// 主题绑定：每帧从应用状态产出随主题流动的颜色。
+type ThemeBinding = Box<dyn Fn(&dyn Any) -> DropdownColors>;
+
+/// 随主题流动的下拉框颜色子集 (构建后仍可经 [`Dropdown::bind_theme`] 每帧刷新)。
+///
+/// **为什么需要它**: 视图树只在启动时构建一次 (`danqing/src/window/mod.rs` 的
+/// `let tree = app.view();`), 所以 `themed(&theme)` 烘进去的颜色不跟随运行时的
+/// 主题切换。更糟的是 [`Dropdown::new`] 内部硬编码 `LightTheme` —— 暗色主题下
+/// 用它建出来的下拉框整个是浅色样式。
+///
+/// 形状与 [`crate::widget::TitleBar::bind_theme`] 一致 —— 后续组件要补时请沿用,
+/// 不要再发明第二种。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DropdownColors {
+    bg: Color,
+    popup_bg: Color,
+    border: Color,
+    focus_border: Color,
+    text: Color,
+    hover: Color,
+    selected: Color,
+    arrow: Color,
+}
+
+impl DropdownColors {
+    /// 从主题解析 —— `themed` 与 `bind_theme` **共用这一份**, 免得两处各写一套口径。
+    fn from_theme(theme: &impl Theme) -> Self {
+        Self {
+            bg: theme.surface_input(),
+            popup_bg: theme.surface_input(),
+            border: theme.border(),
+            focus_border: theme.accent(),
+            text: theme.text_primary(),
+            hover: theme.surface_variant(),
+            selected: theme.selection(),
+            arrow: theme.accent(),
+        }
+    }
+}
 
 /// 无 hover 行。
 const NO_HOVER: usize = usize::MAX;
@@ -70,6 +109,8 @@ pub struct Dropdown {
     selected: usize,
     /// 选中绑定。
     selected_binding: Option<SelectedBinding>,
+    /// 主题绑定 (每帧刷新随主题流动的颜色; 见 [`Dropdown::bind_theme`])。
+    theme_binding: Option<ThemeBinding>,
     /// 选中消息工厂。
     on_select: Option<SelectFactory>,
     /// 展开态 (组件自管)。
@@ -124,10 +165,12 @@ impl Dropdown {
     /// 使用指定主题创建。
     pub fn themed(theme: &impl Theme, options: Vec<String>) -> Self {
         let control_height = theme.control_height();
+        let colors = DropdownColors::from_theme(theme);
         Self {
             options,
             selected: 0,
             selected_binding: None,
+            theme_binding: None,
             on_select: None,
             expanded: false,
             hover_idx: NO_HOVER,
@@ -140,16 +183,36 @@ impl Dropdown {
             padding: theme.spacing_md(),
             list_pad: theme.spacing_xs(),
             font_size: theme.font_size_body(),
-            bg_color: theme.surface_input(),
-            popup_bg_color: theme.surface_input(),
-            border_color: theme.border(),
-            focus_border_color: theme.accent(),
+            bg_color: colors.bg,
+            popup_bg_color: colors.popup_bg,
+            border_color: colors.border,
+            focus_border_color: colors.focus_border,
             focused: false,
-            text_color: theme.text_primary(),
-            hover_color: theme.surface_variant(),
-            selected_color: theme.selection(),
-            arrow_color: theme.accent(),
+            text_color: colors.text,
+            hover_color: colors.hover,
+            selected_color: colors.selected,
+            arrow_color: colors.arrow,
         }
+    }
+
+    /// 绑定主题：每帧从应用状态重取主题，刷新随主题流动的颜色
+    /// (底色/弹层底色/边框/焦点边框/正文/hover/选中/箭头); 其余规格
+    /// (控件高度、行高、圆角、内边距、字号) 保持构建时的主题值。
+    ///
+    /// **构建态的颜色不会跟随运行时切主题** —— 视图树只建一次。产品侧若要支持
+    /// 明暗切换, 必须挂上这个绑定。形状与 [`crate::widget::TitleBar::bind_theme`]
+    /// 一致。
+    pub fn bind_theme<S: 'static, T: Theme + 'static>(
+        mut self,
+        f: impl Fn(&S) -> T + 'static,
+    ) -> Self {
+        self.theme_binding = Some(Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("Dropdown 主题绑定的状态类型不匹配");
+            DropdownColors::from_theme(&f(state))
+        }));
+        self
     }
 
     /// 绑定选中索引 (从应用状态读取)。
@@ -330,6 +393,17 @@ fn union_rect(a: Rect, b: Rect) -> Rect {
 
 impl Widget for Dropdown {
     fn sync(&mut self, state: &dyn Any) {
+        if let Some(bind) = &self.theme_binding {
+            let c = bind(state);
+            self.bg_color = c.bg;
+            self.popup_bg_color = c.popup_bg;
+            self.border_color = c.border;
+            self.focus_border_color = c.focus_border;
+            self.text_color = c.text;
+            self.hover_color = c.hover;
+            self.selected_color = c.selected;
+            self.arrow_color = c.arrow;
+        }
         if let Some(bind) = &self.selected_binding {
             self.selected = bind(state);
         }
