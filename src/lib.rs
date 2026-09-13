@@ -23,6 +23,7 @@ pub mod log;
 /// 仅 `persist` feature 启用: 默认关闭不拉序列化栈, 产品显式开启。
 #[cfg(feature = "persist")]
 pub mod persist;
+pub mod platform;
 mod render;
 mod text;
 pub mod theme;
