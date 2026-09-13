@@ -4,7 +4,29 @@
 //! 集成测试:组件树构建 + 布局 + 绘制命令收集(纯逻辑,无需 GPU)。
 
 use danqing::widget::{self, Box as UiBox, Button, Center, Column, Row, Text, TextInput, Widget};
-use danqing::{Color, Constraints, LightTheme, Point, Rect, Size, Theme};
+use danqing::{Color, Constraints, LightTheme, Point, Rect, Size, Theme, srgb_to_linear};
+
+/// 实例 buffer 里某个颜色是否就是这支 token。
+///
+/// **实例里存的是 linear 值** (颜色进 GPU 前做过一次 sRGB→linear 解码,
+/// 见 `render::LinearRgba`), 所以比较前必须同样解码 —— 直接拿 token 的 sRGB 分量比,
+/// 非白色的 token 一律对不上 (本文件原有 4 处因此变红)。
+///
+/// ⚠ **白色是这个变换的不动点** (`srgb_to_linear(1.0) == 1.0`), 所以
+/// 「比白色」的断言**永远不会失败** —— 组件就算一个 token 都不读、直接画纯白,
+/// 也照样通过。本文件另 3 处正是这种形态, 它们只证得出「画了白色」,
+/// **证不出「读了主题」**。要证后者得换一支非白 token。
+fn is_color(c: &[f32; 4], token: Color) -> bool {
+    let want = [
+        srgb_to_linear(token.r),
+        srgb_to_linear(token.g),
+        srgb_to_linear(token.b),
+        token.a,
+    ];
+    c.iter()
+        .zip(want.iter())
+        .all(|(a, b)| (a - b).abs() < 0.001)
+}
 
 struct AppState {
     count: u32,
@@ -78,12 +100,7 @@ fn input_row_renders_text_input_background() {
     tree.paint(Rect::new(Point::ZERO, size), &mut rects, &mut texts);
 
     let bg = LightTheme.surface_input();
-    let has_background = rects.instance_colors().iter().any(|c| {
-        (c[0] - bg.r).abs() < 0.001
-            && (c[1] - bg.g).abs() < 0.001
-            && (c[2] - bg.b).abs() < 0.001
-            && (c[3] - bg.a).abs() < 0.001
-    });
+    let has_background = rects.instance_colors().iter().any(|c| is_color(c, bg));
     assert!(has_background, "应绘制出 TextInput 的背景");
 }
 
@@ -139,12 +156,7 @@ fn showcase_like_column_keeps_text_input_on_screen() {
         .instance_rects()
         .into_iter()
         .zip(rects.instance_colors())
-        .filter(|(_, c)| {
-            (c[0] - bg.r).abs() < 0.001
-                && (c[1] - bg.g).abs() < 0.001
-                && (c[2] - bg.b).abs() < 0.001
-                && (c[3] - bg.a).abs() < 0.001
-        })
+        .filter(|(_, c)| is_color(c, bg))
         .map(|(r, _)| r)
         .collect();
 
@@ -198,11 +210,7 @@ fn click_empty_card_clears_focus_for_keyboard_fallback() {
         .instance_rects()
         .into_iter()
         .zip(rects.instance_colors())
-        .find(|(_, c)| {
-            (c[0] - dark.r).abs() < 0.001
-                && (c[1] - dark.g).abs() < 0.001
-                && (c[2] - dark.b).abs() < 0.001
-        })
+        .find(|(_, c)| is_color(c, dark))
         .map(|(r, _)| r)
         .expect("应找到键盘区卡片");
     focus.set_by_click(
@@ -247,9 +255,7 @@ fn stretched_column_gives_cards_uniform_width() {
         .instance_rects()
         .into_iter()
         .zip(rects.instance_colors())
-        .filter(|(_, c)| {
-            (c[0] - 1.0).abs() < 0.001 && (c[1] - 1.0).abs() < 0.001 && (c[2] - 1.0).abs() < 0.001
-        })
+        .filter(|(_, c)| is_color(c, Color::WHITE))
         .map(|(r, _)| r)
         .collect();
 
@@ -289,11 +295,7 @@ fn fit_box_with_child_wraps_content_height() {
         .instance_rects()
         .into_iter()
         .zip(rects.instance_colors())
-        .find(|(_, c)| {
-            (c[0] - green.r).abs() < 0.001
-                && (c[1] - green.g).abs() < 0.001
-                && (c[2] - green.b).abs() < 0.001
-        })
+        .find(|(_, c)| is_color(c, green))
         .map(|(r, _)| r)
         .expect("应找到第二张卡片");
 
@@ -326,11 +328,7 @@ fn fill_center_with_fill_max_centers_child_across_full_cross() {
         .instance_rects()
         .into_iter()
         .zip(rects.instance_colors())
-        .find(|(_, c)| {
-            (c[0] - green.r).abs() < 0.001
-                && (c[1] - green.g).abs() < 0.001
-                && (c[2] - green.b).abs() < 0.001
-        })
+        .find(|(_, c)| is_color(c, green))
         .map(|(r, _)| r)
         .expect("应找到绿色卡片");
 
@@ -373,11 +371,7 @@ fn fit_center_in_column_does_not_push_later_children_off_screen() {
         .instance_rects()
         .into_iter()
         .zip(rects.instance_colors())
-        .find(|(_, c)| {
-            (c[0] - red.r).abs() < 0.001
-                && (c[1] - red.g).abs() < 0.001
-                && (c[2] - red.b).abs() < 0.001
-        })
+        .find(|(_, c)| is_color(c, red))
         .map(|(r, _)| r)
         .expect("应找到第一个红色卡片");
 
