@@ -366,17 +366,26 @@ impl Theme for DarkTheme {
 
     fn surface(&self) -> Color {
         // 暗玻璃：白色低透明度。
-        Color::rgba(1.0, 1.0, 1.0, 0.08)
+        // alpha 的推导见 `surface_variant` —— 渲染成 (50,50,54), 与底色差 +12 台阶。
+        Color::rgba(1.0, 1.0, 1.0, 0.022)
     }
 
     fn surface_input(&self) -> Color {
         // 输入区略实，保证文字可读。
-        Color::rgba(1.0, 1.0, 1.0, 0.12)
+        // 比 `surface` 高一档 (渲染 (57,57,60), +15 台阶): 输入框要能读作「这里能打字」。
+        Color::rgba(1.0, 1.0, 1.0, 0.031)
     }
 
     fn surface_variant(&self) -> Color {
         // 悬停/次级表面。
-        Color::rgba(1.0, 1.0, 1.0, 0.10)
+        //
+        // alpha 是 0.010 而非 0.10: 渲染目标按 **linear** 空间混合, 而近黑底
+        // (#191920) 在 linear 空间**极度敏感** —— 白 10% 合成出 (93,93,94),
+        // 是一块灰板（与底色对比度 2.65）; 白 1% 才是淡台阶（1.17）。
+        // 浅色主题不受这个敏感度影响（同一个 10% 在近白底上只差 2/255),
+        // 故两个主题的 alpha 不能同值 —— 判据是**知觉台阶**而非 alpha 本身。
+        // 回归锁: `dark_surface_variant_is_a_subtle_step_not_a_slab`。
+        Color::rgba(1.0, 1.0, 1.0, 0.010)
     }
 
     fn accent(&self) -> Color {
@@ -396,11 +405,15 @@ impl Theme for DarkTheme {
 
     fn divider(&self) -> Color {
         // 跟随文字色变亮。
-        Color::rgba(229.0 / 255.0, 229.0 / 255.0, 234.0 / 255.0, 0.15)
+        // 1px 细线要够亮才看得见 —— 台阶比填充高一档 (渲染 (68,68,72), +20); 但原来的
+        // 0.15 在 linear 混合下会渲染成 (99,99,103) (+33), 比正文还抢眼, 已收。
+        Color::rgba(229.0 / 255.0, 229.0 / 255.0, 234.0 / 255.0, 0.061)
     }
 
     fn border(&self) -> Color {
-        Color::rgba(229.0 / 255.0, 229.0 / 255.0, 234.0 / 255.0, 0.28)
+        // 轮廓线, 台阶最高的一档 (渲染 (87,87,90), +28)。原 0.28 渲染成 (131,131,135)
+        // —— 比中灰还亮 (+46), 在暗色上是刺目的白框, 已收。
+        Color::rgba(229.0 / 255.0, 229.0 / 255.0, 234.0 / 255.0, 0.109)
     }
 
     fn selection(&self) -> Color {
@@ -894,6 +907,52 @@ mod tests {
         let theme = LightTheme;
         assert!(matches!(theme.easing_standard(), Easing::EaseInOut));
         assert!(matches!(theme.easing_accelerate(), Easing::Linear));
+    }
+
+    /// 在 **linear 空间**把 `fg` 合成到 `bg` 上, 返回相对亮度 —— 复现硬件在 sRGB
+    /// 渲染目标上的真实行为（模块 1 修好双重编码后, 这条路径才真正生效）。
+    fn composited_luminance(fg: Color, bg: Color) -> f32 {
+        let f = crate::render::LinearRgba::from(fg);
+        let b = crate::render::LinearRgba::from(bg);
+        let mix = |fc: f32, bc: f32| f.a * fc + (1.0 - f.a) * bc;
+        0.2126 * mix(f.r, b.r) + 0.7152 * mix(f.g, b.g) + 0.0722 * mix(f.b, b.b)
+    }
+
+    #[test]
+    fn dark_translucent_tokens_are_calibrated_for_linear_blending() {
+        // 判据是**渲染之后的知觉台阶**, 不是 token 里的 alpha ——
+        // 模块 1 之前「护栏全绿、屏幕全灰」的成因正是护栏量错了对象。
+        //
+        // 台阶按**角色**定, 不是一律同值: 大面积填充要淡 (否则就是一块板),
+        // 1px 细线要够亮才看得见。`selection` 不在此表 —— 它是**语义高亮**,
+        // 该显眼, 拿它跟填充比会得出误导性的结论。
+        //
+        // 这些 alpha 一律比「照 sRGB 空间手感定」小一个量级: 渲染目标按 linear
+        // 混合, 而近黑底在 linear 空间**极度敏感** (白 1% 就已经是 +6 台阶)。
+        // **每个上界都故意卡在旧值之下** —— 防止有人按老手感把 alpha 调回去。
+        let bg = DarkTheme.background();
+        let base = relative_luminance(bg);
+        let cases: [(&str, Color, f32, f32); 5] = [
+            ("surface", DarkTheme.surface(), 1.20, 1.60),
+            ("surface_input", DarkTheme.surface_input(), 1.35, 1.75),
+            ("surface_variant", DarkTheme.surface_variant(), 1.08, 1.30),
+            ("divider", DarkTheme.divider(), 1.60, 2.00),
+            ("border", DarkTheme.border(), 2.20, 2.70),
+        ];
+        for (name, color, lo, hi) in cases {
+            let composited = composited_luminance(color, bg);
+            let (h, l) = if composited > base {
+                (composited, base)
+            } else {
+                (base, composited)
+            };
+            let ratio = (h + 0.05) / (l + 0.05);
+            assert!(
+                (lo..=hi).contains(&ratio),
+                "{name} 的台阶越界: 对比度 {ratio:.3} 不在 {lo}..{hi} 内 \
+                 (合成亮度 {composited:.5} vs 底色 {base:.5})"
+            );
+        }
     }
 
     #[test]

@@ -15,7 +15,7 @@ use danqing::widget::{
 };
 use danqing::{
     BackgroundConfig, Color, Constraints, Event, LightTheme, MouseButton, Point, Rect, ScaleMode,
-    Size, Theme, WindowAction, WindowConfig,
+    Size, Theme, WindowAction, WindowConfig, srgb_to_linear,
 };
 
 fn approx_eq(a: f32, b: f32) -> bool {
@@ -26,8 +26,26 @@ fn color_eq(a: Color, b: Color) -> bool {
     approx_eq(a.r, b.r) && approx_eq(a.g, b.g) && approx_eq(a.b, b.b) && approx_eq(a.a, b.a)
 }
 
-fn color_from_array(c: [f32; 4]) -> Color {
-    Color::rgba(c[0], c[1], c[2], c[3])
+/// token (作者态 sRGB) → 实例 buffer 里实际存的值。
+///
+/// 实例里存的**不是 token 原值**: 颜色进 GPU 前会做一次 sRGB→linear 解码
+/// (见 `render::LinearRgba`), 所以比较前必须同样解码。
+///
+/// **别改回「直接拿 token 比」** —— 那样所有非白色的断言都会红, 而白色恰好是
+/// 这个变换的不动点 (`srgb_to_linear(1.0) == 1.0`), 于是**只比白色的断言会
+/// 变成永真**: 组件就算一个 token 都不读、直接画纯白, 测试照样绿。
+/// 本文件曾经有四条断言栽在这个性质上（见各用例里的补强断言）。
+fn rgba_of(c: Color) -> [f32; 4] {
+    [
+        srgb_to_linear(c.r),
+        srgb_to_linear(c.g),
+        srgb_to_linear(c.b),
+        c.a,
+    ]
+}
+
+fn arr_eq(a: [f32; 4], b: [f32; 4]) -> bool {
+    a.iter().zip(b.iter()).all(|(x, y)| approx_eq(*x, *y))
 }
 
 #[test]
@@ -77,15 +95,13 @@ fn box_paints_with_theme_surface() {
     );
 
     assert!(rects.len() >= 2);
-    assert!(color_eq(
-        color_from_array(rects.instance_colors()[0]),
-        t.surface()
-    ));
+    assert!(arr_eq(rects.instance_colors()[0], rgba_of(t.surface())));
+    // border 是**非白** token: 这条才真正抓得到「画错颜色」(见 rgba_of 的说明)。
     assert!(
         rects
             .instance_colors()
             .iter()
-            .any(|c| color_eq(color_from_array(*c), t.border()))
+            .any(|c| arr_eq(*c, rgba_of(t.border())))
     );
 }
 
@@ -104,10 +120,8 @@ fn button_paints_with_theme_accent() {
     );
 
     assert!(!rects.is_empty());
-    assert!(color_eq(
-        color_from_array(rects.instance_colors()[0]),
-        t.accent()
-    ));
+    // accent 是**非白** token —— 这条断言本来就抓得到回归, 只需先解码。
+    assert!(arr_eq(rects.instance_colors()[0], rgba_of(t.accent())));
 }
 
 #[test]
@@ -125,10 +139,16 @@ fn text_input_paints_with_theme_surface_input() {
     );
 
     assert!(!rects.is_empty());
-    assert!(color_eq(
-        color_from_array(rects.instance_colors()[0]),
-        t.surface_input()
+    assert!(arr_eq(
+        rects.instance_colors()[0],
+        rgba_of(t.surface_input())
     ));
+    // surface_input 是白色 → 白色是变换不动点 → 单断言它等于永真。补一条:
+    // 必须**不是**普通 surface (两者只差 alpha), 才证明用的是 input 那支 token。
+    assert!(
+        !arr_eq(rects.instance_colors()[0], rgba_of(t.surface())),
+        "应使用 surface_input 而非 surface"
+    );
 }
 
 #[test]
@@ -146,10 +166,16 @@ fn text_area_paints_with_theme_surface_input() {
     );
 
     assert!(!rects.is_empty());
-    assert!(color_eq(
-        color_from_array(rects.instance_colors()[0]),
-        t.surface_input()
+    assert!(arr_eq(
+        rects.instance_colors()[0],
+        rgba_of(t.surface_input())
     ));
+    // surface_input 是白色 → 白色是变换不动点 → 单断言它等于永真。补一条:
+    // 必须**不是**普通 surface (两者只差 alpha), 才证明用的是 input 那支 token。
+    assert!(
+        !arr_eq(rects.instance_colors()[0], rgba_of(t.surface())),
+        "应使用 surface_input 而非 surface"
+    );
 }
 
 #[test]
@@ -167,10 +193,14 @@ fn scrollable_child_paints_with_theme_surface() {
     );
 
     assert!(!rects.is_empty());
-    assert!(color_eq(
-        color_from_array(rects.instance_colors()[0]),
-        t.surface()
-    ));
+    assert!(arr_eq(rects.instance_colors()[0], rgba_of(t.surface())));
+    // 子盒子画了 border (非白 token) —— 这条才抓得到颜色回归。
+    assert!(
+        rects
+            .instance_colors()
+            .iter()
+            .any(|c| arr_eq(*c, rgba_of(t.border())))
+    );
 }
 
 #[test]

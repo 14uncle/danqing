@@ -5,11 +5,19 @@
 
 use danqing::event::Event;
 use danqing::widget::{self, Box as UiBox, Column, Padding, Row};
-use danqing::{Color, Constraints, Point, Rect, Size};
+use danqing::{Color, Constraints, Point, Rect, Size, srgb_to_linear};
 
 #[test]
 fn deep_hover_changes_paint_color() {
     let pink = Color::from_srgb8(0xE6, 0x4C, 0x9F);
+    // 实例里存的是 **linear** 值 (颜色进 GPU 前做过一次 sRGB→linear 解码),
+    // 所以要拿 token 作比较基准时必须先解码 —— 否则比的是两个色彩空间。
+    // 本用例曾经栽在这里: 解码后的 0.7913 与编码态的 0.902 差 0.111, 断言必红。
+    let pink_lin = (
+        srgb_to_linear(pink.r),
+        srgb_to_linear(pink.g),
+        srgb_to_linear(pink.b),
+    );
     let mut tree = widget::node(Padding::all(
         24.0,
         Column::new()
@@ -37,7 +45,7 @@ fn deep_hover_changes_paint_color() {
     tree.paint(root, &mut rects, &mut texts);
     let before = rects.instance_colors();
     assert!(
-        before.iter().any(|c| (c[0] - pink.r).abs() < 0.01),
+        before.iter().any(|c| (c[0] - pink_lin.0).abs() < 0.01),
         "应有粉色实例: {before:?}"
     );
 
@@ -55,7 +63,7 @@ fn deep_hover_changes_paint_color() {
     let after = rects2.instance_colors();
     let hovered = after
         .iter()
-        .any(|c| c[1] > pink.g * 1.15 && (c[0] - pink.r).abs() < 0.3);
+        .any(|c| c[1] > pink_lin.1 * 1.15 && (c[0] - pink_lin.0).abs() < 0.3);
     println!("before: {before:?}");
     println!("after:  {after:?}");
     assert!(hovered, "悬停后粉色块应变亮");
