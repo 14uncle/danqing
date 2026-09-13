@@ -22,6 +22,35 @@ type MsgFactory = Box<dyn Fn() -> Box<dyn Any>>;
 type ColorBinding = Box<dyn Fn(&dyn Any) -> Color>;
 /// 文本绑定闭包: 从类型擦除的应用状态产出文本。
 type TextBinding = Box<dyn Fn(&dyn Any) -> String>;
+/// 主题绑定：每帧从应用状态产出随主题流动的颜色。
+type ThemeBinding = Box<dyn Fn(&dyn Any) -> IconInputColors>;
+
+/// 随主题流动的图标输入框颜色子集 (构建后仍可经 [`IconInput::bind_theme`] 每帧刷新)。
+///
+/// **为什么需要它**: 视图树只在启动时构建一次 (`danqing/src/window/mod.rs` 的
+/// `let tree = app.view();`, 之后整棵交给 Handler 不再重建), 所以 `themed(&theme)`
+/// 烘进去的颜色不会跟随运行时切主题。`IconInput` 的外框主题色**没有任何每帧通路**。
+///
+/// **图标色不在其中**: 图标颜色另有 [`IconInput::bind_icon_color`] /
+/// [`IconInput::bind_icon_hover_color`] 两条通路, 本绑定不碰它们。
+/// 形状与 [`crate::widget::TitleBar::bind_theme`] 一致 —— 后续组件要补时请沿用。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct IconInputColors {
+    background: Color,
+    border: Color,
+    focus_border: Color,
+}
+
+impl IconInputColors {
+    /// 从主题解析 —— `themed` 与 `bind_theme` **共用这一份**, 免得两处各写一套口径。
+    fn from_theme(theme: &impl Theme) -> Self {
+        Self {
+            background: theme.surface_input(),
+            border: theme.border(),
+            focus_border: theme.accent(),
+        }
+    }
+}
 
 /// 图标按钮区域宽度 (逻辑像素)。
 const ICON_AREA_WIDTH: f32 = 32.0;
@@ -57,6 +86,8 @@ pub struct IconInput {
     radius: f32,
     /// 图标颜色绑定。
     icon_color_binding: Option<ColorBinding>,
+    /// 主题绑定 (每帧刷新随主题流动的颜色; 见 [`IconInput::bind_theme`])。
+    theme_binding: Option<ThemeBinding>,
     /// 最近一帧同步的图标颜色。
     icon_color: Color,
     /// 图标悬停背景色绑定。
@@ -81,18 +112,20 @@ impl IconInput {
 
     /// 使用指定主题创建图标输入框。
     pub fn themed(theme: &impl Theme) -> Self {
+        let colors = IconInputColors::from_theme(theme);
         Self {
             input: TextInput::themed(theme).chromeless(),
             focused: false,
             icon_hovered: false,
             icon_pressed: false,
             on_icon_click: None,
-            background: theme.surface_input(),
-            border_color: theme.border(),
-            focus_border_color: theme.accent(),
+            background: colors.background,
+            border_color: colors.border,
+            focus_border_color: colors.focus_border,
             border_width: 1.0,
             radius: theme.radius_sm(),
             icon_color_binding: None,
+            theme_binding: None,
             icon_color: Color::rgb(0.5, 0.5, 0.5),
             icon_hover_binding: None,
             icon_hover_bg: Color::TRANSPARENT,
@@ -101,6 +134,25 @@ impl IconInput {
             area: Cell::new(Rect::default()),
             icon_area: Cell::new(Rect::default()),
         }
+    }
+
+    /// 绑定主题：每帧从应用状态重取主题, 刷新外框背景/边框/焦点边框色;
+    /// 图标色仍由 [`IconInput::bind_icon_color`] /
+    /// [`IconInput::bind_icon_hover_color`] 各自负责, 本绑定不碰。
+    ///
+    /// **构建态的颜色不会跟随运行时切主题** —— 视图树只建一次。产品侧若要支持
+    /// 明暗切换, 必须挂上这个绑定。形状与 [`crate::widget::TitleBar::bind_theme`] 一致。
+    pub fn bind_theme<S: 'static, T: Theme + 'static>(
+        mut self,
+        f: impl Fn(&S) -> T + 'static,
+    ) -> Self {
+        self.theme_binding = Some(Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("IconInput 主题绑定的状态类型不匹配");
+            IconInputColors::from_theme(&f(state))
+        }));
+        self
     }
 
     /// 设置显式宽度。
@@ -238,6 +290,12 @@ impl Default for IconInput {
 
 impl Widget for IconInput {
     fn sync(&mut self, state: &dyn Any) {
+        if let Some(bind) = &self.theme_binding {
+            let c = bind(state);
+            self.background = c.background;
+            self.border_color = c.border;
+            self.focus_border_color = c.focus_border;
+        }
         self.input.sync(state);
         self.focused = self.input.is_focused();
         if let Some(bind) = &self.icon_color_binding {

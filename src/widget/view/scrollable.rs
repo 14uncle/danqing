@@ -34,6 +34,32 @@ const MAX_CONTENT_SIZE: f32 = 1_000_000.0;
 /// 语义见 [`Scrollable::bind_visible`]。
 type VisibleBinding = Box<dyn Fn(&dyn std::any::Any) -> (u64, f32, f32)>;
 
+/// 主题绑定：每帧从应用状态产出随主题流动的颜色。
+type ThemeBinding = Box<dyn Fn(&dyn std::any::Any) -> ScrollableColors>;
+
+/// 随主题流动的滚动条颜色子集 (构建后仍可经 [`Scrollable::bind_theme`] 每帧刷新)。
+///
+/// **为什么需要它**: 视图树只在启动时构建一次 (`danqing/src/window/mod.rs` 的
+/// `let tree = app.view();`, 之后整棵交给 Handler 不再重建), 所以 `themed(&theme)`
+/// 烘进去的颜色不会跟随运行时切主题。`Scrollable` 的滚动条主题色**没有任何每帧通路**。
+///
+/// 形状与 [`crate::widget::TitleBar::bind_theme`] 一致 —— 后续组件要补时请沿用。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ScrollableColors {
+    track_color: Color,
+    thumb_color: Color,
+}
+
+impl ScrollableColors {
+    /// 从主题解析 —— `themed` 与 `bind_theme` **共用这一份**, 免得两处各写一套口径。
+    fn from_theme(theme: &impl Theme) -> Self {
+        Self {
+            track_color: theme.divider(),
+            thumb_color: theme.text_secondary(),
+        }
+    }
+}
+
 /// 滚动容器。
 pub struct Scrollable {
     child: Node,
@@ -54,6 +80,8 @@ pub struct Scrollable {
     area: Cell<Rect>,
     /// 可见性区间绑定 (键盘选中跟随等)。
     visible_binding: Option<VisibleBinding>,
+    /// 主题绑定 (每帧刷新随主题流动的颜色; 见 [`Scrollable::bind_theme`])。
+    theme_binding: Option<ThemeBinding>,
     /// 已应用的绑定 revision; 仅在 revision 变化时纠偏, 滚轮自由。
     applied_rev: u64,
 }
@@ -66,6 +94,7 @@ impl Scrollable {
 
     /// 使用指定主题创建滚动容器。
     pub fn themed(theme: &impl Theme, child: impl Widget + 'static) -> Self {
+        let colors = ScrollableColors::from_theme(theme);
         Self {
             child: Box::new(child),
             axis: ScrollAxis::Vertical,
@@ -73,14 +102,33 @@ impl Scrollable {
             scroll_speed: 40.0,
             child_size: Size::ZERO,
             viewport_size: Size::ZERO,
-            track_color: theme.divider(),
-            thumb_color: theme.text_secondary(),
+            track_color: colors.track_color,
+            thumb_color: colors.thumb_color,
             track_width: theme.spacing_xs(),
             thumb_radius: theme.radius_sm(),
             area: Cell::new(Rect::default()),
             visible_binding: None,
+            theme_binding: None,
             applied_rev: 0,
         }
+    }
+
+    /// 绑定主题：每帧从应用状态重取主题, 刷新滚动条轨道色与滑块色;
+    /// 其余规格 (滚动条宽度、滑块圆角) 保持构建时的值。
+    ///
+    /// **构建态的颜色不会跟随运行时切主题** —— 视图树只建一次。产品侧若要支持
+    /// 明暗切换, 必须挂上这个绑定。形状与 [`crate::widget::TitleBar::bind_theme`] 一致。
+    pub fn bind_theme<S: 'static, T: Theme + 'static>(
+        mut self,
+        f: impl Fn(&S) -> T + 'static,
+    ) -> Self {
+        self.theme_binding = Some(Box::new(move |state: &dyn std::any::Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("Scrollable 主题绑定的状态类型不匹配");
+            ScrollableColors::from_theme(&f(state))
+        }));
+        self
     }
 
     /// 设置滚动方向。
@@ -264,6 +312,11 @@ impl Scrollable {
 
 impl Widget for Scrollable {
     fn sync(&mut self, state: &dyn std::any::Any) {
+        if let Some(binding) = &self.theme_binding {
+            let c = binding(state);
+            self.track_color = c.track_color;
+            self.thumb_color = c.thumb_color;
+        }
         self.child.sync(state);
         if let Some(binding) = &self.visible_binding {
             let (rev, top, height) = binding(state);

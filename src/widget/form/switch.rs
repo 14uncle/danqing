@@ -22,6 +22,35 @@ use crate::{Color, Constraints, LightTheme, Point, Rect, Size, Theme};
 type MsgFactory = Box<dyn Fn() -> Box<dyn Any>>;
 /// bool 绑定闭包: 从类型擦除的应用状态读取开关状态。
 type BoolBinding = Box<dyn Fn(&dyn Any) -> bool>;
+/// 主题绑定：每帧从应用状态产出随主题流动的颜色。
+type ThemeBinding = Box<dyn Fn(&dyn Any) -> SwitchColors>;
+
+/// 随主题流动的开关颜色子集 (构建后仍可经 [`Switch::bind_theme`] 每帧刷新)。
+///
+/// **为什么需要它**: 视图树只在启动时构建一次 (`danqing/src/window/mod.rs` 的
+/// `let tree = app.view();`, 之后整棵交给 Handler 不再重建), 所以 `themed(&theme)`
+/// 烘进去的颜色不会跟随运行时切主题。`Switch` 原本只有 `bind`(checked 状态),
+/// 主题色**没有任何每帧通路**。
+///
+/// `knob_color` 不在其中 —— 它恒为白, 本来就与主题无关。
+/// 形状与 [`crate::widget::TitleBar::bind_theme`] 一致, 不要另发明一种。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SwitchColors {
+    track_off: Color,
+    track_on: Color,
+    focus_ring: Color,
+}
+
+impl SwitchColors {
+    /// 从主题解析 —— `themed` 与 `bind_theme` **共用这一份**, 免得两处各写一套口径。
+    fn from_theme(theme: &impl Theme) -> Self {
+        Self {
+            track_off: theme.border(),
+            track_on: theme.accent(),
+            focus_ring: theme.accent(),
+        }
+    }
+}
 
 /// 轨道宽度 (逻辑像素)。
 const TRACK_WIDTH: f32 = 36.0;
@@ -46,6 +75,8 @@ pub struct Switch {
     checked: bool,
     /// bool 状态绑定。
     checked_binding: Option<BoolBinding>,
+    /// 主题绑定 (每帧刷新随主题流动的颜色; 见 [`Switch::bind_theme`])。
+    theme_binding: Option<ThemeBinding>,
     /// 切换时产出的消息工厂。
     on_toggle: Option<MsgFactory>,
     /// 动画进度: 0.0 = OFF, 1.0 = ON。
@@ -73,6 +104,24 @@ pub struct Switch {
 }
 
 impl Switch {
+    /// 绑定主题：每帧从应用状态重取主题，刷新随主题流动的颜色
+    /// (轨道 OFF/ON、焦点环); `knob_color` 恒为白, 不在其中。
+    ///
+    /// **构建态的颜色不会跟随运行时切主题** —— 视图树只建一次。产品侧若要支持
+    /// 明暗切换, 必须挂上这个绑定。形状与 [`crate::widget::TitleBar::bind_theme`] 一致。
+    pub fn bind_theme<S: 'static, T: Theme + 'static>(
+        mut self,
+        f: impl Fn(&S) -> T + 'static,
+    ) -> Self {
+        self.theme_binding = Some(Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("Switch 主题绑定的状态类型不匹配");
+            SwitchColors::from_theme(&f(state))
+        }));
+        self
+    }
+
     /// 创建滑动开关, 使用默认浅色主题 token, OFF 态。
     pub fn new() -> Self {
         Self::themed(&LightTheme)
@@ -80,9 +129,11 @@ impl Switch {
 
     /// 使用指定主题创建滑动开关。
     pub fn themed(theme: &impl Theme) -> Self {
+        let colors = SwitchColors::from_theme(theme);
         Self {
             checked: false,
             checked_binding: None,
+            theme_binding: None,
             on_toggle: None,
             anim_progress: 0.0,
             anim_target: 0.0,
@@ -90,10 +141,10 @@ impl Switch {
             hovered: false,
             pressed: false,
             focused: false,
-            track_off_color: theme.border(),
-            track_on_color: theme.accent(),
+            track_off_color: colors.track_off,
+            track_on_color: colors.track_on,
             knob_color: Color::WHITE,
-            focus_ring_color: theme.accent(),
+            focus_ring_color: colors.focus_ring,
             area: Cell::new(Rect::default()),
         }
     }
@@ -146,6 +197,12 @@ impl Default for Switch {
 
 impl Widget for Switch {
     fn sync(&mut self, state: &dyn Any) {
+        if let Some(bind) = &self.theme_binding {
+            let c = bind(state);
+            self.track_off_color = c.track_off;
+            self.track_on_color = c.track_on;
+            self.focus_ring_color = c.focus_ring;
+        }
         if let Some(bind) = &self.checked_binding {
             self.checked = bind(state);
             self.anim_target = if self.checked { 1.0 } else { 0.0 };

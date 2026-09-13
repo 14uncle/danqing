@@ -49,6 +49,37 @@ use crate::{Constraints, LightTheme, Rect, Size, Theme};
 type OpenBinding = Box<dyn Fn(&dyn Any) -> bool>;
 /// 消息工厂: 点遮罩时产出一条应用消息。
 type MsgFactory = Box<dyn Fn() -> Box<dyn Any>>;
+/// 主题绑定：每帧从应用状态产出随主题流动的颜色。
+type ThemeBinding = Box<dyn Fn(&dyn Any) -> OverlayColors>;
+
+/// 随主题流动的浮层颜色子集 (构建后仍可经 [`Overlay::bind_theme`] 每帧刷新)。
+///
+/// **为什么需要它**: 视图树只在启动时构建一次 (`danqing/src/window/mod.rs` 的
+/// `let tree = app.view();`, 之后整棵交给 Handler 不再重建), 所以 `themed(&theme)`
+/// 烘进去的颜色不会跟随运行时切主题。`Overlay` 的 scrim 色**没有任何每帧通路**。
+///
+/// 只有 `scrim_color` 一个字段 —— 内容卡样式由产品注入, 不归本组件管。
+///
+/// **本组件的冻结目前无害, 但别据此推断别的组件也无害**: `Theme::scrim()` 的默认
+/// 实现是**刻意与明暗无关**的固定 `rgba(0,0,0,0.35)` (见 `theme.rs` 该处注释 ——
+/// 压暗任何背景都成立), 三个内置主题都返回它, 所以烘死也没有可见后果。这条绑定
+/// 只为「自定义主题真让 scrim 随主题漂移」而存在, 属**对称性**补全, 不是修缺陷。
+/// 其余组件冻结的色是**随主题变的**, 那些是真缺陷 (例: 标题栏文字色, 用户实机报过)。
+///
+/// 形状与 [`crate::widget::TitleBar::bind_theme`] 一致 —— 后续组件要补时请沿用。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct OverlayColors {
+    scrim_color: crate::Color,
+}
+
+impl OverlayColors {
+    /// 从主题解析 —— `themed` 与 `bind_theme` **共用这一份**, 免得两处各写一套口径。
+    fn from_theme(theme: &impl Theme) -> Self {
+        Self {
+            scrim_color: theme.scrim(),
+        }
+    }
+}
 
 /// 模态浮层: open 态绑定的 scrim 遮罩 + 居中内容卡。
 ///
@@ -59,6 +90,8 @@ pub struct Overlay {
     open: bool,
     /// open 态绑定。
     open_binding: Option<OpenBinding>,
+    /// 主题绑定 (每帧刷新随主题流动的颜色; 见 [`Overlay::bind_theme`])。
+    theme_binding: Option<ThemeBinding>,
     /// 内容卡 (产品注入的子树)。
     content: Node,
     /// 点遮罩关闭消息工厂 (opt-in; None = 遮罩点击仅消费不发消息)。
@@ -77,14 +110,33 @@ impl Overlay {
 
     /// 使用指定主题创建浮层。
     pub fn themed(theme: &impl Theme, content: impl Widget + 'static) -> Self {
+        let colors = OverlayColors::from_theme(theme);
         Self {
             open: false,
             open_binding: None,
+            theme_binding: None,
             content: node(content),
             on_scrim_click: None,
-            scrim_color: theme.scrim(),
+            scrim_color: colors.scrim_color,
             content_size: Cell::new(Size::ZERO),
         }
+    }
+
+    /// 绑定主题：每帧从应用状态重取主题, 刷新 scrim 遮罩色。
+    ///
+    /// **构建态的颜色不会跟随运行时切主题** —— 视图树只建一次。产品侧若要支持
+    /// 明暗切换, 必须挂上这个绑定。形状与 [`crate::widget::TitleBar::bind_theme`] 一致。
+    pub fn bind_theme<S: 'static, T: Theme + 'static>(
+        mut self,
+        f: impl Fn(&S) -> T + 'static,
+    ) -> Self {
+        self.theme_binding = Some(Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("Overlay 主题绑定的状态类型不匹配");
+            OverlayColors::from_theme(&f(state))
+        }));
+        self
     }
 
     /// 绑定 open 态: 每帧 sync 从应用状态读取浮层开关。
@@ -117,6 +169,10 @@ impl Overlay {
 
 impl Widget for Overlay {
     fn sync(&mut self, state: &dyn Any) {
+        if let Some(bind) = &self.theme_binding {
+            let c = bind(state);
+            self.scrim_color = c.scrim_color;
+        }
         if let Some(bind) = &self.open_binding {
             let next = bind(state);
             // 开→关边沿: 清内容子树残留的焦点/按压视觉 (关态后 FocusOut
