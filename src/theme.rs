@@ -417,9 +417,20 @@ impl Theme for DarkTheme {
     }
 
     fn selection(&self) -> Color {
-        // 跟随 accent 的 30% 透明选区。
+        // 跟随 accent 的 20% 透明选区 (原 30%)。
+        //
+        // 收窄的理由是**选区会吃掉前景色的对比度** (2026-09-13, 用户实机报
+        // 「ERROR 选中行红色字体看得眼花」)。选区带是 accent 色相、又压在中间的
+        // 亮度上, 于是它跟任何**中等亮度**的前景色都拉不开: 实测 30% 时合成
+        // (25,93,83), 框架自己的 `danger()` 红压在上面只有 **2.03:1**。
+        // 收到 20% 后合成 (25,78,71), 同一支红升到 **2.51:1**, 而选区带自身对底色的
+        // 可见度仍有 1.85 (30% 时 2.27) —— 还看得出选中。
+        //
+        // 浅色主题**不动**: 那里选区合成后是淡青 (242,238,235 一类的浅底), 中亮度
+        // 前景压在它上面本来就够 (实测 ERROR 红 4.04:1), 收了反而让选中变难认。
+        // 回归锁: `dark_selection_band_does_not_swallow_mid_luminance_foregrounds`。
         let a = self.accent();
-        Color::rgba(a.r, a.g, a.b, 0.30)
+        Color::rgba(a.r, a.g, a.b, 0.20)
     }
 
     fn caret(&self) -> Color {
@@ -992,6 +1003,44 @@ mod tests {
                     "{name} 的 {token} 渲染成了板: 对比度 {ratio:.2} ≥ {SLAB}"
                 );
             }
+        }
+        check("LightTheme", &LightTheme);
+        check("DarkTheme", &DarkTheme);
+    }
+
+    /// 选区带**不得离底色太远** —— 它每强一分, 压在它上面的前景色就少一分对比度。
+    ///
+    /// 回归锁 (2026-09-13, 用户实机报): 暗色下选中一行 ERROR, 红字压在 accent 色的
+    /// 选区带上「看得眼花」。根因不是某一支配色不好, 而是选区带**自己就是一支
+    /// 中亮度的彩色** (accent 色相压在中间亮度), 于是跟任何中亮度前景都拉不开 ——
+    /// 这是结构性冲突, 换个色号也只是挪走症状。
+    ///
+    /// 故本锁量的**不是**某个产品前景 (框架无从知道产品的配色), 而是那个共性因子:
+    /// 合成后的选区带相对底色跨了多远。`BAND_MAX = 2.0` 是**导出**的 ——
+    /// 暗色原来的 30% α 是 **2.27** (越线), 收窄到 20% 后 **1.85**; 浅色 30% 是
+    /// **1.32**, 本来就在线内, 故本锁不动浅色。
+    ///
+    /// 合成走 [`composited_luminance`] (线性空间), 与模块 2 其余守卫同一把尺子。
+    /// **不要改用公开的 [`composite_over`]** —— 那个在 sRGB 空间混, 量的不是屏幕。
+    #[test]
+    fn selection_band_does_not_step_too_far_from_the_background() {
+        const BAND_MAX: f32 = 2.0;
+
+        fn check<T: Theme>(name: &str, th: &T) {
+            let bg = th.background();
+            let base = relative_luminance(bg);
+            let band = composited_luminance(th.selection(), bg);
+            let (hi, lo) = if band > base {
+                (band, base)
+            } else {
+                (base, band)
+            };
+            let ratio = (hi + 0.05) / (lo + 0.05);
+            assert!(
+                ratio < BAND_MAX,
+                "{name} 的选区带离底色太远: 对比度 {ratio:.2} ≥ {BAND_MAX} \
+                 —— 压在带上的中亮度前景会被吞掉"
+            );
         }
         check("LightTheme", &LightTheme);
         check("DarkTheme", &DarkTheme);
