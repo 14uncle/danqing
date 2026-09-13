@@ -955,6 +955,48 @@ mod tests {
         }
     }
 
+    /// **两个主题**的半透明「面」都不许渲染成一块板 —— 模块 1 那次事故的形态。
+    ///
+    /// 与上一条 `dark_translucent_tokens_are_calibrated_for_linear_blending` 的分工:
+    /// 那条给暗色卡了**上下双向**的紧窗口 (它是当时逐支重校的产物); 这条只管**上限**,
+    /// 但**两个主题都管** —— 「α 照 sRGB 空间的手感定、换到 linear 混合后渲染成
+    /// 一块灰板」这件事与主题无关, 换哪个主题都可能复发。
+    ///
+    /// **为什么不设下限**: 浅色的三支近白面 (`surface` 1.06 / `surface_input` 1.08 /
+    /// `surface_variant` 1.02) 落在任何合理下限之下 —— 但那是**既有设计**
+    /// (底色 `L*` 已 96.95, 头顶只有 ~3 个点的余量; 玻璃感本就靠贴近底色),
+    /// 且**不是**混合空间迁移造成的 (近白对那次变更是钝感的, 这几个值几乎没动)。
+    /// 拿护栏去卡它们等于借护栏之名改浅色主题 —— 那是独立决策, 已单独记档, 不夹带。
+    #[test]
+    fn no_theme_renders_a_translucent_surface_as_a_slab() {
+        /// 上限: 超过这条就不该再叫「面」了, 是一块板。
+        const SLAB: f32 = 2.0;
+
+        fn check<T: Theme>(name: &str, th: &T) {
+            let bg = th.background();
+            let base = relative_luminance(bg);
+            for (token, c) in [
+                ("surface", th.surface()),
+                ("surface_input", th.surface_input()),
+                ("surface_variant", th.surface_variant()),
+            ] {
+                let composited = composited_luminance(c, bg);
+                let (hi, lo) = if composited > base {
+                    (composited, base)
+                } else {
+                    (base, composited)
+                };
+                let ratio = (hi + 0.05) / (lo + 0.05);
+                assert!(
+                    ratio < SLAB,
+                    "{name} 的 {token} 渲染成了板: 对比度 {ratio:.2} ≥ {SLAB}"
+                );
+            }
+        }
+        check("LightTheme", &LightTheme);
+        check("DarkTheme", &DarkTheme);
+    }
+
     #[test]
     fn relative_luminance_black_is_zero_white_is_one() {
         assert!(relative_luminance(Color::BLACK).abs() < 0.01);
