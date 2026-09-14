@@ -80,6 +80,12 @@ fn cls_of(ch: char) -> Cls {
     Cls::Other
 }
 
+/// 标点字符: 非内部连接符 (尾随/孤立段) + 其余标点。
+/// 连续同类合成一个标点段 —— `hello,world` / `"ERROR"` 靠它断开。
+fn is_punct(ch: char) -> bool {
+    matches!(cls_of(ch), Cls::Conn | Cls::Other)
+}
+
 /// 混合连接器分词: 返回包含 `off` 的 token [start, end)。
 ///
 /// 规则 (按归属字符的类分派):
@@ -128,22 +134,8 @@ pub fn token_at(line: &str, off: usize) -> (usize, usize) {
             expand_compound_right(line, pos + ch.len_utf8()),
         ),
         Cls::Conn => {
-            // 所处连接符段 [cs, ce)
-            let mut cs = pos;
-            for (i, c) in line[..pos].char_indices().rev() {
-                if cls_of(c) != Cls::Conn {
-                    break;
-                }
-                cs = i;
-            }
-            let mut ce = pos + ch.len_utf8();
-            let base = ce;
-            for (i, c) in line[base..].char_indices() {
-                if cls_of(c) != Cls::Conn {
-                    break;
-                }
-                ce = base + i + c.len_utf8();
-            }
+            // 所处连接符段 [cs, ce) —— 与标点段同一个扫描原语 (run_over)
+            let (cs, ce) = run_over(line, pos, |c| cls_of(c) == Cls::Conn);
             let left = line[..cs].chars().next_back();
             let left_word = left.is_some_and(|c| cls_of(c) == Cls::Word);
             let right_word = line[ce..]
@@ -162,10 +154,10 @@ pub fn token_at(line: &str, off: usize) -> (usize, usize) {
                 (cs, expand_compound_right(line, ce))
             } else {
                 // 尾随段或孤立段 → 标点段
-                run_over(line, pos, |c| matches!(cls_of(c), Cls::Conn | Cls::Other))
+                run_over(line, pos, is_punct)
             }
         }
-        Cls::Other => run_over(line, pos, |c| matches!(cls_of(c), Cls::Conn | Cls::Other)),
+        Cls::Other => run_over(line, pos, is_punct),
     }
 }
 
