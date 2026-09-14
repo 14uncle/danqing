@@ -30,6 +30,23 @@ pub enum MouseButton {
     Other(u16),
 }
 
+/// 鼠标指针形状。
+///
+/// 组件经 [`Widget::cursor_icon`](crate::widget::Widget::cursor_icon) 表态,
+/// 框架沿命中路径查询后应用到窗口 (每帧同步, 见平台适配层)。
+/// 变体名与 winit / `cursor-icon` 保持一致, 免得两套词汇各叫各的;
+/// 到 winit 类型的映射在**平台适配层**完成 —— 本模块不依赖 winit。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum CursorIcon {
+    /// 默认箭头。也是「无人表态」时的回退值。
+    #[default]
+    Default,
+    /// 手型 (可点 / 可拖)。
+    Pointer,
+    /// 文本选择 (I 型)。
+    Text,
+}
+
 /// 逻辑按键 (M1: 字符 + 常用具名键)。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Key {

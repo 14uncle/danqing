@@ -20,6 +20,7 @@ mod view;
 
 pub use base::{Button, CloseButton, Image, Text};
 pub use focus::FocusManager;
+pub(crate) use focus::cursor_at;
 pub use form::{Dropdown, IconInput, Switch, TextArea, TextInput};
 pub use layout::{Box, Center, Column, CrossAlign, DragArea, Padding, ReachArea, Row, Stack};
 pub use title_bar::{LogoKind, TitleBar, TitleBarStyle};
@@ -28,7 +29,7 @@ pub use view::{MultiPanel, Overlay, ScrollAxis, Scrollable, Tabs};
 use std::any::Any;
 
 use crate::app::AnimationCtx;
-use crate::event::Event;
+use crate::event::{CursorIcon, Event};
 use crate::render::{RectBatch, TextBatch};
 use crate::{Color, Constraints, Point, Rect, Size};
 
@@ -176,6 +177,18 @@ pub trait Widget {
     /// 默认可点击/可聚焦组件 (如 Button/TextInput) 返回自身完整区域;
     /// 无命中需求返回 None。应与 `ime_area` 区分，后者可能只覆盖光标。
     fn hit_area(&self) -> Option<Rect> {
+        None
+    }
+
+    /// 鼠标悬停在本组件上时的指针形状。
+    ///
+    /// 默认 `None` = **不表态** —— 交给更浅的祖先或框架默认值, 故未实现本方法的
+    /// 组件行为与从前**逐字节相同**。
+    /// 返回 `Some` 的组件在自身 [`Widget::hit_area`] 内的任意位置生效;
+    /// 查询由 [`cursor_at`] 沿命中路径完成 —— 与焦点命中**共用同一趟遍历**
+    /// (见 `focus::visit_hits`), 因此模态屏障与祖先裁剪语义一致, 且取
+    /// **最深且 z 序最上**的表态者。
+    fn cursor_icon(&self) -> Option<CursorIcon> {
         None
     }
 

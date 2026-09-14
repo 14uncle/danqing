@@ -21,11 +21,14 @@ use winit::{
     event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow},
     keyboard::{KeyCode, ModifiersState, PhysicalKey},
-    window::{Window as WinitWindow, WindowAttributes, WindowId, WindowLevel},
+    window::{
+        CursorIcon as WinitCursorIcon, Window as WinitWindow, WindowAttributes, WindowId,
+        WindowLevel,
+    },
 };
 
 use crate::app::{AnimationCtx, App};
-use crate::event::{Event, ImeEvent, Key, NamedKey, WindowAction};
+use crate::event::{CursorIcon, Event, ImeEvent, Key, NamedKey, WindowAction};
 use crate::render::{Context, ImageBatch, RectBatch, TextBatch};
 use crate::widget::{
     FocusManager, MsgQueue, Node, dismiss_popup_at, dispatch_popup_event, event_at_path,
@@ -123,6 +126,8 @@ pub(super) struct Handler<'a, A: App> {
     last_window_title: String,
     /// 文件对话框后强制重设标题的剩余帧数 (Windows rfd 模态消息循环干扰)。
     force_title_frames: u8,
+    /// 上次同步到窗口的指针形状 (与标题同理: 只在变化时调系统 API)。
+    last_cursor: CursorIcon,
 }
 
 impl<'a, A: App> Handler<'a, A> {
@@ -178,6 +183,7 @@ impl<'a, A: App> Handler<'a, A> {
             fullscreen_suspended: false,
             last_window_title,
             force_title_frames: 0,
+            last_cursor: CursorIcon::default(),
         }
     }
 }
@@ -190,6 +196,16 @@ use super::{CloseBehavior, WindowConfig};
 /// (此时 `has_os_focus == false`); 用户主动遍历只发生在持有 OS 焦点期间。
 fn tab_traverse_allowed(has_os_focus: bool) -> bool {
     has_os_focus
+}
+
+/// 框架指针形状 → winit 指针形状。映射只此一处 (平台适配层的职责,
+/// `event` 模块明写不依赖 winit, 见 [`CursorIcon`] 的文档)。
+fn winit_cursor(icon: CursorIcon) -> WinitCursorIcon {
+    match icon {
+        CursorIcon::Default => WinitCursorIcon::Default,
+        CursorIcon::Pointer => WinitCursorIcon::Pointer,
+        CursorIcon::Text => WinitCursorIcon::Text,
+    }
 }
 
 /// 焦点组件未消费的按下事件是否回退应用层。
@@ -619,6 +635,25 @@ impl<A: App> Handler<'_, A> {
         }
     }
 
+    /// 根据鼠标当前位置更新窗口指针形状。
+    ///
+    /// 每帧调用 (与 [`Self::update_ime`] 同层, 需在布局之后): 命中查询复用
+    /// 焦点那一趟遍历 (见 `widget::cursor_at`), 故模态屏障与祖先裁剪语义一致。
+    /// **每帧重算**而非只在 CursorMoved 时算 —— 鼠标不动而内容变化 (滚动 /
+    /// 切主题 / 布局重排) 时形状同样要跟着变。
+    /// 与窗口标题同理, 只在变化时调系统 API (见 `last_cursor`)。
+    fn update_cursor(&mut self) {
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        let icon = crate::widget::cursor_at(&self.tree, self.cursor).unwrap_or_default();
+        if icon == self.last_cursor {
+            return;
+        }
+        window.set_cursor(winit_cursor(icon));
+        self.last_cursor = icon;
+    }
+
     /// 渲染一帧并 present (RedrawRequested 与启动预渲染共用)。
     ///
     /// 每帧心跳 → sync 绑定 → 焦点重建 → 布局 → 绘制 → 提交 wgpu。
@@ -693,6 +728,7 @@ impl<A: App> Handler<'_, A> {
                 );
             }
             self.update_ime();
+            self.update_cursor();
         }
         if let Some(context) = &mut self.context {
             // 应用层提供的每帧背景状态 (场景选择 / 淡化 / 清屏色)。

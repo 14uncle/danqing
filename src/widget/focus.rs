@@ -8,6 +8,7 @@
 
 use crate::Point;
 use crate::Rect;
+use crate::event::CursorIcon;
 use crate::widget::Node;
 
 /// 组件树中的节点路径：从根到目标节点的子索引序列。
@@ -160,7 +161,24 @@ impl FocusManager {
             self.chain.push(prefix.clone());
             self.chain_ids.push(node.focus_id());
         }
-        for (i, child) in node.children().iter().enumerate() {
+        let children = node.children();
+        // 开态模态屏障: 与命中遍历 ([`visit_hits`]) **同一规则** —— 只深入最上层
+        // 那个屏障子树, 屏障外兄弟连同其子树对 Tab 遍历同样不可见。
+        //
+        // 缺了这条, 设置卡开着时 Tab 会走到卡后被盖住的组件上, 按 Tab 看不到
+        // 任何事发生 (三问第 1 问)。这与 `modal_barrier_confines_click_focus_to_its_subtree`
+        // 是**同一个 bug 的两条通道** —— 那条走点击定焦, 这条走 Tab 遍历;
+        // 规则只该有一套, 故在此复用同一判据而非另写。
+        //
+        // 注意: 这里**不改遍历顺序** (本函数正序 = Tab 顺序, 与 `visit_hits`
+        // 的逆序是两种用途), 只加屏障过滤。
+        if let Some(i) = children.iter().rposition(|c| c.modal_barrier()) {
+            prefix.push(i);
+            self.collect(&children[i], prefix);
+            prefix.pop();
+            return;
+        }
+        for (i, child) in children.iter().enumerate() {
             prefix.push(i);
             self.collect(child, prefix);
             prefix.pop();
@@ -186,9 +204,9 @@ impl FocusManager {
 
 /// 命中测试：返回点击位置的可聚焦节点路径。
 ///
-/// 兄弟重叠时低索引赢 (visit 逆序遍历但逐次覆写 result，
-/// 最终低索引覆盖高索引)。若需高索引优先，可在 visit 中
-/// 找到首个匹配即 return。
+/// 兄弟重叠时低索引赢 (逆序遍历但逐次覆写 result, 最终低索引覆盖高索引)。
+/// 需要「最深 / z 序最上优先」的查询走 [`visit_hits`] 的 `first_wins`
+/// (指针形状即此) —— 两条规则都在同一趟遍历里, 见 [`visit_hits`]。
 ///
 /// **例外: 模态屏障** (开态 `Overlay`, 见 [`crate::widget::Widget::modal_barrier`])。
 /// 子级中若有开态屏障, 只深入最上层 (z 序最后 = 最高索引) 的那个,
@@ -199,16 +217,59 @@ impl FocusManager {
 fn hit_focusable(root: &Node, pos: Point) -> Option<FocusPath> {
     let mut result = None;
     let mut path = Vec::new();
-    visit(root, &mut path, pos, None, &mut result);
+    visit_hits(
+        root,
+        &mut path,
+        pos,
+        None,
+        &mut result,
+        &mut |node, path| node.focusable().then(|| path.clone()),
+        false,
+    );
     result
 }
 
-fn visit(
+/// 指针形状查询：返回该位置**最深且 z 序最上**的表态组件所说的形状。
+///
+/// 与 [`hit_focusable`] **共用同一趟遍历** ([`visit_hits`]), 故模态屏障与祖先
+/// 裁剪语义同焦点命中 —— 模态卡之后的组件抢不到光标。
+/// 无组件表态返回 `None`, 由调用方回退到默认箭头。
+pub(crate) fn cursor_at(root: &Node, pos: Point) -> Option<CursorIcon> {
+    let mut result = None;
+    let mut path = Vec::new();
+    visit_hits(
+        root,
+        &mut path,
+        pos,
+        None,
+        &mut result,
+        &mut |node, _| node.cursor_icon(),
+        true,
+    );
+    result
+}
+
+/// 命中路径遍历 —— [`hit_focusable`] 与 [`cursor_at`] **共用同一趟**。
+///
+/// 语义 (两处查询共享, 改一处即改两处):
+/// - 深度优先, 兄弟**逆序** (z 序靠上者先访问), 自身在其子级之后;
+/// - 开态模态屏障 ([`Widget::modal_barrier`](crate::widget::Widget::modal_barrier))
+///   收束进屏障子树, 屏障外兄弟整支跳过 (成因见 [`hit_focusable`] 文档);
+/// - 祖先 `hit_area` 作为后代可见区域的**裁剪**, 越界子树跳过; 同一矩形也是
+///   节点自身的命中判定。
+///
+/// `probe` 决定「这个节点算不算候选、候选值是什么」; `first_wins` 决定多个候选
+/// 谁胜 —— `true` 取**首次** (最深且 z 序最上, 指针形状用), `false` 取**末次**
+/// (祖先覆盖后代, 焦点沿用此语义, **勿改**: 有 `overlapping_siblings_low_index_wins`
+/// 钉着)。
+fn visit_hits<T>(
     node: &Node,
     path: &mut FocusPath,
     pos: Point,
     clip: Option<Rect>,
-    result: &mut Option<FocusPath>,
+    result: &mut Option<T>,
+    probe: &mut impl FnMut(&Node, &FocusPath) -> Option<T>,
+    first_wins: bool,
 ) {
     // 祖先的 hit_area 作为后代可见区域的裁剪。
     let child_clip = match (clip, node.hit_area()) {
@@ -222,27 +283,38 @@ fn visit(
     if let Some(i) = children.iter().rposition(|c| c.modal_barrier()) {
         // 开态模态屏障: 收束进屏障子树, 屏障外兄弟跳过 (见 hit_focusable 文档)。
         path.push(i);
-        visit(&children[i], path, pos, child_clip, result);
+        visit_hits(
+            &children[i],
+            path,
+            pos,
+            child_clip,
+            result,
+            probe,
+            first_wins,
+        );
         path.pop();
     } else {
         // 逆序遍历子节点，再检查自身 (兄弟重叠时低索引赢：result 逐次覆写)
         for (i, child) in children.iter().enumerate().rev() {
             path.push(i);
-            visit(child, path, pos, child_clip, result);
+            visit_hits(child, path, pos, child_clip, result, probe, first_wins);
             path.pop();
         }
     }
-    if node.focusable() {
-        if let Some(area) = node.hit_area() {
-            let area = match child_clip {
-                Some(c) => match c.intersect(&area) {
-                    Some(intersection) => intersection,
-                    None => return,
-                },
-                None => area,
-            };
-            if area.contains(pos) {
-                *result = Some(path.clone());
+    if let Some(area) = node.hit_area() {
+        let area = match child_clip {
+            Some(c) => match c.intersect(&area) {
+                Some(intersection) => intersection,
+                None => return,
+            },
+            None => area,
+        };
+        if area.contains(pos) {
+            if let Some(v) = probe(node, path) {
+                // first_wins: 已定则不再覆写 (首个候选 = 最深且 z 序最上)。
+                if !first_wins || result.is_none() {
+                    *result = Some(v);
+                }
             }
         }
     }
@@ -274,6 +346,50 @@ mod tests {
         // 深度优先：A(0), B(1,0)
         assert_eq!(mgr.chain, vec![vec![0], vec![1, 0]]);
         assert_eq!(mgr.current(), Some(&vec![0]));
+    }
+
+    #[test]
+    fn tab_chain_excludes_nodes_behind_an_open_modal_barrier() {
+        // 与点击定焦**同一条规则** (见 `modal_barrier_confines_click_focus_to_its_subtree`):
+        // 屏障开时屏障外的可聚焦节点**不进焦点链** —— 否则 Tab 会走到卡后被盖住
+        // 的组件上, 按 Tab 看不到任何事发生。
+        //
+        // 注: 断言里出现 `vec![]` (空路径) 是因为根 Stack 的 `focusable()` 为
+        // 「有任一可聚焦后代」(`stack.rs:95`), 于是它自己是链首。这是**既有行为**,
+        // 本测试**锁的是屏障规则**, 不是认可链首那个不可见节点 (P9 另议)。
+        let make = |open: bool| {
+            node(
+                Stack::new()
+                    .child(Button::new(Text::new("底层")))
+                    .child(Barrier {
+                        open,
+                        child: node(Button::new(Text::new("卡内"))),
+                    }),
+            )
+        };
+        let mut texts = dummy_texts();
+
+        // 开态: 屏障外的「底层」按钮不得进链, 链上只有屏障内那个按钮。
+        let mut open_tree = make(true);
+        open_tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut open_mgr = FocusManager::new();
+        open_mgr.rebuild(&open_tree);
+        assert_eq!(
+            open_mgr.chain,
+            vec![vec![], vec![1, 0]],
+            "开态屏障: 屏障外节点不得进 Tab 链"
+        );
+
+        // 关态 = 既有语义不动 (屏障不存在, 它的子树整个不暴露)。
+        let mut closed_tree = make(false);
+        closed_tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut closed_mgr = FocusManager::new();
+        closed_mgr.rebuild(&closed_tree);
+        assert_eq!(
+            closed_mgr.chain,
+            vec![vec![], vec![0]],
+            "关态: 只有屏障外那个按钮"
+        );
     }
 
     #[test]
@@ -553,6 +669,137 @@ mod tests {
         tree_b_only.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
         let hit_b = hit_focusable(&tree_b_only, Point::new(50.0, 50.0));
         assert_eq!(hit_b, Some(vec![0, 0]), "单个按钮应命中自身");
+    }
+
+    /// 走一趟 layout + paint —— 与真实帧序一致, 组件才有**绝对坐标**的命中矩形
+    /// (Button 把矩形缓存在 `layout`(局部坐标) 与 `event` 里, 只有 TextInput 那款
+    /// 在 `paint` 里缓存绝对坐标; 本探针取后者, 否则嵌套偏移下验不出「最深者胜」)。
+    fn layout_and_paint(tree: &mut Node, texts: &mut crate::TextBatch) {
+        let size = tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), texts);
+        let mut rects = crate::RectBatch::new();
+        tree.paint(Rect::new(Point::ZERO, size), &mut rects, texts);
+    }
+
+    /// 光标探针: 布局/绘制透传子树, 自身在命中矩形上表态一个形状 (`None` = 不表态)。
+    struct CursorProbe {
+        icon: Option<CursorIcon>,
+        area: std::cell::Cell<Rect>,
+        child: Option<Node>,
+    }
+
+    impl CursorProbe {
+        fn new(icon: Option<CursorIcon>) -> Self {
+            Self {
+                icon,
+                area: std::cell::Cell::new(Rect::default()),
+                child: None,
+            }
+        }
+
+        fn child(mut self, child: Node) -> Self {
+            self.child = Some(child);
+            self
+        }
+    }
+
+    impl Widget for CursorProbe {
+        fn layout(&mut self, constraints: Constraints, texts: &mut crate::TextBatch) -> Size {
+            match &mut self.child {
+                Some(c) => c.layout(constraints, texts),
+                None => constraints.constrain(Size::new(100.0, 100.0)),
+            }
+        }
+
+        fn paint(&self, area: Rect, rects: &mut crate::RectBatch, texts: &mut crate::TextBatch) {
+            self.area.set(area);
+            if let Some(c) = &self.child {
+                c.paint(area, rects, texts);
+            }
+        }
+
+        fn hit_area(&self) -> Option<Rect> {
+            Some(self.area.get())
+        }
+
+        fn cursor_icon(&self) -> Option<CursorIcon> {
+            self.icon
+        }
+
+        fn children(&self) -> &[Node] {
+            self.child.as_slice()
+        }
+
+        fn children_mut(&mut self) -> &mut [Node] {
+            self.child.as_mut_slice()
+        }
+    }
+
+    #[test]
+    fn cursor_takes_the_deepest_opinion_not_the_ancestor() {
+        // 外层 Pointer, 内层 Text, 两层命中矩形完全重合 —— 指针落在重合处,
+        // **更深**的内层胜。这条与焦点相反 (焦点是祖先覆盖后代, 见
+        // `overlapping_siblings_low_index_wins`), 故必须分别钉住。
+        let mut texts = dummy_texts();
+        let mut tree = node(
+            CursorProbe::new(Some(CursorIcon::Pointer))
+                .child(node(CursorProbe::new(Some(CursorIcon::Text)))),
+        );
+        layout_and_paint(&mut tree, &mut texts);
+        assert_eq!(
+            cursor_at(&tree, Point::new(50.0, 50.0)),
+            Some(CursorIcon::Text),
+            "深层表态应盖过祖先"
+        );
+    }
+
+    #[test]
+    fn cursor_does_not_reach_past_an_open_modal_barrier() {
+        // 对照组: 同一棵树, 屏障开 / 关给出**不同**答案 —— 否则这条测试是空的。
+        // 屏障在索引 0; 无屏障时逆序遍历先访问索引 1 (z 序靠上), 答案是 Pointer;
+        // 屏障开时收束进索引 0 子树, 答案翻成 Text。
+        let mut texts = dummy_texts();
+        let build = |open: bool| {
+            node(
+                Stack::new()
+                    .child(Barrier {
+                        open,
+                        child: node(CursorProbe::new(Some(CursorIcon::Text))),
+                    })
+                    .child(CursorProbe::new(Some(CursorIcon::Pointer))),
+            )
+        };
+        let mut with = build(true);
+        layout_and_paint(&mut with, &mut texts);
+        assert_eq!(
+            cursor_at(&with, Point::new(50.0, 50.0)),
+            Some(CursorIcon::Text),
+            "开态屏障: 屏障外兄弟不得抢到光标"
+        );
+
+        let mut without = build(false);
+        layout_and_paint(&mut without, &mut texts);
+        assert_eq!(
+            cursor_at(&without, Point::new(50.0, 50.0)),
+            Some(CursorIcon::Pointer),
+            "关态: 屏障不存在, 逆序遍历先访问上层兄弟"
+        );
+    }
+
+    #[test]
+    fn nodes_without_an_opinion_yield_none() {
+        // 不表态 = 默认实现返回 None —— 悬停其上不改变形状, 由调用方回退默认箭头。
+        let mut texts = dummy_texts();
+        let mut tree = node(CursorProbe::new(None));
+        layout_and_paint(&mut tree, &mut texts);
+        assert_eq!(cursor_at(&tree, Point::new(50.0, 50.0)), None);
+    }
+
+    #[test]
+    fn cursor_outside_every_hit_area_is_none() {
+        let mut texts = dummy_texts();
+        let mut tree = node(CursorProbe::new(Some(CursorIcon::Pointer)));
+        layout_and_paint(&mut tree, &mut texts);
+        assert_eq!(cursor_at(&tree, Point::new(500.0, 500.0)), None);
     }
 
     /// 屏障探针: 可开关的模态屏障, layout/paint 透传子树 (焦点命中要求子树
