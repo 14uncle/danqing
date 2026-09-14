@@ -189,6 +189,13 @@ impl FocusManager {
 /// 兄弟重叠时低索引赢 (visit 逆序遍历但逐次覆写 result，
 /// 最终低索引覆盖高索引)。若需高索引优先，可在 visit 中
 /// 找到首个匹配即 return。
+///
+/// **例外: 模态屏障** (开态 `Overlay`, 见 [`crate::widget::Widget::modal_barrier`])。
+/// 子级中若有开态屏障, 只深入最上层 (z 序最后 = 最高索引) 的那个,
+/// 屏障外兄弟连同其子树对点击定焦不可见 —— 否则浮在底层的模态卡
+/// 会被被盖住的可聚焦组件抢焦 (danqing-log 2026-09-14: 设置卡里的
+/// 下拉点击后, 焦点落到底层全 rect 的 LogView, 键盘导航漏成滚动)。
+/// 与弹层通道 `popup_scope`/`find_barrier` 同一语义 (兄弟倒序、嵌套取更靠内)。
 fn hit_focusable(root: &Node, pos: Point) -> Option<FocusPath> {
     let mut result = None;
     let mut path = Vec::new();
@@ -211,11 +218,19 @@ fn visit(
         (None, None) => None,
     };
 
-    // 逆序遍历子节点，再检查自身 (兄弟重叠时低索引赢：result 逐次覆写)
-    for (i, child) in node.children().iter().enumerate().rev() {
+    let children = node.children();
+    if let Some(i) = children.iter().rposition(|c| c.modal_barrier()) {
+        // 开态模态屏障: 收束进屏障子树, 屏障外兄弟跳过 (见 hit_focusable 文档)。
         path.push(i);
-        visit(child, path, pos, child_clip, result);
+        visit(&children[i], path, pos, child_clip, result);
         path.pop();
+    } else {
+        // 逆序遍历子节点，再检查自身 (兄弟重叠时低索引赢：result 逐次覆写)
+        for (i, child) in children.iter().enumerate().rev() {
+            path.push(i);
+            visit(child, path, pos, child_clip, result);
+            path.pop();
+        }
     }
     if node.focusable() {
         if let Some(area) = node.hit_area() {
@@ -236,7 +251,7 @@ fn visit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Box as UiBox, Button, Column, Stack, Text, node};
+    use crate::widget::{Box as UiBox, Button, Column, Stack, Text, Widget, node};
     use crate::{Color, Constraints, Rect, Size};
 
     fn dummy_texts() -> crate::TextBatch {
@@ -538,5 +553,84 @@ mod tests {
         tree_b_only.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
         let hit_b = hit_focusable(&tree_b_only, Point::new(50.0, 50.0));
         assert_eq!(hit_b, Some(vec![0, 0]), "单个按钮应命中自身");
+    }
+
+    /// 屏障探针: 可开关的模态屏障, layout/paint 透传子树 (焦点命中要求子树
+    /// 真实出矩形; mod.rs 弹层测试的屏障探针不出矩形, 锁的是另一条语义)。
+    struct Barrier {
+        open: bool,
+        child: Node,
+    }
+
+    impl Widget for Barrier {
+        fn layout(&mut self, constraints: Constraints, texts: &mut crate::TextBatch) -> Size {
+            self.child.layout(constraints, texts)
+        }
+
+        fn paint(&self, area: Rect, rects: &mut crate::RectBatch, texts: &mut crate::TextBatch) {
+            self.child.paint(area, rects, texts);
+        }
+
+        fn modal_barrier(&self) -> bool {
+            self.open
+        }
+
+        fn children(&self) -> &[Node] {
+            if self.open {
+                std::slice::from_ref(&self.child)
+            } else {
+                &[]
+            }
+        }
+
+        fn children_mut(&mut self) -> &mut [Node] {
+            if self.open {
+                std::slice::from_mut(&mut self.child)
+            } else {
+                &mut []
+            }
+        }
+    }
+
+    #[test]
+    fn modal_barrier_confines_click_focus_to_its_subtree() {
+        // danqing-log 实机回归 (2026-09-14): 设置卡 (Overlay, 高索引兄弟) 里的
+        // 主题下拉点击展开后按 ↑↓, 选中项不动、底下的日志区反而滚动 ——
+        // 点击定焦被被盖住的 LogView 抢走: 它 focusable + 全 rect hit_area,
+        // 又占更低兄弟索引, 「低索引赢」对开着的模态不成立。
+        // 屏障打开时屏障外的子树对点击定焦必须不可见 —— 与弹层通道
+        // `popup_scope`/`find_barrier` 同一语义 (兄弟倒序、嵌套取更靠内)。
+        let make = |open: bool| {
+            node(
+                Stack::new()
+                    .child(
+                        UiBox::new(Color::TRANSPARENT)
+                            .size(200.0, 200.0)
+                            .child(Button::new(Text::new("底层"))),
+                    )
+                    .child(Barrier {
+                        open,
+                        child: node(
+                            UiBox::new(Color::TRANSPARENT)
+                                .size(200.0, 200.0)
+                                .child(Button::new(Text::new("卡内"))),
+                        ),
+                    }),
+            )
+        };
+        let mut texts = dummy_texts();
+        let mut tree = make(true);
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+
+        // 点击两棵子树的重叠处: 屏障开 → 焦点必须落在屏障内 [1,0,0] (卡内按钮),
+        // 不得是屏障外低索引的 [0,0] (底层按钮)。
+        let hit = hit_focusable(&tree, Point::new(50.0, 50.0));
+        assert_eq!(hit, Some(vec![1, 0, 0]), "开态屏障外不得抢焦");
+
+        // 屏障关闭 = 既有语义不动 (低索引赢, 锁于 overlapping_siblings_low_index_wins)。
+        let mut closed = make(false);
+        closed.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let hit_closed = hit_focusable(&closed, Point::new(50.0, 50.0));
+        assert_eq!(hit_closed, Some(vec![0, 0]), "关态屏障不改变既有语义");
     }
 }
