@@ -313,6 +313,15 @@ impl TextInput {
         self.placeholder = Some(text.into());
     }
 
+    /// 全选文本 (光标移到末尾, 锚点留在起点)。
+    ///
+    /// 给「回到输入框」这类**重复按同一个键**的场景用: 光标已在框里时,
+    /// 全选让用户直接覆写, 而不必先把旧草稿删干净。deselect 走
+    /// [`Self::clear`] 或让用户自己按方向键。
+    pub fn select_all(&mut self) {
+        self.editor.select_all();
+    }
+
     /// 光标位置 (测试用)。
     #[cfg(test)]
     pub(crate) fn cursor(&self) -> usize {
@@ -375,11 +384,6 @@ impl TextInput {
     /// 通知应用文本已变化。
     fn notify_change(&self, msgs: &mut MsgQueue) {
         self.editor.notify_change(msgs);
-    }
-
-    /// 全选文本。
-    fn select_all(&mut self) {
-        self.editor.select_all();
     }
 
     /// 删除当前选区 (若存在，测试用)。
