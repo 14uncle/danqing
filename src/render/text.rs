@@ -223,6 +223,29 @@ impl TextBatch {
     pub fn instance_colors(&self) -> Vec<LinearRgba> {
         self.instances.iter().map(|i| i.color).collect()
     }
+
+    /// 测试用：读取所有字形实例的**目标矩形** (`dst_pos` + `dst_size`) ——
+    /// 即 GPU 实际收到的落点与尺寸 (不参与公开 API 契约)。
+    ///
+    /// 与 `RectBatch::instance_rects` 同一约定、同一形状 —— 两边对称。
+    ///
+    /// **为什么需要它**: `measure` 给的是**前进宽度之和 (advance)**, 而眼睛看的是
+    /// **字形实际着墨的范围 (ink)**。两者不相等 —— 字形有左右侧边距, 而且
+    /// `push_text` 是按 `round(pen_x + bearing_x)` 落点、按 `info.width` 定宽的。
+    /// 于是「按 advance 居中」在屏上**不等于**「看着居中」。
+    /// 2026-09-15 的实例: 一个不在内嵌字体子集里的字符 (`✕` U+2715, 0×0 空字形)
+    /// 照样占着 6px 的 advance, 把整串文本顶偏 —— 那时没有任何一把尺能量到它,
+    /// 只能靠人眼在手写的基准里比。有了这个访问器, 「画出来居中不居中」
+    /// 才第一次成为**可断言**的事。
+    #[doc(hidden)]
+    pub fn instance_rects(&self) -> Vec<crate::Rect> {
+        self.instances
+            .iter()
+            .map(|i| {
+                crate::Rect::from_xywh(i.dst_pos[0], i.dst_pos[1], i.dst_size[0], i.dst_size[1])
+            })
+            .collect()
+    }
 }
 
 impl Default for TextBatch {
