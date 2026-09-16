@@ -188,7 +188,8 @@ sha256 `6d95317c…`）/ 商店文案 `docs/ms-store-copy.md` / 隐私政策 `do
    - description 已写入：`Fast large-file log & JSONL viewer for Windows — 1 GiB indexed in 92 ms, regex search in 115 ms. 丹青日志 · Windows 大文件日志/JSONL 查看分析器 (Rust)`
    - **15 个 topics** 已写入（log-viewer / log-analysis / jsonl / jsonl-viewer / large-files / log-parser / tail / observability / logging / log-management / windows / rust / desktop-app / developer-tools / mmap）
    - homepage 按约定留空（上架后回填商店页）
-   - 注：GitHub 的 **topic 索引有延迟**，`topic:log-viewer` 检索尚未收录，需隔期复核
+   - **✅ 验证结果（2026-09-16，写入后复核）**：`topic:jsonl-viewer` **已收录** —— 该面总共只有 13 个仓库，`14uncle/danqing-log` 挂在**第 12 位**；修复前它在这个面上**根本不存在**。其余话题（log-viewer / pomodoro-timer）索引延迟中，需隔期复核。
+   - 旁证：`topic:log-viewer` 榜单靠前的仓库只有 **7–10★** → **GitHub topic 检索是一个不拥挤、可触达的面**
 2. **README 英文摘要块**（本地改动，**未提交**）：补了英文首段（含 `log viewer` / `JSONL viewer` / `large file` / `Rust` / `Windows` / `free & open source` 关键词）。改前 README 英文词频以 `error/jsonl/ctrl` 等配置词为主，**"viewer" 0 次 / "Rust" 0 次 / "large file" 0 次** —— 英文搜索者匹配不到。
 
 **校准发现**
