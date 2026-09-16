@@ -65,6 +65,9 @@ type ThemeBinding = Box<dyn Fn(&dyn Any) -> DropdownColors>;
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct DropdownColors {
     bg: Color,
+    /// 弹层打底色 (不透明, 先铺; 见 `popup_bg`)。
+    popup_base: Color,
+    /// 弹层表面色 (铺在打底之上)。
     popup_bg: Color,
     border: Color,
     focus_border: Color,
@@ -79,6 +82,7 @@ impl DropdownColors {
     fn from_theme(theme: &impl Theme) -> Self {
         Self {
             bg: theme.surface_input(),
+            popup_base: theme.background(),
             popup_bg: theme.surface_input(),
             border: theme.border(),
             focus_border: theme.accent(),
@@ -137,7 +141,15 @@ pub struct Dropdown {
     font_size: u16,
     /// 控件底色。
     bg_color: Color,
-    /// 弹层底色 (比控件更实，须遮住底下内容)。
+    /// 弹层打底色 (不透明, 先铺 —— 弹层的职责是遮住底下内容)。
+    popup_base_color: Color,
+    /// 弹层表面色 (与控件同 token 的输入面 shade, 铺在打底之上)。
+    ///
+    /// **为什么不能单铺它**: `surface_input` 在两个主题里都是半透明玻璃 token
+    /// (浅色 α 0.95 / 暗色 α 0.031) —— 输入框底下是页面底色, 透出来正是设计;
+    /// 弹层底下是任意内容 (文字/开关/表格), 单铺它会全数透到弹层表面
+    /// (2026-09-16 实机事故)。两层铺底: 先不透明 `background()` 打底, 再铺它,
+    /// 合成由 GPU 在线性空间完成 —— 观感与输入控件同 shade, 对底下内容则不透明。
     popup_bg_color: Color,
     /// 边框色。
     border_color: Color,
@@ -184,6 +196,7 @@ impl Dropdown {
             list_pad: theme.spacing_xs(),
             font_size: theme.font_size_body(),
             bg_color: colors.bg,
+            popup_base_color: colors.popup_base,
             popup_bg_color: colors.popup_bg,
             border_color: colors.border,
             focus_border_color: colors.focus_border,
@@ -396,6 +409,7 @@ impl Widget for Dropdown {
         if let Some(bind) = &self.theme_binding {
             let c = bind(state);
             self.bg_color = c.bg;
+            self.popup_base_color = c.popup_base;
             self.popup_bg_color = c.popup_bg;
             self.border_color = c.border;
             self.focus_border_color = c.focus_border;
@@ -601,6 +615,9 @@ impl Widget for Dropdown {
     /// (组件不得自行 `push_layer`)。
     fn paint_popup(&self, area: Rect, rects: &mut RectBatch, texts: &mut TextBatch) {
         let area = area.snap_to_pixels();
+        // 两层铺底: 不透明打底遮住底下内容, 半透明表面与控件同 shade (理由见
+        // `popup_bg_color` 字段注释)。
+        rects.push_rect(area, self.popup_base_color, self.radius);
         rects.push_rect(area, self.popup_bg_color, self.radius);
         rects.push_rounded_border(area, self.border_color, self.radius, 1.0);
 
@@ -631,6 +648,7 @@ impl Widget for Dropdown {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::DarkTheme;
     use crate::widget::{
         Column, FocusManager, dismiss_popup_at, dispatch_popup_event, event_at_path, node,
     };
@@ -937,6 +955,60 @@ mod tests {
             "选中行未被 hover 时仍是选中底色"
         );
         assert_eq!(dd.row_fill(2), None, "既非选中也非 hover 的行无高亮");
+    }
+
+    /// 以指定主题建下拉、展开、画一帧弹层, 返回 (弹层矩形, 批次几何, 批次颜色)。
+    ///
+    /// 颜色与几何按**推送顺序**原样取出 —— 这条要审的正是「谁铺在最底层」。
+    fn themed_popup_layers<T: Theme>(theme: &T) -> (Rect, Vec<Rect>, Vec<[f32; 4]>) {
+        let mut dd = Dropdown::themed(theme, opts())
+            .bind_selected(|s: &Demo| s.selected)
+            .on_select(|idx| idx);
+        let mut texts = TextBatch::new();
+        dd.paint(control(), &mut RectBatch::new(), &mut texts);
+        let mut msgs = MsgQueue::new();
+        click_control(&mut dd, &mut msgs);
+        let popup = dd.popup_area().expect("点击后应展开");
+        let mut rects = RectBatch::new();
+        dd.paint_popup(popup, &mut rects, &mut texts);
+        (
+            popup,
+            rects.instance_rects().to_vec(),
+            rects.instance_colors().to_vec(),
+        )
+    }
+
+    /// 两个主题各跑一遍 (`Theme` 带 `Copy` 上界, 不是对象安全, 没法装进同一张表遍历)。
+    fn assert_popup_grounded<T: Theme>(theme: &T) {
+        let (popup, rects, colors) = themed_popup_layers(theme);
+        assert!(rects.len() >= 2, "弹层应至少有打底 + 表面两层");
+        assert_eq!(rects[0], popup, "打底层必须铺满整个弹层面");
+        assert_eq!(
+            colors[0],
+            rgba_of(theme.background()),
+            "打底层 = background()"
+        );
+        assert_eq!(
+            colors[0][3], 1.0,
+            "打底层必须不透明 —— 弹层的职责是遮住底下内容"
+        );
+        assert_eq!(rects[1], popup, "表面层与打底层同几何");
+        assert_eq!(
+            colors[1],
+            rgba_of(theme.surface_input()),
+            "表面层 = surface_input (与控件同 shade)"
+        );
+    }
+
+    #[test]
+    fn popup_face_is_grounded_on_an_opaque_background_layer() {
+        // 2026-09-16 实机回归: 弹层拿 surface_input 单铺当底色 —— 那是**半透明玻璃
+        // token** (暗色 α 仅 0.031, 浅色 0.95), 盖不住底下内容: 设置卡里「显示级别
+        // 侧栏」的文字与开关全数透到弹层表面。契约: 弹层 = 不透明 background() 打底
+        // + surface_input 铺面 (合成交给 GPU 在线性空间做) —— 观感与输入控件同
+        // shade, 对底下内容则不透明。两个主题都锁: 暗色是重灾区, 浅色那 5% 也是鬼影。
+        assert_popup_grounded(&LightTheme);
+        assert_popup_grounded(&DarkTheme);
     }
 
     #[test]
