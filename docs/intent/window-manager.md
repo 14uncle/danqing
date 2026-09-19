@@ -81,3 +81,20 @@
 - 6 agent 并行初扫（桌面工具/开发者/数据处理/内容创作/系统监控/趋势预测）
 - 4 agent 并行深挖（GlazeWM+Komorebi issues / FancyZones issues / 自动平铺需求验证 / 定价）
 - 交叉验证 GitHub issues 反应数 + 用户原话 + 竞品现状
+
+## 裁决（2026-09-15 用户指令）
+
+**埋掉**：不立项、不推进；仓库 `danqing-tile/` 与代码/spec 产物原样保留作档案（同 Xirang / disk 处置）。代码完成（3207 行 / 37 commits / 63 测试全绿），**从未人工验收、从未发布**。
+
+**依据（2026-09-15 体检，四 agent 查证）**：
+
+1. **免费在位者封死（闸③直接命中）**：PowerToys/FancyZones 微软第一方免费（138,664★ / 单版本 581 万下载 / MS Store 521 评分级）；GlazeWM GPL-3.0 免费 12,769★；FancyWM MS Store 免费 4.5★；**Seelen UI（17,807★ / 350 万下载 / MS Store 免费 4.5★·687 评分 / 内置自动平铺 BSP·columns·stacks + 每应用规则 + floating 例外 / 周更）** —— 本卷对比三角中完全没有它。
+2. **「FancyZones 明确不做」不成立**：canonical issue #2694 六年 384 反应**至今 open、从未标 not_planned**，2020 年官方原话是「auto-tile 不适合 FancyZones 架构，**应做成独立模块**」。是「从未做」，不是「承诺不做」，不可当护城河。
+3. **需求衰减**：2019-2020 为峰值（#37 👍116 / #2694 👍384），此后逐年归零——2025 全年新请求最高 👍2，2026 至今最高 👍4、中位数 0。r/Windows11 平铺话题最高票（408）**是在夸系统自带功能**；Super User 2024-2026 相关提问全是「怎么关掉自动吸附」。
+4. **目标人群错位**：本卷定位「面向普通用户、不需要理解平铺」；查证显示想要自动平铺的人**几乎全是先在 Linux 养成平铺习惯、被工作逼回 Windows 的人**，而 Windows 原生用户中「没用过 Linux 平铺却想要它」的证据为零。**「不用学 YAML」对唯一想要这功能的人群没有价值**——他们要的就是配置权。
+5. **付费天花板实测**：品类头部 komorebi（15,176★ / 35 万下载）2025 全年总收入 **$12,070**，其中 $7,877 来自**商业使用许可（合规费）**，为体验付费 **$0**（作者靠 MDM 企业设备检测「逼」出付费，并写道「企业不会自愿为改善员工工作条件的软件掏钱」）；下载→付费转化 0.03–0.09%。本产品 v1 全免费，直接收入为 0。
+6. **渠道实测挂科**：MS Store「tiling window manager」货架上真应用仅 1 个且免费；HN 头部发布（komorebi 229 分）来自同一几千人池子反复刷脸，头部产品付费用户总数 118 人。
+
+**技术负债（结构性）**：Windows 不强制窗口契约，自动平铺要长期与 app 开发者打游击——komorebi 作者原话：「Applications behaving badly is a big problem for any window management project on Windows... especially since the rise of Electron, [developers] are increasingly throwing established Win32 application development guidelines to the wind.」这是「重投入」在本产品上的具体形状。
+
+**未查证项**：Reddit 三站评论正文（网络阻断）；Google 搜索量硬数据。
