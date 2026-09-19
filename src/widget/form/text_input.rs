@@ -21,6 +21,9 @@ const BLINK_PERIOD: f32 = 0.5;
 /// 主题绑定：每帧从应用状态产出随主题流动的颜色。
 type ThemeBinding = Box<dyn Fn(&dyn Any) -> TextInputColors>;
 
+/// 清空信号绑定: rev 计数, 值变化即清空正文。
+type ClearBinding = Box<dyn Fn(&dyn Any) -> u64>;
+
 /// 随主题流动的输入框颜色子集 (构建后仍可经 [`TextInput::bind_theme`] 每帧刷新)。
 ///
 /// **为什么需要它**: 视图树只在启动时构建一次, `themed(&theme)` 烘进去的颜色
@@ -62,6 +65,10 @@ pub struct TextInput {
     editor: TextEditor,
     /// 主题绑定 (每帧刷新随主题流动的颜色; 见 [`TextInput::bind_theme`])。
     theme_binding: Option<ThemeBinding>,
+    /// 清空信号绑定 (见 [`TextInput::bind_clear`])。
+    clear_binding: Option<ClearBinding>,
+    /// 上次见到的清空代次。
+    last_clear_rev: u64,
     /// 是否获得焦点。
     focused: bool,
     /// 字体大小。
@@ -125,6 +132,8 @@ impl TextInput {
         Self {
             editor: TextEditor::new(),
             theme_binding: None,
+            clear_binding: None,
+            last_clear_rev: 0,
             focused: false,
             font_size: theme.font_size_body(),
             color: colors.text,
@@ -167,6 +176,20 @@ impl TextInput {
                 .downcast_ref::<S>()
                 .expect("TextInput 主题绑定的状态类型不匹配");
             TextInputColors::from_theme(&f(state))
+        }));
+        self
+    }
+
+    /// 绑定清空信号: 每帧读 rev 值, **变化即清空正文** (首次同步与同值不清)。
+    /// 「应用侧触发清空」(如激活成功后清掉 key 输入框) 的机制 —— 与
+    /// danqing-log 产品侧 `Bar::bind_clear_filter/search` 同源, 此处下沉为框架机制
+    /// (2026-09-19, SPEC-v1x-licensing 安全评审修复)。
+    pub fn bind_clear<S: 'static>(mut self, f: impl Fn(&S) -> u64 + 'static) -> Self {
+        self.clear_binding = Some(Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("TextInput 清空绑定的状态类型不匹配");
+            f(state)
         }));
         self
     }
@@ -438,6 +461,16 @@ impl Default for TextInput {
 
 impl Widget for TextInput {
     fn sync(&mut self, state: &dyn Any) {
+        if let Some(binding) = &self.clear_binding {
+            let rev = binding(state);
+            if rev != self.last_clear_rev {
+                self.last_clear_rev = rev;
+                if !self.editor.text().is_empty() {
+                    self.set_text("");
+                }
+                self.preedit = None;
+            }
+        }
         if let Some(binding) = &self.theme_binding {
             let c = binding(state);
             self.color = c.text;
@@ -774,6 +807,22 @@ mod tests {
     fn rgba_of(c: Color) -> [f32; 4] {
         let l = crate::render::LinearRgba::from(c);
         [l.r, l.g, l.b, l.a]
+    }
+
+    /// `bind_clear`: rev 变化 → 清空正文; 首次同步与同 rev 不清。
+    /// (2026-09-19 下沉自 danqing-log `Bar::bind_clear_*` 同款语义。)
+    #[test]
+    fn bind_clear_clears_text_only_on_rev_change() {
+        struct S(u64);
+        let mut input = TextInput::themed(&LightTheme).bind_clear(|s: &S| s.0);
+        input.set_text("secret-key");
+        input.sync(&S(0));
+        assert_eq!(input.value(), "secret-key", "首次同步 (同 rev) 不清");
+        input.sync(&S(1));
+        assert_eq!(input.value(), "", "rev 变化 → 清空");
+        input.set_text("abc");
+        input.sync(&S(1));
+        assert_eq!(input.value(), "abc", "同 rev 不再清");
     }
 
     /// `bind_theme` 必须**每帧重取**主题 —— 视图树只在启动时构建一次,
