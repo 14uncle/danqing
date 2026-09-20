@@ -539,6 +539,19 @@ impl Widget for TextInput {
         let text_x = area.origin.x + self.padding.left;
         let baseline = area.origin.y + self.vertical_pad + texts.ascent(f32::from(self.font_size));
 
+        // 内容裁剪 (2026-09-20 danqing-log 人工验收): 单行输入没有横滚机制,
+        // 长文本 (粘贴 262 字符的 license key) 会越出框体盖到界面上 ——
+        // 字形/选区/preedit/光标一律裁进边框内侧。横向「随光标滚动」是
+        // 更大的功能, 需要时另立; 先把「绝不越界」钉死。
+        let clip = Rect::from_xywh(
+            area.origin.x + self.border_width,
+            area.origin.y,
+            (area.size.width - 2.0 * self.border_width).max(0.0),
+            area.size.height,
+        );
+        rects.push_clip(clip);
+        texts.push_clip(clip);
+
         // 选区高亮
         let (sel_start, sel_end) = self.selection_range();
         if sel_start < sel_end && self.focused {
@@ -602,6 +615,9 @@ impl Widget for TextInput {
                 0.0,
             );
         }
+
+        texts.pop_clip();
+        rects.pop_clip();
     }
 
     fn event(&mut self, event: &Event, area: Rect, msgs: &mut MsgQueue) -> EventResult {
@@ -823,6 +839,32 @@ mod tests {
         input.set_text("abc");
         input.sync(&S(1));
         assert_eq!(input.value(), "abc", "同 rev 不再清");
+    }
+
+    /// 超长内容必须被裁进边框内侧 (2026-09-20 danqing-log 人工验收:
+    /// 粘贴 262 字符的 license key, 渲染越出录入框盖到设置卡上)。
+    #[test]
+    fn overflowing_text_is_clipped_inside_input_area() {
+        let input = TextInput::themed(&LightTheme)
+            .font_size(14)
+            .text("x".repeat(300));
+        let area = Rect::from_xywh(10.0, 10.0, 100.0, 30.0);
+        let mut rects = RectBatch::new();
+        let mut texts = TextBatch::new();
+        input.paint(area, &mut rects, &mut texts);
+        let mut glyphs = 0;
+        for (_pos, cmin, cmax) in texts.glyph_clips() {
+            glyphs += 1;
+            assert!(
+                cmin[0] >= area.origin.x - 0.01,
+                "字形裁剪下界越出左边界: cmin={cmin:?}"
+            );
+            assert!(
+                cmax[0] <= area.origin.x + area.size.width + 0.01,
+                "字形裁剪上界越出右边界: cmax={cmax:?}"
+            );
+        }
+        assert!(glyphs > 0, "测试没画出任一字形, 断言为空转");
     }
 
     /// `bind_theme` 必须**每帧重取**主题 —— 视图树只在启动时构建一次,

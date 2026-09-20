@@ -80,6 +80,18 @@ impl TextBatch {
         self.clip_stack.pop();
     }
 
+    /// 测试观测面: 每个字形实例的 (落点, 裁剪下界, 裁剪上界)。
+    ///
+    /// `#[doc(hidden)] pub` 而非 `cfg(test)`: 产品侧回归锁也要用
+    /// (如 danqing-log 断言「侧栏直方图真的画出来了」—— 那是宽度折叠
+    /// 判定失效时会静默消失的特征)。与 `TextInput::text_color` 同一处置。
+    #[doc(hidden)]
+    pub fn glyph_clips(&self) -> impl Iterator<Item = ([f32; 2], [f32; 2], [f32; 2])> + '_ {
+        self.instances
+            .iter()
+            .map(|g| (g.dst_pos, g.clip_min, g.clip_max))
+    }
+
     fn current_clip(&self) -> Option<crate::Rect> {
         self.clip_stack.iter().rev().find_map(|r| *r)
     }
