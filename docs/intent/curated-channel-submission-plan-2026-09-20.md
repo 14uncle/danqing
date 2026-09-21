@@ -68,6 +68,8 @@
 已划掉：~~大眼仔旭~~（互链前置）；~~算法泛渠道 / 开发者社区~~（实测无效，不再投入）；~~Show HN~~（HN 国内不可达，2026-09-21）。
 英文收录型（AlternativeTo / Product Hunt / Reddit）：**本轮不投**——规则未核实 + 需 VPN/养号，等中文站读数出来再定。
 
+**第二批（2026-09-21 用户指令追加）**：**HelloGitHub / 阮一峰周刊 / 开源中国**——开发者向策展渠道，见 C 组与文案 7–9。
+
 ---
 
 ---
@@ -94,6 +96,18 @@
 | 9 | **Reddit** | r/software · r/Windows11 · r/SideProject | 社区帖（注意各版自推广规则） | 两者 |
 | ~~10~~ | ~~**Hacker News**~~ | ~~Show HN~~ | **已砍掉**（2026-09-21：HN 国内不可达，执行清单同步移除） | — |
 | 11 | **Product Hunt** | producthunt.com launch | 一次性 launch | log |
+
+### C 组：中文开发者向策展渠道（2026-09-21 追加，用户指令）
+
+A 组面向普通用户/效率人群，本组受众 = **开发者**——与 log 正对（「开发者社区对 pomodoro 是受众错配、对 log 是受众正对」的同一逻辑，见 09-21 实投记录）。三家均为策展/编辑型，满足「对的受众 + 可点击外链」；量待实测。
+
+| # | 站点 | 投稿入口 | 形式 | 核实状态（2026-09-21） |
+|---|---|---|---|---|
+| 12 | **HelloGitHub**（开源月刊） | `github.com/521xueweihan/HelloGitHub/issues` 提 issue（官方模板 `submit-cn.yaml`） | 编辑收录进月刊 | ✅ 模板与过审实例已核（`gh api`，实例 #2643）；**查重 0 命中** |
+| 13 | **阮一峰《科技爱好者周刊》** | `github.com/ruanyf/weekly/issues` 提 issue | 编辑收录进「工具」栏（标注「@用户名 投稿」） | ✅ 近期 issue 标题风格已核；**查重 0 命中** |
+| 14 | **开源中国** | ①软件收录：站内「添加软件」入口 ②博客：`my.oschina.net` 发文 | 收录 + 博客双入口 | ⚠️ **收录入口 URL 未核实**——旧地址 `/action/software/create` 404、频道页 404、首页为 JS 壳（本机实测）；用户登录后站内确认，找不到就只走博客 |
+
+HelloGitHub 审核标准（官方 issue #271）：文档完善（项目介绍/特性/快速开始/协议 = 必须——README 已重写 ✓、MIT OR Apache-2.0 双协议 ✓）；**自荐项目 star 为可选标准**（我们 star=1 不致命）；看 Insights 活跃度防弃坑（v1.0.0 刚发 ✓）。收录后 issue 内通知，GitHub 账号进贡献人列表。
 
 ### 已明确排除（实测证明无效，不再投入）
 
@@ -276,6 +290,65 @@
 >
 > 署名：十四叔。如需调整或补充素材请回复本邮件。
 
+### 文案 7 · HelloGitHub 自荐 issue（log）
+
+> **标题**：【开源自荐】丹青日志 LogLens：1 GB 日志秒开的 Windows 日志查看器，原生支持 JSONL
+>
+> - 项目地址：https://github.com/14uncle/danqing-log
+> - 类别：Rust
+> - 项目标题：秒开 GB 级日志的 Windows 原生日志查看器
+> - 项目描述：不把文件读进内存——mmap + 行步进索引，1 GB 日志建索引 92 ms、正则搜索 115 ms（本机实测）。JSONL 自动列化成表、按字段过滤（level=ERROR status=500）。GBK 中文老日志默认打开不乱码。单文件便携 zip，解压即用，无账号无遥测。
+> - 亮点：
+>   1. 同机实测（1 GB）：VS Code 开明文约 10 秒、JSONL 扩展 Daucloud 约 7 秒、LogViewPlus 60 秒（全量解析，结构性的慢），LogLens 冷开约 0.6 秒 / 热开 92 ms；5 GB 冷开约 3 秒、10 GB 约 6~7 秒（全部本机实测，报告随仓库公开）。
+>   2. 免费同类 klogg 停更四年多、273 个 open issue（2026-09-16 查证），且无 JSONL 列化。
+>   3. 中文场景对照实测（2026-09-21，同一 32 MiB GBK 文件默认打开）：LogViewPlus 乱码 / klogg 正常 / LogLens 正常且中文可搜（字面量）。
+> - 截图：
+>
+> ```
+> <table><tr>
+>   <td><img src="https://raw.githubusercontent.com/14uncle/danqing-log/dev/docs/images/screenshot-jsonl-dark.png" /></td>
+>   <td><img src="https://raw.githubusercontent.com/14uncle/danqing-log/dev/docs/images/screenshot-gbk-cn-dark.png" /></td>
+> </tr></table>
+> ```
+>
+> - 后续更新计划：v1.x 付费层（多文件时间线合并、字段分析聚合、导出）；已免费的部分保持免费，持续维护。
+
+⚠️ 模板提示「请勿使用复制的内容作为项目描述」——以上项目描述为手写新稿，未从 README 复制。提交时删除模板尾部「提高项目收录的方法」段。
+
+### 文案 8 · 阮一峰周刊自荐 issue（log）
+
+> **标题**：【开源自荐】丹青日志 LogLens：1 GB 日志 92 毫秒建索引的 Windows 日志查看器
+>
+> **正文**：
+> 一个 Windows 原生的大日志查看器（Rust，开源，MIT/Apache-2.0）。
+>
+> mmap + 行步进索引，不把文件读进内存：1 GB 日志建索引 92 ms、正则搜索 115 ms、随机访问 0.52 µs/行；5 GB 冷开约 3 秒、10 GB 约 6~7 秒（均本机实测）。
+>
+> JSONL 自动列化成表、按字段过滤；GBK 编码的中文老日志直接打开不乱码。单文件 zip，解压即用。
+>
+> https://github.com/14uncle/danqing-log
+>
+> ![JSONL 列化视图](https://raw.githubusercontent.com/14uncle/danqing-log/dev/docs/images/screenshot-jsonl-dark.png)
+
+### 文案 9 · 开源中国（log，双入口）
+
+**入口 ① 软件收录**（入口 URL 未核实，见 C 组表；登录后站内找「添加软件」）——字段预填：
+
+| 字段 | 值 |
+|---|---|
+| 软件名称 | 丹青日志 LogLens |
+| 主页 | https://github.com/14uncle/danqing-log |
+| 下载地址 | https://github.com/14uncle/danqing-log/releases |
+| 授权协议 | MIT OR Apache-2.0（双协议） |
+| 开发语言 | Rust |
+| 操作系统 | Windows 10 / 11（64 位） |
+| 分类 | 开发工具（日志/文本工具类，按站内实际选项就近） |
+| 一句话简介 | 1 GB 日志秒开的 Windows 原生日志查看器，原生支持 JSONL（开源） |
+| 详细介绍 | 用文案 2 的实测段（从「这东西起源于一次产品选型调研」到 GBK 段止），删去叙事头尾 |
+| 截图 | 仓库两张 1920×1032 截图（JSONL 列化视图 + GBK 中文视图） |
+
+**入口 ② 博客**：`my.oschina.net` 后台发文，**与 CSDN 同稿**（文案 2 全文，标题「1 GB 日志秒开：我用 Rust 写了一个日志查看器」），文末 GitHub 链接照放。⚠️ 同稿多发对搜索权重有轻微稀释，但本实验按 GitHub referrer 归因（`oschina.net` / `my.oschina.net` 可见），不受影响。
+
 ---
 
 ## 三、记录表模板
@@ -294,6 +367,9 @@
 | 掘金 | **2026-09-21** | 方案外自投（log） | **已发** [7687796652300517416](https://juejin.cn/post/7687796652300517416) | 待补（JS 渲染抓不到，后台读） |  |  |  |  | — | — | — |
 | 微信公众号 | **2026-09-21** | 方案外自投（log） | **已发** [mp.weixin](https://mp.weixin.qq.com/s/VnR50DT4vS-cMWWw0Il43g)（无可点外链，预期 referrer 不可见） |  |  |  |  |  | — | — | — |
 | 抖音 | **2026-09-21** | 方案外自投（log） | **已发**（作品 ID `7687911042646691082`，[创作者后台](https://creator.douyin.com/creator-micro/work-management/work-detail/7687911042646691082?enter_from=content)；无公开链接入口，预期 referrer 不可见） | 待补（后台读） |  |  |  |  | — | — | — |
+| HelloGitHub | 待定（用户动作） | 自荐 issue（文案 7，log） | 就绪待投（月刊，周期长） |  |  |  |  |  | — | — | — |
+| 阮一峰周刊 | 待定（用户动作） | 自荐 issue（文案 8，log） | 就绪待投（周刊，每周五发布） |  |  |  |  |  | — | — | — |
+| 开源中国 | 待定（用户动作） | 软件收录 + 博客（文案 9，log） | 就绪待投（收录入口待用户站内核实） |  |  |  |  |  | — | — | — |
 | ~~Show HN~~ | — | — | **已砍掉**（2026-09-21：HN 国内不可达） | — | — | — | — | — | — | — | — |
 
 **2026-09-21 实投记录（用户执行）**：当日实投 **7 渠道**——小众软件论坛、少数派 + 方案外 5 个（CSDN / 知乎 / 掘金 / 微信公众号 / 抖音）；3 个邮件渠道（软餐 / 异次元 / 反斗）当日未投，仍就绪。分析备注：开发者社区（CSDN / 知乎 / 掘金）对 pomodoro 是受众错配（198 阅读≈0），但 **log 的用户本来就是开发者——受众正对**，这是「同渠道换产品」的再测，不是重复烧；公众号 / 抖音无可点击外链，只作顶部认知，预期 GitHub referrer 里看不到它们。
