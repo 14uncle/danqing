@@ -5,7 +5,7 @@
 
 ## Phase 1: 边界改造
 
-- [ ] T1: TextBatch scale 化
+- [x] T1: TextBatch scale 化
   - Acceptance: `TextBatch` 新增 `set_scale_factor(f32)`（默认 1.0）；`push_text` 按 `round(px×s)` 物理栅格化、坐标 ×s 后物理格吸附；`measure/line_height/ascent/descent` 返回逻辑值（物理指标 ÷s）；`push_clip` 收逻辑 rect 内部 ×s；scale 变更清图集缓存；s=1.0 行为与现状逐位一致
   - Verify: 新增单测 s=2.0（落点/尺寸 ×2、measure 返回 ÷2、栅格 px=30）+ s=1.5（取整一致）+ s=1.0（恒等）；`cargo test render::text` 全绿
   - Files: `src/render/text.rs`
