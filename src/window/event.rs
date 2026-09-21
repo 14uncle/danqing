@@ -124,7 +124,8 @@ impl WindowEventSender {
 ///
 /// `scale` 为 DPI 缩放因子 (winit `Window::scale_factor`): winit 报物理像素坐标,
 /// 框架内部统一逻辑像素 (spec: docs/specs/hidpi-scale-factor.md), 此处 ÷scale 落界。
-/// `cursor` 必须已是逻辑域 (handler 存点时已换算), MouseInput/MouseWheel 原样透传。
+/// `cursor` 必须已是逻辑域 (handler 存点时已换算), MouseInput/MouseWheel
+/// 的 position 字段原样透传该 cursor。
 pub(super) fn convert_event(
     event: &WindowEvent,
     cursor: Point,

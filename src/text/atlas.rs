@@ -26,7 +26,7 @@ pub struct GlyphInfo {
     /// 垂直 bearing: 基线到位图顶边的距离 (fontdue 坐标系中 y 向上，
     /// 等于 `ymin + height`,即 ymax)。
     pub bearing_y: i32,
-    /// 笔迹前进宽度 (逻辑像素)。
+    /// 笔迹前进宽度 (栅格化 px 域: HiDPI 下 = 物理像素, 见 render/text.rs 的 scale 换算)。
     pub advance: f32,
 }
 

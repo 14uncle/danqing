@@ -1051,10 +1051,10 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 // 动态切换 (拖拽跨屏 / 运行中改系统缩放): 只更新 scale 并立即
-                // 按新逻辑视口重排; 尺寸与表面走 Resized 单路径 (winit 随后
-                // 必发), 不双写防竞态 (spec A7)。隐藏态同样更新: scale 无
-                // 幻影尺寸问题, 且补上 last_real_size 注释里「隐藏期间 DPI
-                // 变化被忽略」的已知取舍中可救的一半。
+                // 按新逻辑视口重排; 尺寸若变 winit 随后发 Resized 走单路径,
+                // 不双写防竞态 (plan A7, tasks/plan-hidpi.md)。隐藏态同样更新:
+                // scale 无幻影尺寸问题, 且补上 last_real_size 注释里「隐藏
+                // 期间 DPI 变化被忽略」的已知取舍中可救的一半。
                 log::info!("DPI 缩放变化：{} → {}", self.scale, scale_factor);
                 self.scale = scale_factor;
                 // 图集缓存键是物理字号, scale 一变全部失效 (内部按变化才清)。

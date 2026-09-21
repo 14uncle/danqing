@@ -27,7 +27,7 @@
 
 ## Checkpoint CP1: s=1.0 回归锁
 
-- [x] `cargo test --lib --tests` 现有测试**零修改**全绿 + 新增单测绿（616 + 集成 67）
+- [x] `cargo test --lib --tests` 现有测试**零修改**全绿 + 新增单测绿（616 lib + 58 集成）
 - [x] `cargo clippy -- -D warnings` 零警告 + `cargo fmt --check`
 - [x] showcase 100% 人工比对无漂移（截图 target/tmp/showcase-cp1.png，文字/图像/分层全部正常）
 

@@ -150,12 +150,13 @@ impl TextBatch {
         self.font.source()
     }
 
-    /// 建议行高 (**逻辑像素**; `px` 为逻辑字号)。
+    /// 建议行高 (**逻辑像素**; `px` 为逻辑字号, 预期整数值 —— 主题字号档皆整数;
+    /// 分数值在 s=1.0 下会经 phys_px 取整, 与引入前行为不等价)。
     pub fn line_height(&self, px: f32) -> f32 {
         self.font.line_height(self.phys_px(px)) / self.scale
     }
 
-    /// 指定逻辑字号下的 ascent(基线到行顶的距离, **逻辑像素**)。
+    /// 指定逻辑字号下的 ascent(基线到行顶的距离, **逻辑像素**; `px` 预期整数值, 同 [`Self::line_height`])。
     pub fn ascent(&self, px: f32) -> f32 {
         let phys = self.phys_px(px);
         self.font
@@ -166,7 +167,7 @@ impl TextBatch {
             / self.scale
     }
 
-    /// 指定逻辑字号下的 descent(基线到行底的距离, **逻辑像素**)。
+    /// 指定逻辑字号下的 descent(基线到行底的距离, **逻辑像素**; `px` 预期整数值, 同 [`Self::line_height`])。
     pub fn descent(&self, px: f32) -> f32 {
         let phys = self.phys_px(px);
         self.font
@@ -823,5 +824,34 @@ mod tests {
         let mut m2 = TextBatch::new();
         m2.set_scale_factor(1.0);
         assert_eq!(m1.measure("日志 viewer", 15), m2.measure("日志 viewer", 15));
+    }
+
+    #[test]
+    fn fractional_scale_rounding_is_pinned() {
+        // 取整策略钉死: phys_px(15)@1.5 必须 == 23 (round half away from zero,
+        // 22.5→23)。s=2.0 下 round 是恒等操作锁不住这条 —— 用跨尺度等价把
+        // 物理字号变成可断言量: s=1.5 逻辑 15px 与 s=1.0 直接 23px 必须逐位同形。
+        let mut scaled = TextBatch::new();
+        scaled.set_scale_factor(1.5);
+        scaled.push_text("A", 0.0, 40.0, 15, Color::BLACK);
+        let mut direct = TextBatch::new();
+        direct.push_text("A", 0.0, 60.0, 23, Color::BLACK); // 40×1.5=60, 同基线
+        assert_eq!(
+            scaled.instance_rects()[0],
+            direct.instance_rects()[0],
+            "同物理字号同落点, 实例必须逐位相等"
+        );
+        // 行指标同一把物理尺: line_height(15)@1.5 == line_height(23)@1.0 ÷ 1.5
+        assert_eq!(
+            scaled.line_height(15.0),
+            direct.line_height(23.0) / 1.5,
+            "line_height 与栅格化必须共用同一物理字号"
+        );
+        // measure 同一把物理尺: measure(15)@1.5 == measure(23)@1.0 ÷ 1.5
+        assert_eq!(
+            scaled.measure("日志", 15),
+            direct.measure("日志", 23) / 1.5,
+            "measure 与栅格化必须共用同一物理字号"
+        );
     }
 }
