@@ -237,4 +237,4 @@ interview-me 确认（2026-09-18，用户显式 yes）：
 ## 开放问题（等用户）
 
 - ~~（沿用 round4）pomodoro Partner Center 商店页上架状态~~ → **2026-09-19 双闭环：已上架且有自然流量；首单外检已读数**（Add-on acquisitions = 2，均为用户自购 → 陌生人首单 0，闸门未过。见上方 MS Store 基线）。
-- log 商店认证状态：认证中（2026-09-19 用户确认）；过审后用户贴 Store ID/链接，接进 README 下载节 + 仓库 homepageUrl + launch-copy 速查表（七处占位清单已备），随后按发稿执行清单七平台齐发。
+- log 商店认证状态：**已过审上架（2026-09-21，09-19 提交、仅 2 天过审）**；待用户贴 Store ID/链接 → 接进 README 下载节 + 仓库 homepageUrl + launch-copy 速查表（七处占位清单已备）。
