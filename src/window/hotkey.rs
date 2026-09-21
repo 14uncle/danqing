@@ -127,24 +127,24 @@ pub(super) mod hotkeys {
         }
         log::info!("[hotkey thread] 消息队列已创建");
 
-        let mut registered: Vec<i32> = Vec::with_capacity(specs.len());
+        let mut registered: Vec<GlobalHotkey> = Vec::with_capacity(specs.len());
         for spec in specs {
             if unsafe { RegisterHotKey(hwnd, spec.id as i32, mods_of(spec), spec.vk) } == 0 {
+                // 单键冲突不连坐: 跳过该键, 其余照常注册 (2026-09-21 前为全部注销并退线程)。
                 log::warn!(
-                    "RegisterHotKey 失败: id={} vk=0x{:02X} (与其它应用冲突?)",
+                    "RegisterHotKey 失败 (跳过该键): id={} vk=0x{:02X} (与其它应用冲突?)",
                     spec.id,
                     spec.vk
                 );
-                for id in &registered {
-                    unsafe {
-                        UnregisterHotKey(hwnd, *id);
-                    }
-                }
-                return;
+                continue;
             }
-            registered.push(spec.id as i32);
+            registered.push(*spec);
         }
-        log::info!("全局热键已注册: {specs:?}");
+        if registered.is_empty() {
+            log::warn!("全部全局热键注册失败, 热键线程退出");
+            return;
+        }
+        log::info!("全局热键已注册: {registered:?}");
 
         let mut msg: MSG = unsafe { std::mem::zeroed() };
         loop {
@@ -168,9 +168,9 @@ pub(super) mod hotkeys {
             }
         }
 
-        for id in &registered {
+        for spec in &registered {
             unsafe {
-                UnregisterHotKey(hwnd, *id);
+                UnregisterHotKey(hwnd, spec.id as i32);
             }
         }
         log::info!("全局热键已注销");
