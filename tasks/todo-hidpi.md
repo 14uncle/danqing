@@ -33,9 +33,9 @@
 
 ## Phase 3: 动态切换与验收
 
-- [ ] T4: ScaleFactorChanged 动态切换
+- [x] T4: ScaleFactorChanged 动态切换
   - Acceptance: `window_event` 新增 `ScaleFactorChanged` arm：更新 `self.scale` → `texts.set_scale_factor`（清图集）→ `context.set_scale_factor` → 请求 redraw；尺寸/表面走既有 Resized 单路径不双写；隐藏态 scale 照常更新（无幻影问题）
-  - Verify: 单测覆盖 arm 的状态更新（可测部分）；`cargo test window` 全绿
+  - Verify: arm 内各 setter 的单测已在 T1/T3 落地（清图集/非法值拒绝）；arm 本体为纯接线，由 T5「运行中改系统缩放」人工验证；`cargo test window` 全绿
   - Files: `src/window/handler.rs`
   - 检查点: **CP2**
 

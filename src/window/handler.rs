@@ -1049,6 +1049,23 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     context.resize(size.width, size.height);
                 }
             }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                // 动态切换 (拖拽跨屏 / 运行中改系统缩放): 只更新 scale 并立即
+                // 按新逻辑视口重排; 尺寸与表面走 Resized 单路径 (winit 随后
+                // 必发), 不双写防竞态 (spec A7)。隐藏态同样更新: scale 无
+                // 幻影尺寸问题, 且补上 last_real_size 注释里「隐藏期间 DPI
+                // 变化被忽略」的已知取舍中可救的一半。
+                log::info!("DPI 缩放变化：{} → {}", self.scale, scale_factor);
+                self.scale = scale_factor;
+                // 图集缓存键是物理字号, scale 一变全部失效 (内部按变化才清)。
+                self.texts.set_scale_factor(self.scale as f32);
+                if let Some(context) = &mut self.context {
+                    context.set_scale_factor(self.scale);
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::Moved(position) => {
                 // 位置记忆: 拖动后回报物理坐标 (产品侧防抖落盘)。
                 // 最大化/最小化位置由系统管理, 不记 —— 最大化位污染还原位;
