@@ -121,15 +121,20 @@ impl WindowEventSender {
 }
 
 /// 把 winit 窗口事件转换为内部事件; 无关事件返回 None。
+///
+/// `scale` 为 DPI 缩放因子 (winit `Window::scale_factor`): winit 报物理像素坐标,
+/// 框架内部统一逻辑像素 (spec: docs/specs/hidpi-scale-factor.md), 此处 ÷scale 落界。
+/// `cursor` 必须已是逻辑域 (handler 存点时已换算), MouseInput/MouseWheel 原样透传。
 pub(super) fn convert_event(
     event: &WindowEvent,
     cursor: Point,
     modifiers: ModifiersState,
+    scale: f64,
 ) -> Option<Event> {
     match event {
         WindowEvent::CursorMoved { position, .. } => Some(Event::CursorMoved(Point::new(
-            position.x as f32,
-            position.y as f32,
+            (position.x / scale) as f32,
+            (position.y / scale) as f32,
         ))),
         WindowEvent::CursorLeft { .. } => Some(Event::CursorLeft),
         WindowEvent::MouseInput { state, button, .. } => {
@@ -150,7 +155,9 @@ pub(super) fn convert_event(
         WindowEvent::MouseWheel { delta, .. } => {
             let d = match delta {
                 winit::event::MouseScrollDelta::LineDelta(x, y) => (*x, *y),
-                winit::event::MouseScrollDelta::PixelDelta(p) => (p.x as f32, p.y as f32),
+                winit::event::MouseScrollDelta::PixelDelta(p) => {
+                    ((p.x / scale) as f32, (p.y / scale) as f32)
+                }
             };
             Some(Event::MouseWheel {
                 delta: d,
@@ -242,5 +249,87 @@ mod tests {
             }
             other => panic!("期望 BoostFrames, 实际 {other:?}"),
         }
+    }
+
+    // ---- HiDPI scale 支持 (spec: docs/specs/hidpi-scale-factor.md) ----
+    // 框架内部坐标统一为逻辑像素: winit 报物理坐标, 边界处 ÷scale 转逻辑。
+
+    use winit::event::{DeviceId, MouseScrollDelta, TouchPhase};
+    use winit::keyboard::ModifiersState as WinitModifiers;
+
+    #[test]
+    fn cursor_moved_position_divided_by_scale() {
+        let ev = WindowEvent::CursorMoved {
+            device_id: DeviceId::dummy(),
+            position: winit::dpi::PhysicalPosition::new(200.0, 100.0),
+        };
+        let Some(Event::CursorMoved(p)) =
+            convert_event(&ev, Point::new(0.0, 0.0), WinitModifiers::empty(), 2.0)
+        else {
+            panic!("期望 CursorMoved");
+        };
+        assert_eq!((p.x, p.y), (100.0, 50.0), "物理坐标 ÷scale 得逻辑坐标");
+    }
+
+    #[test]
+    fn cursor_moved_scale_one_is_identity() {
+        let ev = WindowEvent::CursorMoved {
+            device_id: DeviceId::dummy(),
+            position: winit::dpi::PhysicalPosition::new(200.5, 100.25),
+        };
+        let Some(Event::CursorMoved(p)) =
+            convert_event(&ev, Point::new(0.0, 0.0), WinitModifiers::empty(), 1.0)
+        else {
+            panic!("期望 CursorMoved");
+        };
+        assert_eq!((p.x, p.y), (200.5, 100.25), "s=1.0 必须逐位恒等");
+    }
+
+    #[test]
+    fn mouse_wheel_pixel_delta_divided_line_delta_untouched() {
+        let pixel = WindowEvent::MouseWheel {
+            device_id: DeviceId::dummy(),
+            delta: MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(40.0, 20.0)),
+            phase: TouchPhase::Moved,
+        };
+        let Some(Event::MouseWheel { delta, .. }) =
+            convert_event(&pixel, Point::new(0.0, 0.0), WinitModifiers::empty(), 2.0)
+        else {
+            panic!("期望 MouseWheel");
+        };
+        assert_eq!(delta, (20.0, 10.0), "PixelDelta 是物理域, 须 ÷scale");
+
+        let line = WindowEvent::MouseWheel {
+            device_id: DeviceId::dummy(),
+            delta: MouseScrollDelta::LineDelta(1.0, -2.0),
+            phase: TouchPhase::Moved,
+        };
+        let Some(Event::MouseWheel { delta, .. }) =
+            convert_event(&line, Point::new(0.0, 0.0), WinitModifiers::empty(), 2.0)
+        else {
+            panic!("期望 MouseWheel");
+        };
+        assert_eq!(delta, (1.0, -2.0), "LineDelta 是行域, 不受 scale 影响");
+    }
+
+    #[test]
+    fn mouse_input_position_passes_cursor_through() {
+        // MouseInput 不带坐标, 用调用方给的 cursor (handler 存点时已 ÷scale)。
+        let ev = WindowEvent::MouseInput {
+            device_id: DeviceId::dummy(),
+            state: ElementState::Pressed,
+            button: WinitMouseButton::Left,
+        };
+        let cursor = Point::new(100.0, 50.0);
+        let Some(Event::MouseInput { position, .. }) =
+            convert_event(&ev, cursor, WinitModifiers::empty(), 2.0)
+        else {
+            panic!("期望 MouseInput");
+        };
+        assert_eq!(
+            (position.x, position.y),
+            (cursor.x, cursor.y),
+            "cursor 由 handler 保证已是逻辑域, 此处原样透传"
+        );
     }
 }

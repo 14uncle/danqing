@@ -103,6 +103,14 @@ pub(super) struct Handler<'a, A: App> {
     /// 会以旧物理像素强制回尺寸 —— 对固定尺寸弹窗影响小, 下次真实尺寸
     /// 变化即自愈。
     last_real_size: PhysicalSize<u32>,
+    /// DPI 缩放因子 (winit `Window::scale_factor`)。
+    ///
+    /// 框架内部坐标统一为**逻辑像素** (spec: docs/specs/hidpi-scale-factor.md):
+    /// 布局视口 = last_real_size ÷ scale; 输入坐标 ÷scale 落界;
+    /// TextBatch 按 px×scale 物理栅格化。窗口创建时取真实值初始化
+    /// (见 create_window), `ScaleFactorChanged` 时更新 (拖拽跨屏 /
+    /// 运行中改系统缩放)。1.0 = 100% 缩放, 与引入前行为逐位一致。
+    scale: f64,
     /// 热键主键吞键守卫 (热键触发时置入, 主键抬起 / 失焦时清除)。
     /// 详见 [`hotkey_swallow_filter`]。
     swallow_hotkey_key: Option<KeyCode>,
@@ -172,6 +180,7 @@ impl<'a, A: App> Handler<'a, A> {
             is_visible: true,
             has_os_focus: false,
             last_real_size: PhysicalSize::new(0, 0),
+            scale: 1.0,
             swallow_hotkey_key: None,
             mouse_capture: None,
             images: ImageBatch::new(),
@@ -877,7 +886,11 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         Self::log_event(&event);
         if let WindowEvent::CursorMoved { position, .. } = event {
-            self.cursor = Point::new(position.x as f32, position.y as f32);
+            // winit 报物理像素坐标; 框架内部统一逻辑像素, 存点即 ÷scale。
+            self.cursor = Point::new(
+                (position.x / self.scale) as f32,
+                (position.y / self.scale) as f32,
+            );
         }
         if let WindowEvent::ModifiersChanged(mods) = event {
             self.modifiers = mods.state();
@@ -922,7 +935,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                 | WindowEvent::MouseWheel { .. }
         ) {
             // 鼠标事件
-            if let Some(internal) = convert_event(&event, self.cursor, self.modifiers) {
+            if let Some(internal) = convert_event(&event, self.cursor, self.modifiers, self.scale) {
                 Self::note_activity(self.config.mode, &mut self.last_activity);
                 // 指针捕获配对: 抬起重定向到捕获的按下坐标, 保证消费按下的
                 // 组件收到配对抬起 (按下态不泄漏; 布局剧变属可接受近似)
@@ -984,7 +997,9 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
                     self.app.event(&internal);
                 }
             }
-        } else if let Some(internal) = convert_event(&event, self.cursor, self.modifiers) {
+        } else if let Some(internal) =
+            convert_event(&event, self.cursor, self.modifiers, self.scale)
+        {
             // 键盘 /IME 事件经焦点路由
             Self::note_activity(self.config.mode, &mut self.last_activity);
             self.dispatch_focused_event(&internal);

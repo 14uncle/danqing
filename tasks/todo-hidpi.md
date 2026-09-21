@@ -11,7 +11,7 @@
   - Files: `src/render/text.rs`
   - 检查点: **CP1**
 
-- [ ] T2: 输入边界换算
+- [x] T2: 输入边界换算
   - Acceptance: `convert_event` 增加 scale 参数；`CursorMoved` 坐标 ÷s；`MouseWheel` PixelDelta ÷s（LineDelta 不动）；handler 存 `self.cursor` 处 ÷s；handler 现传 1.0（T3 才接线），行为不变
   - Verify: 新增单测：物理 (200,100) @s=2 → 逻辑 (100,50)；PixelDelta ÷s、LineDelta 原样；`cargo test window` 全绿
   - Files: `src/window/event.rs`, `src/window/handler.rs`
