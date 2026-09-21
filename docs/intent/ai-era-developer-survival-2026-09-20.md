@@ -272,7 +272,7 @@ E 路补一条：bootstrap 成功样本的共同点是**「卖结果/代理」�
 | 5 | **小红书** | 图文 | 「番茄钟/专注/自律」是热门话题；胃之书靠小红书自传播的同类路径 |
 | 6 | **知乎** | 回答已有问题 | 「有什么好用的番茄钟」类问题下作答，非自问自答 |
 | 7 | **Reddit** | r/Windows11 / r/software / r/SideProject | 英文，注意各版自推广规则 |
-| 8 | **Hacker News** | Show HN | 英文，残酷但信号强 |
+| 8 | **Hacker News** | Show HN | 英文，残酷但信号强 ⚠️ **2026-09-21 砍掉**：国内不可达（本机实测 DNS 污染 + HTTPS 超时），无代理通道 |
 | 9 | **Product Hunt** | launch | 英文，一次性 |
 | 10 | **ASO / 商店内** | 优化 MS Store listing 品类词 | 直接回应 A6：区分「渠道无流量」与「listing 不排名」 |
 
@@ -378,7 +378,7 @@ E 路补一条：bootstrap 成功样本的共同点是**「卖结果/代理」�
 **唯一能同时满足「对的受众 + 可点击外链 + 量」的是策展/编辑型渠道——它们替你分发且带链接，一次收录 = 一次真实触达，不需养号。**
 
 - **中文策展站**：小众软件**主站收录**（forum 帖 → 主站专题）、少数派、软餐、反斗软件、异次元软件世界、大眼仔旭
-- **英文策展站**：AlternativeTo 收录、Portable Freeware、Reddit r/software · r/Windows11、HN Show HN、Product Hunt
+- **英文策展站**：AlternativeTo 收录、Portable Freeware、Reddit r/software · r/Windows11、~~HN Show HN~~（**2026-09-21 砍掉**：国内不可达，DNS 污染实测）、Product Hunt
 
 **已排除的动作**（数据证明无效，不再投入）：
 - 算法型泛渠道（抖音/小红书/百家号）——无外链，死路

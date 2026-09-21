@@ -54,7 +54,7 @@
 
 ### 最终执行清单（log，2026-09-20 定稿）
 
-**首投对象 = log**（基线真零，读得干净）。各渠道按 referrer 域名归因（sspai.com / meta.appinn.net / ruancan.com / iplaysoft.com / news.ycombinator.com），**同日批量投、读数互不污染**：
+**首投对象 = log**（基线真零，读得干净）。各渠道按 referrer 域名归因（sspai.com / meta.appinn.net / ruancan.com / iplaysoft.com），**同日批量投、读数互不污染**：
 
 | 序 | 渠道 | 入口 | 形态 | 文案 | 耗时 |
 |---|---|---|---|---|---|
@@ -63,10 +63,10 @@
 | 3 | **软餐** | 邮件 `xiansuo@ruancan.com` | pitch 邮件 | 文案 5 + 截图附件 | ~10 分钟 |
 | 4 | **异次元** | 邮件 `xtremforce@gmail.com`（发前复核投稿页） | 全文投稿邮件 | 文案 6（= 文案 2 全文）+ 截图附件 | ~10 分钟 |
 | 5 | **反斗软件** | 邮件 `jzhone@qq.com` | pitch 邮件（低确定性，可选） | 文案 5 改称呼 | ~5 分钟 |
-| 6 | **Show HN** | `news.ycombinator.com`（需账号） | 英文社区帖 | 文案 3 | **明天（周一）21:00–23:00 发** = 北美周一上午；今天周日流量低 |
+| ~~6~~ | ~~**Show HN**~~ | — | — | — | **已砍掉（2026-09-21 用户决定）**：HN 国内不可达（本机实测 DNS 污染——域名被解析到 Facebook IPv6、HTTPS 连接超时），无代理通道；文案 3 留档备复用 |
 
-已划掉：~~大眼仔旭~~（互链前置）；~~算法泛渠道 / 开发者社区~~（实测无效，不再投入）。
-英文收录型（AlternativeTo / Product Hunt / Reddit）：**本轮不投**——规则未核实 + 需 VPN/养号，等中文站 + HN 读数出来再定。
+已划掉：~~大眼仔旭~~（互链前置）；~~算法泛渠道 / 开发者社区~~（实测无效，不再投入）；~~Show HN~~（HN 国内不可达，2026-09-21）。
+英文收录型（AlternativeTo / Product Hunt / Reddit）：**本轮不投**——规则未核实 + 需 VPN/养号，等中文站读数出来再定。
 
 ---
 
@@ -92,7 +92,7 @@
 | 7 | **AlternativeTo** | alternativeto.net 提交 | 收录（长期 SEO 流量） | 两者 |
 | 8 | **Portable Freeware** | portablefreeware.com 提交 | 编辑收录 | pomodoro |
 | 9 | **Reddit** | r/software · r/Windows11 · r/SideProject | 社区帖（注意各版自推广规则） | 两者 |
-| 10 | **Hacker News** | Show HN | 社区帖 | **log**（开发工具向） |
+| ~~10~~ | ~~**Hacker News**~~ | ~~Show HN~~ | **已砍掉**（2026-09-21：HN 国内不可达，执行清单同步移除） | — |
 | 11 | **Product Hunt** | producthunt.com launch | 一次性 launch | log |
 
 ### 已明确排除（实测证明无效，不再投入）
@@ -175,7 +175,9 @@
 
 ⚠️ **文案事实性修正（2026-09-20 用户指出，实事求是）**：① 初版文案开头的「运维丢给我 2 GB 日志、最后靠 grep 扛过去」是 **agent 编造的叙事**——真实起源是旧版产品选型指南的调研，已全部改为可查证事实；② 竞品数字以 `danqing-log/docs/DEEP_COMPETITIVE_RESEARCH.md` §2.2 为准：LogViewPlus 1 GB 冷启动 **60 s**、Daucloud **7 s** 均为实测；**klogg 未实测**（旧稿「0.8 s」系编造值，已废），**禁止对 klogg 声称任何速度优势**（mmap 同构，速度平手）；③ 「VS Code 明文 1 GB ≈ 10 s」为用户 2026-09-20 实测口述，仓库无记录；④ **竞品侧只实测过 1 GB**（用户 2026-09-20 澄清）——DEEP §2.2 的 10 GB 竞品行（LogViewPlus ~600 s / Daucloud ~70 s 标为「实测」）实为外推当实测，文案中所有该类参照已全部移除；**仓库侧已完成口径清扫（2026-09-21）**：DEEP §2.2 该改「未实测」并加二轮修正框，PERFORMANCE_REPORT 竞品表重做为实测口径并回填 VS Code/5GB/10GB 值，全仓旧值（69/70/74/77/88ms）、「独家」「唯一」「卡死/卡成 PPT」、ANSI 假主张、POC 中文 Show HN 旧稿同步清掉，审计链见 `ROADMAP-v1x.md` §六。自家大文件实测（用户 2026-09-20 口述，仓库已回填）：**5 GB 冷启动约 3 秒、10 GB 冷启动约 6~7 秒**——注意旧目标「10 GB < 3 s」**未达到**，任何文案只许用实测值（6~7 s），**禁止把目标值当成绩引用**。（一致性校验：1 GB 0.6 s → 5 GB 3 s → 10 GB 6~7 s，与索引架构的线性速率吻合。）
 
-### 文案 3 · Show HN（log）
+### 文案 3 · Show HN（log）—— **已砍掉（2026-09-21 用户决定），文案留档备复用**
+
+> ⚠️ **砍因**：HN 国内不可达——本机实测 DNS 污染（`news.ycombinator.com` 被解析到 Facebook IPv6，HTTPS 连接 15 秒超时；Cloudflare/Quad9/OpenDNS 四个境外 DoH 亦不可达），且无代理通道。若将来环境变化或有通道，此稿可直接复用（原窗口建议：周一 21:00–23:00 北京时间 = 北美周一上午）。
 
 > **标题**：`Show HN: LogLens – a Windows log viewer that indexes 1 GiB in 92 ms`
 >
@@ -206,6 +208,8 @@
 ⚠️ **对外文案禁止声称清单**（`danqing-log/CLAUDE.md` 已立）：① 「ANSI 颜色支持」——**全仓无此实现**（klogg 也缺，不构成差异化）；② 「JSONL 列化独家」——LogViewPlus 与 VS Code 扩展都支持，站得住的限定说法是「**原生桌面、秒开的** JSONL 列化」。写任何对外文案前先扫这两条。
 
 ### 文案 4 · 小众软件论坛·发现频道（log 新帖）
+
+📌 **发帖稿已按官方模板逐栏改造，以仓外工作文件为准（2026-09-21）**：`F:\github\farm01\docs\小众软件发帖模板.md`——格式对照 pomodoro 过审实例（`meta.appinn.net/t/topic/92064`）校准（标题带【开发者自荐】前缀 / 简介开头先放图 / 官网栏用项目符号列表）。本节文案 4 为内容底稿，粘贴时以该文件为准。
 
 > **标题**：丹青日志 LogLens —— 1 GB 日志秒开的 Windows 日志查看器（开源）
 >
@@ -280,16 +284,25 @@
 
 | 渠道 | 投递日 | 形式 | 状态 | L1 曝光 | L1 互动 | GitHub uniques 增量 | 商店视图增量 | 安装增量 | acquisitions | 自购剔除 | 净陌生人付费 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 少数派 | 待定（用户动作） | 体验文（文案 2，log） | 就绪待投 |  |  |  |  |  | —（付费层未上线） | — | — |
-| 小众软件论坛 | 待定（用户动作） | 自荐新帖（文案 4，log） | 就绪待投 |  |  |  |  |  | — | — | — |
+| 少数派 | **2026-09-21** | 体验文（文案 2，log） | **审核中**（当日提交，URL 待出） |  |  |  |  |  | —（付费层未上线） | — | — |
+| 小众软件论坛 | **2026-09-21** | 自荐新帖（模板稿，log） | **已发** [topic/92198](https://meta.appinn.net/t/topic/92198) | 33（09-21 读） | **1 回复（陌生人 tjsky：「下来试试，倒是 EmEditor 和 UltraEdit 之外的一个选择」）** |  |  |  | — | — | — |
 | 软餐 | 待定（用户动作） | pitch 邮件（文案 5，log） | 就绪待投（2 工作日时钟） |  |  |  |  |  | — | — | — |
 | 异次元 | 待定（用户动作） | 全文邮件（文案 6，log） | 就绪待投 |  |  |  |  |  | — | — | — |
 | 反斗软件 | 待定（用户动作） | pitch 邮件（文案 5 改，log） | 就绪待投（可选） |  |  |  |  |  | — | — | — |
-| Show HN | 待定（建议周一 21:00–23:00） | 社区帖（文案 3，log） | 就绪待投 |  |  |  |  |  | — | — | — |
+| CSDN | **2026-09-21** | 方案外自投（log） | **已发** [166250357](https://blog.csdn.net/GANWEIHUN/article/details/166250357) | 15 阅读（09-21 读） |  |  |  |  | — | — | — |
+| 知乎 | **2026-09-21** | 方案外自投（log） | **已发** [p/2085411801093633051](https://zhuanlan.zhihu.com/p/2085411801093633051) | 待补（外抓 403，后台读） |  |  |  |  | — | — | — |
+| 掘金 | **2026-09-21** | 方案外自投（log） | **已发** [7687796652300517416](https://juejin.cn/post/7687796652300517416) | 待补（JS 渲染抓不到，后台读） |  |  |  |  | — | — | — |
+| 微信公众号 | **2026-09-21** | 方案外自投（log） | **已发** [mp.weixin](https://mp.weixin.qq.com/s/VnR50DT4vS-cMWWw0Il43g)（无可点外链，预期 referrer 不可见） |  |  |  |  |  | — | — | — |
+| 抖音 | **2026-09-21** | 方案外自投（log） | **已发**（作品 ID `7687911042646691082`，[创作者后台](https://creator.douyin.com/creator-micro/work-management/work-detail/7687911042646691082?enter_from=content)；无公开链接入口，预期 referrer 不可见） | 待补（后台读） |  |  |  |  | — | — | — |
+| ~~Show HN~~ | — | — | **已砍掉**（2026-09-21：HN 国内不可达） | — | — | — | — | — | — | — | — |
+
+**2026-09-21 实投记录（用户执行）**：当日实投 **7 渠道**——小众软件论坛、少数派 + 方案外 5 个（CSDN / 知乎 / 掘金 / 微信公众号 / 抖音）；3 个邮件渠道（软餐 / 异次元 / 反斗）当日未投，仍就绪。分析备注：开发者社区（CSDN / 知乎 / 掘金）对 pomodoro 是受众错配（198 阅读≈0），但 **log 的用户本来就是开发者——受众正对**，这是「同渠道换产品」的再测，不是重复烧；公众号 / 抖音无可点击外链，只作顶部认知，预期 GitHub referrer 里看不到它们。
+
+**T0 基线快照**（2026-09-21 投放当日拉取，`gh api`）：近 14 天（09-07→09-20）**79 views / 14 uniques**；referrer **只有 github.com（19/4），外部来源为零** ✓；v1.0.0 zip 下载 **3**（sha256 0）；**star 1 / fork 0 / watcher 0**。**回读对照点：7 天 = 2026-09-28，30 天 = 2026-10-21**。
 
 **读数工具**：
-- GitHub：`gh api repos/14uncle/danqing-pomodoro/traffic/views`（**仅 14 天窗口**，需按周期拉）
-- GitHub 下载：`gh api repos/14uncle/danqing-pomodoro/releases`（累计，可与上次快照相减）
+- GitHub：`gh api repos/14uncle/danqing-log/traffic/views`（**仅 14 天窗口**，需按周期拉）
+- GitHub 下载：`gh api repos/14uncle/danqing-log/releases`（累计，可与上次快照相减）
 - 商店：Partner Center → 收购 → 过去 1 个月（注意 T+1~T+3 延迟）
 - **自购剔除**：用户每次自己购买都要记时间戳，从 acquisitions 里减
 
