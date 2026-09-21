@@ -675,10 +675,13 @@ impl<A: App> Handler<'_, A> {
         let screen = self.window.as_ref().map(|_| {
             // 尺寸取自 last_real_size 而非 winit inner_size: 后者在 Windows 上
             // 被隐藏态的幻影 WM_SIZE 污染后不再自愈 (见 last_real_size 字段注释)。
-            Size::new(
-                self.last_real_size.width as f32,
-                self.last_real_size.height as f32,
-            )
+            // 物理尺寸 ÷scale 得逻辑布局视口 (框架内部统一逻辑像素)。
+            let (w, h) = crate::render::logical_viewport(
+                self.last_real_size.width,
+                self.last_real_size.height,
+                self.scale,
+            );
+            Size::new(w, h)
         });
         if let Some(screen) = screen {
             let ctx = AnimationCtx::new(Instant::now(), self.start.elapsed());
@@ -858,6 +861,13 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 先持有窗口引用并记下真实客户区尺寸: 预渲染首帧需要布局基准;
         // 此后每帧布局以 last_real_size 为准 (隐藏后 winit inner_size 会卡幻影值)。
         self.last_real_size = window.inner_size();
+        // DPI 缩放在首帧布局前接线: 布局视口 (÷scale) 与文字栅格化 (×scale)
+        // 都依赖它; 之后经 ScaleFactorChanged 事件更新。
+        self.scale = window.scale_factor();
+        self.texts.set_scale_factor(self.scale as f32);
+        if let Some(context) = self.context.as_mut() {
+            context.set_scale_factor(self.scale);
+        }
         self.window = Some(Arc::clone(&window));
         // 预渲染首帧: 隐藏时渲染 + present, 显示时直接见内容 — 避免首帧就绪前白屏。
         // 平台注: 已在 Windows/DX12 验证。Wayland 上隐藏表面未映射, get_current_texture

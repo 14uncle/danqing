@@ -25,6 +25,18 @@ use winit::window::Window as WinitWindow;
 
 use crate::Color;
 
+/// 物理尺寸 ÷scale → 逻辑视口尺寸 (框架内部坐标统一为逻辑像素,
+/// 见 docs/specs/hidpi-scale-factor.md)。
+///
+/// 布局视口 (handler) 与 rect/image pass 的 shader 视口 (render) 共用此一把尺。
+/// s=1.0 时逐位恒等 (f64 除法恰为原值)。
+pub(crate) fn logical_viewport(phys_w: u32, phys_h: u32, scale: f64) -> (f32, f32) {
+    (
+        (f64::from(phys_w) / scale) as f32,
+        (f64::from(phys_h) / scale) as f32,
+    )
+}
+
 /// 根据平台选择单一主 backend，避免实例创建时扫描多个后端。
 ///
 /// Windows 固定走 DX12：`Backends::PRIMARY` 会同时拉起 Vulkan 与 DX12
@@ -92,6 +104,10 @@ pub struct Context {
     text_pipeline: TextPipeline,
     /// 图像纹理渲染管线。
     image_pipeline: ImagePipeline,
+    /// DPI 缩放因子: rect/image 批是**逻辑域** (组件坐标), shader 视口须喂
+    /// 逻辑尺寸 (物理 ÷scale); text 批是**物理域** (TextBatch 内部已 ×scale
+    /// 栅格化), 喂物理尺寸; background 顶点为归一化坐标, 域无关 (喂物理)。
+    scale_factor: f64,
 }
 
 impl Context {
@@ -200,7 +216,19 @@ impl Context {
             rect_pipeline,
             text_pipeline,
             image_pipeline,
+            scale_factor: 1.0,
         })
+    }
+
+    /// 设置 DPI 缩放因子 (窗口创建时取 `Window::scale_factor`,
+    /// `ScaleFactorChanged` 时更新)。只影响 rect/image pass 的 shader 视口
+    /// 换算; 非法值 (非正/非有限) 拒绝。
+    pub fn set_scale_factor(&mut self, scale: f64) {
+        if !scale.is_finite() || scale <= 0.0 {
+            log::warn!("拒绝非法缩放因子: {scale}");
+            return;
+        }
+        self.scale_factor = scale;
     }
 
     /// 窗口尺寸变化时重建 surface 配置 (0 尺寸最小化期间忽略)。
@@ -267,10 +295,22 @@ impl Context {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame encoder"),
             });
+        // 分域视口 (spec: docs/specs/hidpi-scale-factor.md):
+        // text 批与 background 走物理域 (text 实例由 TextBatch 按 px×scale 物理
+        // 栅格化; background 顶点归一化, 域无关); rect/image 批是逻辑域 (组件
+        // 坐标原样), shader 除法里 scale 自然约掉, 视觉尺寸跨 DPI 不变。
         let target = DrawTarget {
             view: &view,
             width: self.config.width as f32,
             height: self.config.height as f32,
+            clear_color: self.clear_color,
+        };
+        let (logical_w, logical_h) =
+            logical_viewport(self.config.width, self.config.height, self.scale_factor);
+        let logical_target = DrawTarget {
+            view: &view,
+            width: logical_w,
+            height: logical_h,
             clear_color: self.clear_color,
         };
         let has_background = self
@@ -294,7 +334,7 @@ impl Context {
              (浮层文字滞留在低层, 被浮层自己的矩形盖住)"
         );
         self.rect_pipeline
-            .upload(&self.device, &self.queue, rects, &target);
+            .upload(&self.device, &self.queue, rects, &logical_target);
         self.text_pipeline
             .upload(&self.device, &self.queue, texts, &target);
         let layers = rect_spans.len().max(text_spans.len());
@@ -302,7 +342,7 @@ impl Context {
             let clear = layer == 0 && !has_background;
             let rect_span = rect_spans.get(layer).cloned().unwrap_or(0..0);
             self.rect_pipeline
-                .draw_span(&mut encoder, &target, rect_span, clear);
+                .draw_span(&mut encoder, &logical_target, rect_span, clear);
             if let Some(text_span) = text_spans.get(layer) {
                 self.text_pipeline
                     .draw_span(&mut encoder, &target, text_span.clone());
@@ -310,11 +350,42 @@ impl Context {
         }
         // 图像纹理 pass
         if !images.is_empty() {
-            self.image_pipeline
-                .draw(&self.device, &self.queue, &mut encoder, &target, images);
+            self.image_pipeline.draw(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &logical_target,
+                images,
+            );
         }
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- HiDPI scale 支持 (spec: docs/specs/hidpi-scale-factor.md) ----
+
+    #[test]
+    fn logical_viewport_divides_by_scale() {
+        assert_eq!(
+            logical_viewport(3200, 2000, 2.0),
+            (1600.0, 1000.0),
+            "200% 缩放: 物理 ÷2 得逻辑视口"
+        );
+        assert_eq!(
+            logical_viewport(1920, 1080, 1.0),
+            (1920.0, 1080.0),
+            "s=1.0 必须逐位恒等"
+        );
+        let (w, h) = logical_viewport(2560, 1440, 1.5);
+        assert!(
+            (w - 1706.6667).abs() < 0.01 && (h - 960.0).abs() < 0.01,
+            "150% 缩放: 得 {w}x{h}"
+        );
     }
 }

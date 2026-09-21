@@ -19,7 +19,7 @@
 
 ## Phase 2: 翻牌接线
 
-- [ ] T3: 布局视口逻辑化 + scale 接线
+- [x] T3: 布局视口逻辑化 + scale 接线
   - Acceptance: handler 新增 `scale: f64` 字段，窗口创建时取 `window.scale_factor()` 初始化并下发 `texts.set_scale_factor` + `context.set_scale_factor`；`render_frame` 布局视口 = `last_real_size ÷ s`（逻辑）；`Context::render` 内 rect/image pass 喂逻辑尺寸、text pass 喂物理尺寸（DrawTarget 分域）；s=1.0 本机行为与改造前一致
   - Verify: 新增单测（视口换算助手：3200×2000 @s=2 → 1600×1000）；`cargo test --lib --tests` 全绿；showcase 本机 100% 肉眼无漂移
   - Files: `src/window/handler.rs`, `src/render/mod.rs`
@@ -27,9 +27,9 @@
 
 ## Checkpoint CP1: s=1.0 回归锁
 
-- [ ] `cargo test --lib --tests` 现有测试**零修改**全绿 + 新增单测绿
-- [ ] `cargo clippy -- -D warnings` 零警告 + `cargo fmt --check`
-- [ ] showcase 100% 人工比对无漂移
+- [x] `cargo test --lib --tests` 现有测试**零修改**全绿 + 新增单测绿（616 + 集成 67）
+- [x] `cargo clippy -- -D warnings` 零警告 + `cargo fmt --check`
+- [x] showcase 100% 人工比对无漂移（截图 target/tmp/showcase-cp1.png，文字/图像/分层全部正常）
 
 ## Phase 3: 动态切换与验收
 
