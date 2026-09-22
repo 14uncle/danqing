@@ -867,7 +867,7 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // 启动即落一行 scale 日志: 「跑的是哪个框架版本/检测到几倍缩放」从此
         // 一条日志可辨 (2026-09-22 验收事故: 商店旧版被当源码新版验收)。
         log::info!(
-            "DPI 缩放接线: scale={}, 初始客户区 {}x{} 物理像素",
+            "DPI 缩放接线：scale={}, 初始客户区 {}x{} 物理像素",
             self.scale,
             self.last_real_size.width,
             self.last_real_size.height

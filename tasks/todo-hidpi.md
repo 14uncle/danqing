@@ -40,8 +40,8 @@
   - 检查点: **CP2**
 
 - [x] T5: 人工视觉验收 (**2026-09-22 通过**)
-  - Acceptance: 本机 1080p 屏 Windows 缩放调 200%：showcase 与 100% 基准逐区域等比、文字清晰度不劣化（S1）；125%/150% 各抽验一次无破版（S2）；运行中改系统缩放 UI 等比跟随（S3/T4 实测）；日志无「图集满」warn（R1 观察，触发则停工请示）
-  - 验收记录: showcase 全套通过（S1 等比 / S2 125%·150% 抽验 / S3 动态跟随）；**pomodoro + danqing-log 源码复验通过**（RustRover debug，200%，danqing-log 走 `.cargo/config.toml` patch）。R1: 当日全部运行日志零「图集满」warn。
+  - Acceptance: 本机 1080p 屏 Windows 缩放调 200%：showcase 与 100% 基准逐区域等比、文字清晰度不劣化（S1）；125%/150% 各抽验一次无破版（S2）；运行中改系统缩放 UI 等比跟随（S3/T4 实测）；日志无「栅格化失败」warn（R1 观察；图集满时 err 含「字形图集已满」，触发则停工请示）
+  - 验收记录: showcase 全套通过（S1 等比 / S2 125%·150% 抽验 / S3 动态跟随）；**pomodoro + danqing-log 源码复验通过**（RustRover debug，200%，danqing-log 走 `.cargo/config.toml` patch）。R1: 当日全部运行日志零「栅格化失败」warn（grep 口径「图集|字形」，覆盖 measure/paint 两路径）。**注**: 原扳机写「图集满」是死字符串（实际日志为「栅格化失败」/「字形图集已满」），2026-09-22 review 修正。
   - **事故与收口**: 首轮产品「不通过」实为跑了旧框架 —— danqing-log 的 patch 默认关、lock 钉修复前 rev `21e03952`；pomodoro 点到商店版（包私有日志 09:30 实证，源码 exe 未重建）。与修复本身无关。为此框架新增启动 scale 日志（`2ac0900`），「跑的是哪个框架/几倍缩放」一贴日志可辨。
   - Files: 无代码改动（诊断日志行见 `2ac0900`）
   - 检查点: **CP2**

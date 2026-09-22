@@ -56,7 +56,7 @@
 | 风险 | 级别 | 对策 |
 |------|------|------|
 | T3 翻牌引入回归 | 高 | s=1.0 数学恒等（×1.0/÷1.0 逐位不变）+ CP1 测试零修改绿 + showcase 人工比对 |
-| R1 图集容量 @s=2（字形面积 ×4，1024² 或不足） | 中 | T5 验收盯日志「图集满」warn；触发则请示扩容/驱逐（Boundaries: ask first） |
+| R1 图集容量 @s=2（字形面积 ×4，1024² 或不足） | 中 | T5 验收盯日志「栅格化失败」warn（图集满 err 含「字形图集已满」）；触发则请示扩容/驱逐（Boundaries: ask first） |
 | fractional scale 行高/测量不一致 | 低 | A3 同一 rounded px 贯穿栅格与测量，内部自洽 |
 | ScaleFactorChanged 与 Resized 时序竞态 | 中 | A7 单路径；T5 运行中改缩放实测 |
 | 隐藏态改系统缩放后落位错误 | 低 | scale 更新无幻影尺寸问题；显示时自愈路径按新 scale 换算（handler.rs:1410 已用 scale_factor） |

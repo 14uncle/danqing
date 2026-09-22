@@ -194,16 +194,21 @@ impl TextBatch {
     /// 按字排版一段单行文本：从 (x, baseline) 起逐字放置 (**逻辑像素**坐标)。
     ///
     /// 内部 ×scale 转物理域: 按 `round(px×scale)` 物理字号栅格化、
-    /// 落点吸附物理像素格。排版失败的字形 (如图集满) 记录日志并跳过，不中断整行。
+    /// 落点吸附物理像素格。排版失败的字形 (如图集已满) 记录日志并跳过，不中断整行。
     pub fn push_text(&mut self, text: &str, x: f32, baseline: f32, px: u16, color: Color) {
         let phys = self.phys_px(f32::from(px)) as u16;
         let mut pen_x = x * self.scale;
         let baseline = baseline * self.scale;
         let atlas_size = self.atlas.size() as f32;
         for ch in text.chars() {
-            let Ok(info) = self.atlas.get_or_rasterize(self.font.inner(), ch, phys) else {
-                log::warn!("字形栅格化失败，跳过：{ch:?} ({phys}px 物理)");
-                continue;
+            let info = match self.atlas.get_or_rasterize(self.font.inner(), ch, phys) {
+                Ok(info) => info,
+                Err(err) => {
+                    // err 必须带上: 图集已满 (AtlasError::Full) 与 fontdue 栅格化失败
+                    // 在日志里靠它区分, 与 measure 路径对称 (R1 预警线, 2026-09-22 评审)。
+                    log::warn!("字形栅格化失败，跳过：{ch:?} ({phys}px 物理)：{err}");
+                    continue;
+                }
             };
             if info.width > 0 {
                 // 字形落点吸附整数像素: dst 矩形与物理像素格对齐后, 线性采样

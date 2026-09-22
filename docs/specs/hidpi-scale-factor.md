@@ -91,7 +91,7 @@ cargo test <name> -- --exact
 
 ## Risks / Open Questions
 
-- **R1 图集容量**：1024² 图集在 s=2.0 下字形面积 ×4，LogLens 长会话大字号档位是否触发「图集满跳过字形」—— plan 阶段评估（选项：扩容 2048² / LRU 驱逐 / 按 scale 分档）
+- **R1 图集容量**：1024² 图集在 s=2.0 下字形面积 ×4，LogLens 长会话大字号档位是否触发「图集已满跳过字形」（日志扳机「栅格化失败」）—— plan 阶段评估（选项：扩容 2048² / LRU 驱逐 / 按 scale 分档）
 - **R2 fractional scale 栅格粒度**：atlas 现按 u16 px 键控，fontdue 原生接受 f32 —— plan 定（f32 直传 vs 就近取整，取整方向影响行高一致性）
 - **R3 placement 持久化语义**：产品保存/恢复的窗口位置尺寸跨 DPI 屏行为 —— 现状不变（物理域），验收发现错位再立 follow-up
 - **R4 背景 shader 物理像素程序纹理核查**：是否存在按 frag coord 计算的效果（D5 豁免是否真有对象）
