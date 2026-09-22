@@ -94,7 +94,7 @@ pub struct UpdateSpec {
 
 - [ ] `danqing::update` 纯逻辑 + GitHub 轨在 `update` feature 下编过, 单测全绿(移植 pomodoro 覆盖)。
 - [ ] 默认(无 feature)构建**不**拉 `ureq/serde/dirs`(`cargo check --no-default-features` 验证)。
-- [ ] 产品侧可经 `UpdateSpec` 注入 repo/来源, `current_hint()` 每帧给 UI 角标, 有新版给「前往下载」。
+- [x] 产品侧可经 `UpdateSpec` 注入 repo/来源, `current_hint()` 每帧给 UI 角标, 有新版给「前往下载」。(2026-09-22 update-badge 批次落地: danqing-log 设置按钮角标 + 双轨动作; 商店轨动作文案是「更新」)
 - [ ] 后台线程检查不阻塞 UI; 网络失败静默 None。
 
 ## Open Questions

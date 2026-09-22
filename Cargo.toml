@@ -43,7 +43,9 @@ rodio = { version = "0.22", default-features = false, features = ["playback", "s
 tray-icon = "0.19"
 windows-sys = { version = "0.59", features = ["Win32_Storage_Packaging_Appx", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_UI_Shell", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole"] }
 # 更新检查核心 (仅 `update` feature 启用): GitHub Releases + 序列化缓存 + 系统打开链接。
-ureq = { version = "3.4", default-features = false, features = ["rustls", "json"], optional = true }
+# `platform-verifier`: 根证书走系统证书库而非内置 webpki-roots —— 加速器/企业代理的
+# 私有 CA 中间人环境下 webpki-roots 必败且**静默** (2026-09-22 实测, SPEC-update-badge D2)。
+ureq = { version = "3.4", default-features = false, features = ["rustls", "json", "platform-verifier"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 dirs = { version = "5", optional = true }

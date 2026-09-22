@@ -73,6 +73,10 @@ pub enum UpdateStatus {
 
 /// 检查结果缓存: 落 `%APPDATA%/danqing/update-check-<repo>.json` (按 repo 分词,
 /// 避免多产品共用同一缓存文件)。
+///
+/// **仅影响展示的不可信输入**: 同用户写者可伪造角标/压制检查 (未来时间戳让
+/// `is_fresh` 恒真), 但那不越过任何权限边界 (同写者本就能替换 exe), 故不做
+/// 完整性校验 —— 只保证解析失败按无缓存处理 (fail-closed)。
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CheckCache {
     /// 上次检查成功的 wall-clock 秒。
@@ -234,18 +238,40 @@ pub fn perform_action(spec: &UpdateSpec) {
     }
 }
 
+/// 构造更新检查用的 Agent 配置: 全局超时 + **系统证书库**根证书。
+///
+/// 为何弃默认的 WebPki 内置根证书 (2026-09-22 实测): 加速器/企业代理常把
+/// `api.github.com` 劫持到本地 443 并以**私有 CA** 做 TLS 中间人 (hosts 同步改写),
+/// 内置根证书不认私有 CA → 握手拒绝 → 检查**静默**失败, 用户永远收不到更新提示
+/// (实录: SteamTools 劫持下必败; 同机 PowerShell/gh 走系统证书存储则通)。
+/// 安全权衡 (SPEC-update-badge D2): 系统证书库意味着信任系统管理员装进信任存储的
+/// 任何 CA (含 `CurrentUser\Root` 这类免提权可写的) —— 最坏代价是攻击者**伪造或
+/// 压制**「有新版」提示、并观察检查时机 (固定 UA, 无 PII); 而「前往下载」的 URL
+/// 是编译期常量, 改不动, 用户落点始终是真发布页。**这条边界靠「远端 JSON 永不作
+/// 定位符」成立** —— 见 [`fetch_update_status`] 的不变量注释, 加字段前先读它。
+fn agent_config() -> ureq::config::Config {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS)))
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                .build(),
+        )
+        .build()
+}
+
 /// GitHub 轨: 查 releases/latest 的 tag_name; 网络/解析任何失败返回 None (静默)。
 fn fetch_update_status(spec: &UpdateSpec) -> Option<UpdateStatus> {
+    /// **不变量 (D2 安全边界)**: 只反序列化 `tag_name` —— 远端 JSON 永不作定位符
+    /// (URL/路径/命令), 展示前经 [`parse_version`] 收成数字三元组。想给这里加
+    /// `html_url` / `assets[].browser_download_url` 之类字段的人, 先读 SPEC-update-badge D2。
     #[derive(serde::Deserialize)]
     struct Release {
         tag_name: String,
     }
     let api = format!("https://api.github.com/repos/{}/releases/latest", spec.repo);
-    let config = ureq::Agent::config_builder()
-        .timeout_global(Some(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS)))
-        .build();
     // GitHub API 无 User-Agent 直接 403。
-    let release: Release = ureq::Agent::new_with_config(config)
+    let release: Release = ureq::Agent::new_with_config(agent_config())
         .get(&api)
         .header("User-Agent", spec.user_agent)
         .call()
@@ -431,6 +457,22 @@ mod tests {
         assert!(current_hint(&spec).is_some());
         publish(None);
         assert!(current_hint(&spec).is_none());
+    }
+
+    #[test]
+    fn update_agent_trusts_platform_root_certs() {
+        // D2 回归锁: 根证书必须是**系统证书库** (PlatformVerifier), 不是内置 WebPki。
+        // 取反的后果不是报错而是**静默**——私有 CA 中间人环境下检查必败且无提示,
+        // 用户永远收不到新版本 (2026-09-22 实测那条 WARN 就是这么来的)。
+        let config = agent_config();
+        assert!(
+            matches!(
+                config.tls_config().root_certs(),
+                ureq::tls::RootCerts::PlatformVerifier
+            ),
+            "更新检查的根证书必须走系统证书库 (PlatformVerifier), 实际: {:?}",
+            config.tls_config().root_certs()
+        );
     }
 
     #[test]
