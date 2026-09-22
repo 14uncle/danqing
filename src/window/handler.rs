@@ -864,6 +864,14 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         // DPI 缩放在首帧布局前接线: 布局视口 (÷scale) 与文字栅格化 (×scale)
         // 都依赖它; 之后经 ScaleFactorChanged 事件更新。
         self.scale = window.scale_factor();
+        // 启动即落一行 scale 日志: 「跑的是哪个框架版本/检测到几倍缩放」从此
+        // 一条日志可辨 (2026-09-22 验收事故: 商店旧版被当源码新版验收)。
+        log::info!(
+            "DPI 缩放接线: scale={}, 初始客户区 {}x{} 物理像素",
+            self.scale,
+            self.last_real_size.width,
+            self.last_real_size.height
+        );
         self.texts.set_scale_factor(self.scale as f32);
         if let Some(context) = self.context.as_mut() {
             context.set_scale_factor(self.scale);
