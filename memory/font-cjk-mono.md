@@ -1,6 +1,6 @@
 ---
 name: font-cjk-mono
-description: 框架内嵌字体 = Sarasa Mono SC SemiBold(GB2312 子集),Noto Sans SC 已退役;为何 mono/为何字重而非超采样/DPI 遗留
+description: 框架内嵌字体 = Sarasa Mono SC SemiBold(GB2312 子集),Noto Sans SC 已退役;为何 mono/为何字重而非超采样/DPI 物理栅格已支持
 metadata:
   type: project
 ---
@@ -16,5 +16,5 @@ metadata:
 
 **How to apply**：
 - 换字重/改子集 → `python tools/subset-mono-font.py [源.ttf]`（需 fonttools）。
-- 「小字仍软」排查顺序：**① 字重档位** → **② 字号**（13→14-15px）→ **③ DPI-aware 栅格**（字体 px × scale_factor；danqing 现按逻辑 px 栅格，屏幕 >100% 时文字在物理域偏小，**未处理，v1.x 候选**）→ ④ hinting（fontdue 不支持，勿引入新栅格器）。
+- 「小字仍软」排查顺序：**① 字重档位** → **② 字号**（13→14-15px）→ **③ DPI-aware 栅格（已支持，2026-09-22 HiDPI 落地）**：`TextBatch` 持 scale，按 `round(px×s)` 物理字号栅格化、落点吸附物理像素格（A3 取整决策：图集键 u16 保持物理 px、round 收在 TextBatch 内，图集零改动）；`measure/line_height/ascent/descent` 返逻辑值。若高分屏仍异常，先看启动日志「DPI 缩放接线：scale=…」确认检测值（存在性判据：无此行 = 跑的是旧框架二进制）→ ④ hinting（fontdue 不支持，勿引入新栅格器）。
 - 除非重现「小字不清晰」投诉，勿回退到 SSAA 路线（已被证据否掉）。

@@ -1,7 +1,7 @@
 # Spec: HiDPI 缩放支持（scale factor 贯通框架）
 
 - 日期: 2026-09-21
-- 状态: 待批准
+- 状态: **已完成**（2026-09-22；S1–S5 全满足，CP1/CP2 达成，T6 联动 lock 复钉 danqing#d8133ea1）
 - 触发: LogLens 在 3200×2000 @ 200% 缩放屏上全 UI 等比缩小约 50%（用户上报，截图存 Desktop\danqing\）
 
 ## Objective

@@ -53,12 +53,13 @@
 
 ## Phase 4: 联动与收口
 
-- [ ] T6: danqing-log 联动验证（**阻塞：需用户先 push danqing**）
+- [x] T6: danqing-log 联动验证 (**2026-09-22 完成**)
   - Acceptance: danqing-log 内 `cargo update -p danqing` 后 253 测试全绿 + 本机启动冒烟无漂移 = spec S5「产品零代码改动」成立；lock 是否提交由用户定夺
+  - 验收记录: danqing push `d8133ea` 后关 patch、`cargo check` 驱动重解一步钉到 `danqing#d8133ea1`；**253 测试全绿**（88 lib + 154 main + 8 genlog + 3 keygen）；启动冒烟通过 —— 日志实证「DPI 缩放接线：scale=1」（新框架在跑 + 用户已恢复 100%）、零「栅格化失败」warn。产品零代码改动。**lock 用户裁决提交**（danqing-log `08365a0`）。
   - Verify: `cargo test`（danqing-log）+ 人工启动
-  - Files: `danqing-log/Cargo.lock`（不提交）
+  - Files: `danqing-log/Cargo.lock`（已提交，`08365a0`）
 
-- [ ] T7: 记忆/文档回填
+- [x] T7: 记忆/文档回填 (2026-09-22 完成, 本批一并落地)
   - Acceptance: `memory/font-cjk-mono.md` 的「DPI 栅格未处理」条目改写为已支持（含 A3 取整决策）；spec 状态翻「已完成」；`MEMORY.md` 索引同步；本 plan/todo 归档 `tasks/archive/`
   - Verify: 文件核查
   - Files: `memory/font-cjk-mono.md`, `MEMORY.md`, `docs/specs/hidpi-scale-factor.md`
