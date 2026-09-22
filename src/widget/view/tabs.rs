@@ -23,6 +23,8 @@ type ThemeBinding = Box<dyn Fn(&dyn Any) -> TabColors>;
 type ChangeFactory = Box<dyn Fn(usize) -> Box<dyn Any>>;
 /// icon 数据 (RGBA 像素, 宽, 高)。
 type IconData = (Vec<u8>, u32, u32);
+/// tab 角标显隐绑定闭包：每帧从应用状态读取该 tab 是否画角标。
+type BadgeBinding = Box<dyn Fn(&dyn Any) -> bool>;
 
 /// 随主题流动的 tab 颜色子集 (构建后仍可经 [`Tabs::bind_theme`] 每帧刷新)。
 ///
@@ -111,6 +113,10 @@ pub struct Tabs {
     icon_rects: Vec<Option<Rect>>,
     /// tab 点击热区 (layout 缓存，hit_test 用；与 labels 一一对应)。
     hit_rects: Vec<Rect>,
+    /// tab 角标显隐绑定 (与 labels 一一对应，None = 该 tab 永无角标)。
+    badge_bindings: Vec<Option<BadgeBinding>>,
+    /// tab 角标显隐状态 (sync 缓存，paint 消费；与 labels 一一对应)。
+    badges: Vec<bool>,
     /// 面板顶部间距 (theme token)。
     panel_pad: f32,
 }
@@ -119,6 +125,13 @@ pub struct Tabs {
 const INDICATOR_H: f32 = 2.0;
 /// 指示线文字两侧延伸量。
 const INDICATOR_PAD: f32 = 8.0;
+/// 角标圆点直径 (SPEC-update-hint-ui D1: 与产品侧底栏角标同参 6px)。
+const BADGE_DOT_D: f32 = 6.0;
+/// 角标圆点与标题右缘的间距 (D1: 右缘外 2px)。
+const BADGE_DOT_GAP: f32 = 2.0;
+/// 角标绑定下标上限 (笔误防线): 超出视为 builder 打错 —— 拒绝预约, 防天文下标
+/// (如 `usize::MAX`) 把 `badge_bindings` 撑爆。真实页签数远低于此。
+const BADGE_BIND_MAX_INDEX: usize = 64;
 /// 面板内容与 tab 栏之间的间距 (取 theme spacing_md token，约 12px)。
 fn panel_top_pad(theme: &impl Theme) -> f32 {
     theme.spacing_md()
@@ -152,6 +165,8 @@ impl Tabs {
             icon_gap: 4.0,
             icon_rects: Vec::new(),
             hit_rects: Vec::new(),
+            badge_bindings: Vec::new(),
+            badges: Vec::new(),
             panel_pad: panel_top_pad(theme),
         }
     }
@@ -231,6 +246,34 @@ impl Tabs {
             let state = state
                 .downcast_ref::<S>()
                 .expect("Tabs 绑定的状态类型不匹配");
+            f(state)
+        }));
+        self
+    }
+
+    /// 绑定某 tab 的角标显隐：每帧 `sync` 时经闭包读取, true = 在该 tab 标题右上
+    /// 画 accent 圆点 (SPEC-update-hint-ui 腿 A 语义: token 同 D1、零布局位移、
+    /// 不改命中与切换; false / 未绑定 = 零痕迹)。
+    ///
+    /// `index` 允许**预约** (超出当前 tab 数 = 留给后续 `.tab()`), 超过
+    /// [`BADGE_BIND_MAX_INDEX`] 视为笔误直接忽略 —— 不 panic 不 OOM。
+    pub fn bind_tab_badge<S: 'static>(
+        mut self,
+        index: usize,
+        f: impl Fn(&S) -> bool + 'static,
+    ) -> Self {
+        if index >= BADGE_BIND_MAX_INDEX {
+            log::warn!("角标绑定下标 {index} 超出合理页签数, 已忽略 (笔误?)");
+            return self;
+        }
+        // Box<dyn Fn> 非 Clone, 不能 resize —— 逐个 push None 补齐。
+        while self.badge_bindings.len() <= index {
+            self.badge_bindings.push(None);
+        }
+        self.badge_bindings[index] = Some(Box::new(move |state: &dyn Any| {
+            let state = state
+                .downcast_ref::<S>()
+                .expect("Tabs 角标绑定的状态类型不匹配");
             f(state)
         }));
         self
@@ -357,6 +400,14 @@ impl Widget for Tabs {
         if let Some(binding) = &self.binding {
             self.active = binding(state);
         }
+        // 刷新角标显隐 (未绑定 = false, 零痕迹)。
+        self.badges.clear();
+        self.badges.resize(self.labels.len(), false);
+        for (i, binding) in self.badge_bindings.iter().enumerate() {
+            if let (Some(binding), Some(flag)) = (binding, self.badges.get_mut(i)) {
+                *flag = binding(state);
+            }
+        }
         self.clamp_active();
         // 面板切换时重置旧面板焦点
         if self.active != prev_active {
@@ -427,6 +478,25 @@ impl Widget for Tabs {
                     self.color_inactive
                 };
                 texts.push_text(label, text_x, text_y, self.font_size, color);
+
+                // 角标: D1 同参圆点锚标题右上 (顶齐平 baseline−ascent, 右缘外 2px) ——
+                // 绝对定位零布局位移; 色与选中指示线同源 (theme.accent)。
+                // 坐标一律「相对量 + area.origin」一次 (text_info.origin 即 baseline 点,
+                // 2026-09-22 实机 bug: y 取已含 area.origin.y 的 text_y 再加一次 = 双加跌出面板)。
+                if self.badges.get(i).copied().unwrap_or(false) {
+                    let title_top = text_info.origin.y - texts.ascent(f32::from(self.font_size));
+                    let title_right = text_info.origin.x + text_info.size.width;
+                    rects.push_rect(
+                        Rect::from_xywh(
+                            area.origin.x + title_right + BADGE_DOT_GAP,
+                            area.origin.y + title_top,
+                            BADGE_DOT_D,
+                            BADGE_DOT_D,
+                        ),
+                        self.color_indicator,
+                        BADGE_DOT_D / 2.0,
+                    );
+                }
 
                 // 选中指示线：以标题区域为基准居中
                 if self.active == i {
@@ -623,6 +693,168 @@ mod tests {
             .child(Text::new("2"))
             .child(Text::new("3"));
         assert_eq!(tabs.labels.len(), tabs.children.len());
+    }
+
+    /// 统计角标圆点实例数 (radius 3.0 四角同值 = 正圆) —— 与指示线 (radius 1.0) 可辨。
+    fn badge_dot_count(rects: &RectBatch) -> usize {
+        badge_dots(rects).len()
+    }
+
+    /// sync + layout + paint 一遍, 返回 (rects, 尺寸, texts)。area 原点取 ZERO。
+    fn paint_tabs(tabs: &mut Tabs) -> (RectBatch, Size, TextBatch) {
+        paint_tabs_at(tabs, Point::ZERO)
+    }
+
+    /// 同 [`paint_tabs`] 但 area 原点可指定 (平移不变锁专用: ZERO 原点测不出坐标系双加)。
+    fn paint_tabs_at(tabs: &mut Tabs, origin: Point) -> (RectBatch, Size, TextBatch) {
+        let mut texts = TextBatch::default();
+        let size = tabs.layout(loose(), &mut texts);
+        let mut rects = RectBatch::default();
+        tabs.paint(Rect::new(origin, size), &mut rects, &mut texts);
+        (rects, size, texts)
+    }
+
+    /// 取角标圆点实例 (radius 3.0) 的矩形列表。
+    fn badge_dots(rects: &RectBatch) -> Vec<Rect> {
+        rects
+            .instance_rects()
+            .into_iter()
+            .zip(rects.instance_radii())
+            .filter(|(_, r)| *r == [3.0; 4])
+            .map(|(rect, _)| rect)
+            .collect()
+    }
+
+    /// 角标两态对拍 (SPEC-update-hint-ui 腿 A): 谓词 true 恰画一个圆点, false / 无绑定零痕迹。
+    /// A/B: 摘掉 paint 里的角标 push 须精确红 (1 ≠ 0)。
+    #[test]
+    fn tab_badge_shows_dot_only_when_flagged() {
+        let build = |predicate: bool| {
+            let mut tabs = Tabs::default()
+                .tab("常规")
+                .tab("关于")
+                .child(Text::new("a"))
+                .child(Text::new("b"))
+                .bind_tab_badge(1, move |_: &State| predicate);
+            tabs.sync(&State { active: 0 });
+            let (rects, _, _) = paint_tabs(&mut tabs);
+            badge_dot_count(&rects)
+        };
+        assert_eq!(build(true), 1, "有角标恰画一个圆点");
+        assert_eq!(build(false), 0, "无角标零痕迹");
+
+        // 未绑定的 tab 永无角标 (谓词恒真也一样)。
+        let mut none = Tabs::default()
+            .tab("常规")
+            .tab("关于")
+            .child(Text::new("a"))
+            .child(Text::new("b"));
+        none.sync(&State { active: 0 });
+        let (rects, _, _) = paint_tabs(&mut none);
+        assert_eq!(badge_dot_count(&rects), 0, "无绑定零痕迹");
+    }
+
+    /// 几何 (D1 同参): 6px 圆点锚标题右上 —— 右缘外 2px, 顶与文字顶齐平 (baseline − ascent)。
+    #[test]
+    fn tab_badge_dot_sits_at_the_title_corner() {
+        let mut tabs = Tabs::default()
+            .tab("关于")
+            .child(Text::new("a"))
+            .bind_tab_badge(0, |_: &State| true);
+        tabs.sync(&State { active: 0 });
+        let (rects, _, texts) = paint_tabs(&mut tabs);
+        let dots = badge_dots(&rects);
+        assert_eq!(dots.len(), 1, "恰一个圆点");
+        let title = tabs.tab_areas[0];
+        let expected_x = title.origin.x + title.size.width + 2.0;
+        let expected_y = title.origin.y - texts.ascent(f32::from(tabs.font_size));
+        assert_eq!(dots[0].origin, Point::new(expected_x, expected_y));
+        assert_eq!(dots[0].size, Size::new(6.0, 6.0));
+    }
+
+    /// 角标随 area 平移同量 (坐标系双加锁): paint 原点平移 (dx, dy) 后圆点坐标平移同量。
+    /// 2026-09-22 实机 bug: y 用了已含 `area.origin.y` 的 `text_y` 又在 push 时再加一次,
+    /// area 原点非零时圆点跌出面板 —— ZERO 原点的几何锁测不出, 本锁补盲区。
+    /// A/B: 恢复双加须精确红 (y 偏大 dy)。
+    #[test]
+    fn tab_badge_dot_translates_with_area_origin() {
+        let build = |origin: Point| {
+            let mut tabs = Tabs::default()
+                .tab("常规")
+                .tab("关于")
+                .child(Text::new("a"))
+                .child(Text::new("b"))
+                .bind_tab_badge(1, |_: &State| true);
+            tabs.sync(&State { active: 0 });
+            let (rects, _, _) = paint_tabs_at(&mut tabs, origin);
+            let dots = badge_dots(&rects);
+            assert_eq!(dots.len(), 1, "恰一个圆点");
+            dots[0].origin
+        };
+        let base = build(Point::ZERO);
+        let (dx, dy) = (40.0, 80.0);
+        let moved = build(Point::new(dx, dy));
+        assert_eq!(
+            moved,
+            Point::new(base.x + dx, base.y + dy),
+            "角标必须随 area 平移同量 (相对定位, 不得双加 origin)"
+        );
+    }
+
+    /// 越界绑定的边界语义 (评审 Required #3): **预约** (index 超当前 tab 数但低于上限)
+    /// 合法 —— 后续 `.tab()` 补到即生效; **天文下标** (≥ [`BADGE_BIND_MAX_INDEX`]) 视为
+    /// 笔误直接忽略 —— 零圆点、不 panic、不把 `badge_bindings` 撑爆。
+    #[test]
+    fn tab_badge_binding_out_of_range_is_ignored_not_fatal() {
+        // 预约: bind 先于 .tab(), 补到即生效。
+        let mut tabs = Tabs::default()
+            .tab("常规")
+            .bind_tab_badge(1, |_: &State| true)
+            .tab("关于")
+            .child(Text::new("a"))
+            .child(Text::new("b"));
+        tabs.sync(&State { active: 0 });
+        let (rects, _, _) = paint_tabs(&mut tabs);
+        assert_eq!(badge_dot_count(&rects), 1, "预约绑定补 tab 后生效");
+
+        // 天文下标: 忽略 + 零痕迹 + 不 panic (修前: `while push(None)` 直到撑爆)。
+        let mut tabs = Tabs::default()
+            .tab("关于")
+            .child(Text::new("a"))
+            .bind_tab_badge(usize::MAX, |_: &State| true);
+        tabs.sync(&State { active: 0 });
+        let (rects, _, _) = paint_tabs(&mut tabs);
+        assert_eq!(badge_dot_count(&rects), 0, "天文下标忽略, 零痕迹");
+    }
+
+    /// 空 label 页签上的角标 (评审 Nit): 圆点锚空标题右缘 (title_x + 0 + 2), 不炸不越界。
+    #[test]
+    fn tab_badge_on_empty_label_stays_harmless() {
+        let mut tabs = Tabs::default()
+            .tab("")
+            .child(Text::new("a"))
+            .bind_tab_badge(0, |_: &State| true);
+        tabs.sync(&State { active: 0 });
+        let (rects, _, _) = paint_tabs(&mut tabs);
+        let dots = badge_dots(&rects);
+        assert_eq!(dots.len(), 1, "空 label 也恰一圆点 (锚空标题右缘)");
+    }
+
+    /// 角标零布局位移: 显隐两态 layout 尺寸一致 (绝对定位, 不进 measure)。
+    #[test]
+    fn tab_badge_does_not_shift_layout() {
+        let build = |flagged: bool| {
+            let mut tabs = Tabs::default()
+                .tab("常规")
+                .tab("关于")
+                .child(Text::new("a"))
+                .child(Text::new("b"))
+                .bind_tab_badge(1, move |_: &State| flagged);
+            tabs.sync(&State { active: 0 });
+            let (_, size, _) = paint_tabs(&mut tabs);
+            size
+        };
+        assert_eq!(build(true), build(false), "角标显隐零布局位移");
     }
 
     #[test]
