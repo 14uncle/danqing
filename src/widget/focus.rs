@@ -48,14 +48,14 @@ impl FocusManager {
         // 若当前焦点路径在新树中不再有效，则重置为 None
         if let Some(path) = &self.current {
             if !self.is_valid_path(root, path) {
-                self.current = None;
+                self.transition(None);
             }
         }
 
         // 仅在首次重建时自动聚焦焦点链第一个节点;
         // 之后用户主动清焦 (点击空白 / Escape) 不再抢回。
         if !self.did_initial_focus && self.current.is_none() && !self.chain.is_empty() {
-            self.current = Some(self.chain[0].clone());
+            self.transition(Some(self.chain[0].clone()));
             self.did_initial_focus = true;
         }
     }
@@ -85,21 +85,20 @@ impl FocusManager {
     /// 切换到下一个可聚焦节点 (Tab)。
     pub fn next(&mut self) {
         if self.chain.is_empty() {
-            self.current = None;
+            self.transition(None);
             return;
         }
         let idx = self
             .current_index()
             .map(|i| (i + 1) % self.chain.len())
             .unwrap_or(0);
-        self.previous = self.current.clone();
-        self.current = Some(self.chain[idx].clone());
+        self.transition(Some(self.chain[idx].clone()));
     }
 
     /// 切换到上一个可聚焦节点 (Shift+Tab)。
     pub fn prev(&mut self) {
         if self.chain.is_empty() {
-            self.current = None;
+            self.transition(None);
             return;
         }
         let n = self.chain.len();
@@ -107,8 +106,7 @@ impl FocusManager {
             .current_index()
             .map(|i| (i + n - 1) % n)
             .unwrap_or(n - 1);
-        self.previous = self.current.clone();
-        self.current = Some(self.chain[idx].clone());
+        self.transition(Some(self.chain[idx].clone()));
     }
 
     /// 设置焦点为点击位置最上层的可聚焦节点 (后绘制者优先)。
@@ -116,21 +114,12 @@ impl FocusManager {
     /// 点击未命中任何可聚焦节点时清除焦点 (点击空白 = 取消聚焦),
     /// 之后键盘事件由窗口层回退到应用层处理。
     pub fn set_by_click(&mut self, root: &Node, pos: Point) {
-        self.previous = self.current.clone();
-        self.current = hit_focusable(root, pos);
+        self.transition(hit_focusable(root, pos));
     }
 
     /// 显式设置焦点路径。
-    ///
-    /// 设到当前路径 = no-op: 不得把 previous 抹成 current —— rebuild 自动聚焦 /
-    /// 点击定焦留下的 pending 跳变要靠 `changed()` 供窗口层派发 FocusIn/Out,
-    /// 抹掉会让组件视觉焦点永远起不来 (clipboard 2026-09-24「唤起无焦点态」根因)。
     pub fn set_focus(&mut self, path: FocusPath) {
-        if self.current.as_ref() == Some(&path) {
-            return;
-        }
-        self.previous = self.current.clone();
-        self.current = Some(path);
+        self.transition(Some(path));
     }
 
     /// 按稳定标识聚焦 (见 [`crate::widget::Widget::focus_id`])。
@@ -148,8 +137,21 @@ impl FocusManager {
 
     /// 清除当前焦点。
     pub fn clear_focus(&mut self) {
+        self.transition(None);
+    }
+
+    /// 焦点迁移的**唯一落账出口**: 所有 current 变更 (含置空) 必须经此。
+    ///
+    /// 目标与当前相同 = no-op: 不得把 previous 抹成 current —— rebuild 自动聚焦 /
+    /// 点击定焦留下的 pending 跳变要靠 `changed()` 供窗口层派发 FocusIn/Out,
+    /// 抹掉会让组件视觉焦点永远起不来 (clipboard 2026-09-24「唤起无焦点态」根因;
+    /// 双路评审补全: set_by_click 命中当前 / 单节点链 Tab 绕回是同一 bug 类)。
+    fn transition(&mut self, next: Option<FocusPath>) {
+        if self.current == next {
+            return;
+        }
         self.previous = self.current.clone();
-        self.current = None;
+        self.current = next;
     }
 
     fn collect(&mut self, node: &Node, prefix: &mut FocusPath) {
@@ -599,6 +601,32 @@ mod tests {
         mgr2.set_focus(vec![0]);
         assert_eq!(mgr2.previous(), None, "set_focus 同路径同样不得抹 pending");
         assert!(mgr2.changed());
+    }
+
+    /// 不变式补全 (双路评审 2026-09-24 B-R1): 同 bug 类不止 set_focus 一扇门 ——
+    /// 单节点链 Tab 绕回自身 / 点击已聚焦控件, 同样不得伪造 previous 吞 pending 跳变。
+    #[test]
+    fn next_on_single_node_chain_preserves_pending_transition() {
+        let mut texts = dummy_texts();
+        let mut tree = node(Button::new(Text::new("A")));
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree); // 自动聚焦 [], previous=None
+        mgr.next(); // 单节点链绕回自身 = 目标未变
+        assert_eq!(mgr.previous(), None, "绕回自身不得抹 pending 跳变");
+        assert!(mgr.changed(), "None→[] 的跳变应保留供 FocusIn 派发");
+    }
+
+    #[test]
+    fn set_by_click_on_current_target_preserves_pending_transition() {
+        let mut texts = dummy_texts();
+        let mut tree = node(Button::new(Text::new("A")));
+        layout_and_paint(&mut tree, &mut texts);
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree); // 自动聚焦 [], previous=None
+        mgr.set_by_click(&tree, Point::new(10.0, 10.0)); // 命中 [] == 当前路径
+        assert_eq!(mgr.previous(), None, "点击当前路径不得抹 pending 跳变");
+        assert!(mgr.changed());
     }
 
     #[test]
