@@ -121,7 +121,14 @@ impl FocusManager {
     }
 
     /// 显式设置焦点路径。
+    ///
+    /// 设到当前路径 = no-op: 不得把 previous 抹成 current —— rebuild 自动聚焦 /
+    /// 点击定焦留下的 pending 跳变要靠 `changed()` 供窗口层派发 FocusIn/Out,
+    /// 抹掉会让组件视觉焦点永远起不来 (clipboard 2026-09-24「唤起无焦点态」根因)。
     pub fn set_focus(&mut self, path: FocusPath) {
+        if self.current.as_ref() == Some(&path) {
+            return;
+        }
         self.previous = self.current.clone();
         self.current = Some(path);
     }
@@ -129,13 +136,13 @@ impl FocusManager {
     /// 按稳定标识聚焦 (见 [`crate::widget::Widget::focus_id`])。
     ///
     /// 供 `App::focus_request` 使用: 弹层面板关闭后焦点回到打开面板的按钮。
-    /// 未找到匹配标识时不变更焦点并返回 `false`。
+    /// 未找到匹配标识时不变更焦点并返回 `false`; 目标已是当前路径时返回 `true`
+    /// 且不动 `previous` (同 [`Self::set_focus`] 的 no-op 语义)。
     pub fn set_focus_by_id(&mut self, id: &str) -> bool {
         let Some(idx) = self.chain_ids.iter().position(|i| *i == Some(id)) else {
             return false;
         };
-        self.previous = self.current.clone();
-        self.current = Some(self.chain[idx].clone());
+        self.set_focus(self.chain[idx].clone());
         true
     }
 
@@ -565,6 +572,52 @@ mod tests {
         let tree = node(UiBox::new(Color::BLACK));
         mgr.rebuild(&tree);
         assert!(mgr.current().is_none());
+    }
+
+    #[test]
+    fn set_focus_to_current_target_preserves_pending_transition() {
+        // clipboard 实机回归 (2026-09-24): 热键唤起录入框无焦点态 (边框不亮/光标不闪),
+        // 但键盘仍可达 —— 首帧 rebuild 自动聚焦链首留下 None→path 待派发跳变,
+        // 同帧 focus_request 的 set_focus(_by_id) 把 previous 抹成 current,
+        // 跳变被吞 → FocusIn 永不派发, 组件视觉焦点 (focused 标志) 永远起不来。
+        // 规则: 设到当前路径 = no-op, 不得伪造/吞掉 pending 跳变。
+        let mut texts = dummy_texts();
+        let mut tree = node(Column::new().child(Button::new(Text::new("A")).id("alpha")));
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree); // 自动聚焦 [0], previous=None
+        assert_eq!(mgr.current(), Some(&vec![0]));
+        assert_eq!(mgr.previous(), None, "rebuild 自动聚焦留下 pending 跳变");
+
+        assert!(mgr.set_focus_by_id("alpha"), "目标 == 当前路径");
+        assert_eq!(mgr.previous(), None, "pending 跳变不得被抹掉");
+        assert!(mgr.changed(), "None→[0] 的跳变应保留供 FocusIn 派发");
+
+        // set_focus 同语义
+        let mut mgr2 = FocusManager::new();
+        mgr2.rebuild(&tree);
+        mgr2.set_focus(vec![0]);
+        assert_eq!(mgr2.previous(), None, "set_focus 同路径同样不得抹 pending");
+        assert!(mgr2.changed());
+    }
+
+    #[test]
+    fn set_focus_by_id_across_paths_still_dispatches_normally() {
+        // danqing-log Ctrl+F 语义不受同路径 no-op 影响: 跨路径仍产生正常跳变。
+        let mut texts = dummy_texts();
+        let mut tree = node(
+            Column::new()
+                .child(Button::new(Text::new("A")).id("alpha"))
+                .child(Button::new(Text::new("B")).id("beta")),
+        );
+        tree.layout(Constraints::loose(Size::new(1000.0, 1000.0)), &mut texts);
+        let mut mgr = FocusManager::new();
+        mgr.rebuild(&tree);
+        mgr.acknowledge(); // 收掉自动聚焦跳变
+        assert!(mgr.set_focus_by_id("beta"));
+        assert_eq!(mgr.previous(), Some(&vec![0]));
+        assert_eq!(mgr.current(), Some(&vec![1]));
+        assert!(mgr.changed(), "跨路径切换照常产生跳变");
     }
 
     #[test]
