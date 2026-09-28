@@ -65,6 +65,8 @@ struct Showcase {
     switch_enabled: bool,
     /// Checkbox 演示：是否勾选。
     checkbox_on: bool,
+    /// Checkbox 演示：对照对状态 (两枚互镜像绑定, 都可点)。
+    checkbox_pair: bool,
     /// 点击穿透演示：当前是否处于穿透态。
     click_through: bool,
     /// 窗口置顶演示：当前是否置顶 (env DANQING_SHOWCASE_TOPMOST=1 出生即置顶,
@@ -145,6 +147,8 @@ enum Msg {
     SwitchToggle,
     /// Checkbox 演示：切换勾选状态。
     CheckboxToggle,
+    /// Checkbox 演示：切换对照对 (两枚互镜像同翻)。
+    CheckboxPairToggle,
     /// 点击穿透演示：切换穿透态 (Switch 与全局热键 Ctrl+Shift+K 双入口)。
     ClickThroughToggle,
     /// 窗口置顶演示：切换置顶层级。
@@ -219,6 +223,7 @@ impl App for Showcase {
             }
             Msg::SwitchToggle => self.switch_enabled = !self.switch_enabled,
             Msg::CheckboxToggle => self.checkbox_on = !self.checkbox_on,
+            Msg::CheckboxPairToggle => self.checkbox_pair = !self.checkbox_pair,
             Msg::ClickThroughToggle => {
                 self.click_through = !self.click_through;
                 if let Some(sender) = &self.sender {
@@ -744,12 +749,20 @@ fn checkbox_card(t: &LightTheme) -> impl Widget + 'static {
                 .gap(2.0)
                 .cross_center()
                 .child(
-                    Text::new("静态勾中/未选：")
+                    Text::new("勾中/未选对照明镜（都可点）：")
                         .font_size(t.font_size_body())
                         .color(t.text_primary()),
                 )
-                .child(Checkbox::new().bind(|_: &Showcase| true))
-                .child(Checkbox::new()),
+                .child(
+                    Checkbox::new()
+                        .bind(|s: &Showcase| s.checkbox_pair)
+                        .on_toggle(|| Msg::CheckboxPairToggle),
+                )
+                .child(
+                    Checkbox::new()
+                        .bind(|s: &Showcase| !s.checkbox_pair)
+                        .on_toggle(|| Msg::CheckboxPairToggle),
+                ),
         )
 }
 
@@ -1781,6 +1794,7 @@ fn main() -> anyhow::Result<()> {
         selected_tab: 0,
         switch_enabled: false,
         checkbox_on: false,
+        checkbox_pair: true,
         click_through: false,
         topmost: topmost_at_boot,
         sender: None,

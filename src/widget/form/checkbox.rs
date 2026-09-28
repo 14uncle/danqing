@@ -171,7 +171,17 @@ impl Checkbox {
     ///
     /// `colors` 由调用方按所在底面选套: 普通底面 [`CheckboxColors::from_theme`],
     /// accent 底 (高亮行) [`CheckboxColors::on_accent`]。
+    ///
+    /// **前提: `rect` 为正方形** (勾的顶点按边长比例推, 非正方形会把勾画出盒外;
+    /// 评审实测 20×10 墨迹越界) —— 调用方传 [`Checkbox::BOX_SIZE`] 边长的方盒。
+    /// 尺寸参数化是为测试/未来变体, 不是为非正方形; 边框宽/圆角是 14px 盒的
+    /// 固定取值, 不随尺寸缩放。
     pub fn paint_box(rects: &mut RectBatch, rect: Rect, checked: bool, colors: CheckboxColors) {
+        debug_assert!(
+            (rect.size.width - rect.size.height).abs() < 1.0,
+            "paint_box 要求正方形 rect (勾按边长比例画), 实得 {:?}",
+            rect.size
+        );
         let rect = rect.snap_to_pixels();
         let w = rect.size.width;
         if checked {
@@ -224,11 +234,17 @@ impl Widget for Checkbox {
             );
             rects.push_rounded_border(ring, self.colors.fill, BOX_RADIUS + FOCUS_RING_OUTSET, 1.5);
         }
-        // 按压缩放: 盒 0.85 居中 (Switch 滑块同语义)。
+        // 按压缩放: 盒 0.85 居中 (Switch 滑块同语义)。受约束得到非正方面积时
+        // (layout 接受更小尺寸) 取短边、双轴各自居中 —— 墨迹不画出布局面积外
+        // (评审修复: 此前单按 width 推导, 10×8 面积会画出 10×10 溢出 2px)。
         let scale = if self.pressed { 0.85 } else { 1.0 };
-        let side = area.size.width * scale;
-        let inset = (area.size.width - side) / 2.0;
-        let box_rect = Rect::from_xywh(area.origin.x + inset, area.origin.y + inset, side, side);
+        let side = area.size.width.min(area.size.height) * scale;
+        let box_rect = Rect::from_xywh(
+            area.origin.x + (area.size.width - side) / 2.0,
+            area.origin.y + (area.size.height - side) / 2.0,
+            side,
+            side,
+        );
         Self::paint_box(rects, box_rect, self.checked, self.colors);
     }
 
@@ -632,5 +648,97 @@ mod tests {
     #[test]
     fn default_is_unchecked() {
         assert!(!Checkbox::new().is_checked());
+    }
+
+    /// 评审锁 (受约束溢出修复): 非正方面积 (10×8) 时墨迹不画出布局面积外。
+    #[test]
+    fn paint_stays_within_constrained_area() {
+        let mut cb = Checkbox::new();
+        cb.checked = true;
+        let mut texts = TextBatch::new();
+        cb.layout(Constraints::loose(Size::new(400.0, 400.0)), &mut texts);
+        let area = Rect::from_xywh(0.0, 0.0, 10.0, 8.0);
+        let mut rects = RectBatch::new();
+        cb.paint(area, &mut rects, &mut texts);
+        assert!(!rects.instance_rects().is_empty(), "勾中态应有墨迹");
+        for r in rects.instance_rects() {
+            assert!(
+                r.origin.x >= area.origin.x - 0.01
+                    && r.origin.y >= area.origin.y - 0.01
+                    && r.origin.x + r.size.width <= area.origin.x + area.size.width + 0.01
+                    && r.origin.y + r.size.height <= area.origin.y + area.size.height + 0.01,
+                "墨迹 {r:?} 溢出布局面积 {area:?}"
+            );
+        }
+    }
+
+    /// 主题映射字面锚 (评审补锁): `from_theme` 的 fill↦accent / border↦border()
+    /// 对**明暗两主题**按值锁定 —— 暗色 token 有再校准先例 (09-13 重校),
+    /// 两支映射都钉死, 换校时静默劣化有人拦。
+    #[test]
+    fn from_theme_maps_tokens_for_both_themes() {
+        let light = CheckboxColors::from_theme(&LightTheme);
+        assert_eq!(light.fill, LightTheme.accent());
+        assert_eq!(light.border, LightTheme.border());
+        assert_eq!(light.check, Color::WHITE);
+        let dark = CheckboxColors::from_theme(&crate::theme::DarkTheme);
+        assert_eq!(dark.fill, crate::theme::DarkTheme.accent());
+        assert_eq!(dark.border, crate::theme::DarkTheme.border());
+        assert_eq!(dark.check, Color::WHITE);
+        assert_ne!(light.fill, dark.fill, "暗色 accent 是另一支 (防探针自欺)");
+        assert_ne!(light.border, dark.border, "暗色 border 是另一支");
+    }
+
+    /// 勾形几何签名锁 (评审补锁): 勾墨 bounding box 在盒内 + 横向跨度显著 +
+    /// **谷底偏左、右端上翘** (✓ 的两条极值签名; 修复前: 勾画成叉,
+    /// 既有颜色锁照样全绿 —— 颜色锁锁不住几何)。
+    #[test]
+    fn check_strokes_form_a_check_not_a_cross() {
+        let colors = CheckboxColors::from_theme(&LightTheme);
+        let mut batch = RectBatch::new();
+        Checkbox::paint_box(&mut batch, box_area(), true, colors);
+        let check = rgba_of(colors.check);
+        let dots: Vec<Rect> = batch
+            .instance_rects()
+            .iter()
+            .zip(batch.instance_colors().iter())
+            .filter(|(_, c)| **c == check)
+            .map(|(r, _)| *r)
+            .collect();
+        assert!(!dots.is_empty(), "勾中应有勾墨");
+        let s = Checkbox::BOX_SIZE;
+        let (mut min_x, mut min_y) = (f32::INFINITY, f32::INFINITY);
+        let (mut max_x, mut max_y) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+        for r in &dots {
+            min_x = min_x.min(r.origin.x);
+            min_y = min_y.min(r.origin.y);
+            max_x = max_x.max(r.origin.x + r.size.width);
+            max_y = max_y.max(r.origin.y + r.size.height);
+        }
+        assert!(
+            min_x >= 0.0 && min_y >= 0.0 && max_x <= s && max_y <= s,
+            "勾墨 bbox [{min_x},{min_y}..{max_x},{max_y}] 须在盒内 (0..{s})"
+        );
+        assert!(max_x - min_x > s * 0.4, "勾形横向跨度应显著 (非一点)");
+        // 极值签名 (单点, 不用带 —— 「带内全在左侧」会把右侧上行笔的合法
+        // 谷底邻域错杀: 上行笔从谷底爬升, 底部带内有点越过中线是正常的)。
+        let bottom_most = dots
+            .iter()
+            .max_by(|a, b| a.origin.y.partial_cmp(&b.origin.y).unwrap())
+            .expect("非空");
+        let right_most = dots
+            .iter()
+            .max_by(|a, b| a.origin.x.partial_cmp(&b.origin.x).unwrap())
+            .expect("非空");
+        assert!(
+            bottom_most.origin.x + bottom_most.size.width / 2.0 < s / 2.0,
+            "✓ 签名: 谷底墨点应在中线左侧, 实得 x={}",
+            bottom_most.origin.x
+        );
+        assert!(
+            right_most.origin.y + right_most.size.height / 2.0 < s / 2.0,
+            "✓ 签名: 最右墨点应在上半 (右端上翘), 实得 y={}",
+            right_most.origin.y
+        );
     }
 }
