@@ -6,6 +6,7 @@
 //! `text_editor` 为内部编辑状态机, 经 [`TextInput`] / [`TextArea`] 复用,
 //! 不进入公开 API。
 
+mod checkbox;
 mod dropdown;
 mod icon_input;
 mod switch;
@@ -13,6 +14,7 @@ mod text_area;
 mod text_editor;
 mod text_input;
 
+pub use checkbox::{Checkbox, CheckboxColors};
 pub use dropdown::Dropdown;
 pub use icon_input::IconInput;
 pub use switch::Switch;

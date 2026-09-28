@@ -21,7 +21,7 @@ mod view;
 pub use base::{Button, CloseButton, Image, Text};
 pub use focus::FocusManager;
 pub(crate) use focus::cursor_at;
-pub use form::{Dropdown, IconInput, Switch, TextArea, TextInput};
+pub use form::{Checkbox, CheckboxColors, Dropdown, IconInput, Switch, TextArea, TextInput};
 pub use layout::{Box, Center, Column, CrossAlign, DragArea, Padding, ReachArea, Row, Stack};
 pub use title_bar::{LogoKind, TitleBar, TitleBarStyle};
 pub use view::{MultiPanel, Overlay, ScrollAxis, Scrollable, Tabs};

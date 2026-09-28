@@ -14,9 +14,9 @@
 )]
 
 use danqing::widget::{
-    self, Box as UiBox, Button, CloseButton, Column, DragArea, Dropdown, EventResult, IconInput,
-    MsgQueue, MultiPanel, Node, Overlay, Padding, ReachArea, Row, Scrollable, Stack, Switch, Tabs,
-    Text, TextArea, TextInput, TitleBar, Widget,
+    self, Box as UiBox, Button, Checkbox, CloseButton, Column, DragArea, Dropdown, EventResult,
+    IconInput, MsgQueue, MultiPanel, Node, Overlay, Padding, ReachArea, Row, Scrollable, Stack,
+    Switch, Tabs, Text, TextArea, TextInput, TitleBar, Widget,
 };
 use danqing::{
     App, AsyncJob, BackgroundConfig, Color, Crossfade, Easing, Event, GlobalHotkey, Key,
@@ -63,6 +63,8 @@ struct Showcase {
     selected_tab: usize,
     /// Switch 演示：是否启用通知。
     switch_enabled: bool,
+    /// Checkbox 演示：是否勾选。
+    checkbox_on: bool,
     /// 点击穿透演示：当前是否处于穿透态。
     click_through: bool,
     /// 窗口置顶演示：当前是否置顶 (env DANQING_SHOWCASE_TOPMOST=1 出生即置顶,
@@ -141,6 +143,8 @@ enum Msg {
     OpenImage,
     /// Switch 演示：切换开关状态。
     SwitchToggle,
+    /// Checkbox 演示：切换勾选状态。
+    CheckboxToggle,
     /// 点击穿透演示：切换穿透态 (Switch 与全局热键 Ctrl+Shift+K 双入口)。
     ClickThroughToggle,
     /// 窗口置顶演示：切换置顶层级。
@@ -214,6 +218,7 @@ impl App for Showcase {
                 }
             }
             Msg::SwitchToggle => self.switch_enabled = !self.switch_enabled,
+            Msg::CheckboxToggle => self.checkbox_on = !self.checkbox_on,
             Msg::ClickThroughToggle => {
                 self.click_through = !self.click_through;
                 if let Some(sender) = &self.sender {
@@ -700,6 +705,51 @@ fn switch_card(t: &LightTheme) -> impl Widget + 'static {
             })
             .font_size(t.font_size_body())
             .color(t.text_primary()),
+        )
+}
+
+/// 复选框区：Checkbox 组件演示 (可交互一枚 + 勾中/未选静态各一)。
+fn checkbox_card(t: &LightTheme) -> impl Widget + 'static {
+    Row::new()
+        .gap(t.spacing_lg())
+        .cross_center()
+        .child(
+            Row::new()
+                .gap(2.0)
+                .cross_center()
+                .child(
+                    Text::new("复选框：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(
+                    Checkbox::new()
+                        .bind(|s: &Showcase| s.checkbox_on)
+                        .on_toggle(|| Msg::CheckboxToggle),
+                ),
+        )
+        .child(
+            Text::bind(|s: &Showcase| {
+                if s.checkbox_on {
+                    "已勾选".to_string()
+                } else {
+                    "未勾选".to_string()
+                }
+            })
+            .font_size(t.font_size_body())
+            .color(t.text_primary()),
+        )
+        .child(
+            Row::new()
+                .gap(2.0)
+                .cross_center()
+                .child(
+                    Text::new("静态勾中/未选：")
+                        .font_size(t.font_size_body())
+                        .color(t.text_primary()),
+                )
+                .child(Checkbox::new().bind(|_: &Showcase| true))
+                .child(Checkbox::new()),
         )
 }
 
@@ -1449,7 +1499,8 @@ fn page_form(t: &LightTheme) -> impl Widget + 'static {
             .child(card(t, "图标输入", icon_input_row(t)))
             .child(card(t, "多行输入", textarea_card(t)))
             .child(card(t, "下拉选择器", dropdown_card(t)))
-            .child(card(t, "滑动开关", switch_card(t))),
+            .child(card(t, "滑动开关", switch_card(t)))
+            .child(card(t, "复选框", checkbox_card(t))),
     )
 }
 
@@ -1729,6 +1780,7 @@ fn main() -> anyhow::Result<()> {
         image_data: None,
         selected_tab: 0,
         switch_enabled: false,
+        checkbox_on: false,
         click_through: false,
         topmost: topmost_at_boot,
         sender: None,
