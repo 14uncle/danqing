@@ -90,6 +90,37 @@ pub fn composite_over(top: Color, base: Color) -> Color {
     )
 }
 
+/// 亮底源色板 (D11): 合并视图「按源着色」的 8 支色, **索引 = 源序号**。
+///
+/// 色相环均分 红→橙→黄→绿→青→蓝→紫→粉, 逐支压暗到对亮底 WCAG AA 的
+/// 文字可读档 (源名是常驻小字)。取值是**解出来的不是挑出来的**: 保持各色相
+/// 与饱和度、只二分亮度, 满足对页面底 ≥4.5 —— 数字别随手改, 回归锁
+/// `source_palette_clears_wcag_aa_against_the_page_background` 守着。
+const SOURCE_PALETTE_LIGHT: [Color; 8] = [
+    Color::from_srgb8(0xBD, 0x3F, 0x2C), // 红
+    Color::from_srgb8(0xA7, 0x53, 0x22), // 橙
+    Color::from_srgb8(0x70, 0x6D, 0x23), // 黄
+    Color::from_srgb8(0x26, 0x78, 0x48), // 绿
+    Color::from_srgb8(0x25, 0x74, 0x81), // 青
+    Color::from_srgb8(0x2E, 0x68, 0xC6), // 蓝
+    Color::from_srgb8(0x8D, 0x48, 0xCA), // 紫
+    Color::from_srgb8(0xBE, 0x2C, 0x88), // 粉
+];
+
+/// 暗底源色板 (D11): 同一套色相, 反向提亮到对暗底 AA 的文字可读档。
+///
+/// 与 [`SOURCE_PALETTE_LIGHT`] 同一推导纪律 (保色相保饱和、只动亮度)。
+const SOURCE_PALETTE_DARK: [Color; 8] = [
+    Color::from_srgb8(0xDF, 0x5E, 0x4A), // 红
+    Color::from_srgb8(0xDD, 0x62, 0x1B), // 橙
+    Color::from_srgb8(0x8F, 0x8B, 0x24), // 黄
+    Color::from_srgb8(0x26, 0x9A, 0x56), // 绿
+    Color::from_srgb8(0x27, 0x94, 0xA4), // 青
+    Color::from_srgb8(0x4E, 0x87, 0xE2), // 蓝
+    Color::from_srgb8(0xA8, 0x6C, 0xDC), // 紫
+    Color::from_srgb8(0xE0, 0x4E, 0xAA), // 粉
+];
+
 /// 主题接口。
 ///
 /// 定义一套面向效率工具的现代毛玻璃浅色设计 token; 后续可扩展 `DarkTheme`。
@@ -129,6 +160,24 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     fn traffic_maximize(&self) -> Color;
     /// 面板遮罩色 (浮层半透明罩, 压暗背景以突出浮层)。
     fn scrim(&self) -> Color;
+
+    /// 合并视图「按源着色」的 8 色 token 族 (D11) —— **索引 = 源序号**。
+    ///
+    /// 同屏多来源并排时, 每源一支固定色, 一眼分源。默认实现按 `background()`
+    /// 亮度自动选明/暗两套 (阈值 0.5 落在两个内置主题的亮度巨大空档里), 未来
+    /// 新主题零成本继承; 各主题可覆盖钉死自己的色板。
+    ///
+    /// 判据 (与产品侧语义色板同一把尺): 每支对**常驻面** (页面底) 过 WCAG AA
+    /// 4.5, 对瞬时面 (hover) 不低于 3.0; 色相环均分保证两两可辨 (一眼分源)。
+    /// 回归锁 `source_palette_clears_wcag_aa_against_the_page_background` /
+    /// `source_palette_entries_are_pairwise_distinguishable`。
+    fn source_palette(&self) -> [Color; 8] {
+        if relative_luminance(self.background()) < 0.5 {
+            SOURCE_PALETTE_DARK
+        } else {
+            SOURCE_PALETTE_LIGHT
+        }
+    }
 
     /// 小字号 (如提示、标签)。
     fn font_size_small(&self) -> u16;
@@ -1417,5 +1466,66 @@ mod tests {
         assert_eq!(dark.radius_lg(), light.radius_lg());
         assert_eq!(dark.scrim(), light.scrim());
         assert_eq!(dark.danger(), light.danger());
+    }
+
+    // ---- source_palette (D11 源色板) ----
+
+    /// 判据与产品侧语义色板同一把尺: **常驻面** (页面底) ≥ 4.5, **瞬时面**
+    /// (悬停/次级表面, 合成到底色后取) 不低于 3.0。两个主题、8 支全量扫。
+    fn assert_source_palette_reads<T: Theme>(theme: T, name: &str) {
+        let pal = theme.source_palette();
+        let bg = theme.background();
+        let transient = composite_over(theme.surface_variant(), bg);
+        for (i, c) in pal.iter().enumerate() {
+            let steady = contrast_ratio(*c, bg);
+            assert!(
+                steady >= 4.5,
+                "{name} 源色 {i} vs 常驻面 (页面底): {steady:.2} < 4.5"
+            );
+            let temp = contrast_ratio(*c, transient);
+            assert!(
+                temp >= 3.0,
+                "{name} 源色 {i} vs 瞬时面 (surface_variant): {temp:.2} < 3.0"
+            );
+        }
+    }
+
+    #[test]
+    fn source_palette_clears_wcag_aa_against_the_page_background() {
+        assert_source_palette_reads(LightTheme, "浅色");
+        assert_source_palette_reads(DarkTheme, "暗色");
+    }
+
+    /// 两两 sRGB 欧氏距离 ≥ 25 (0-255 口径, 与调值脚本同一把尺)。
+    fn assert_source_palette_distinguishable<T: Theme>(theme: T, name: &str) {
+        let pal = theme.source_palette();
+        for i in 0..8 {
+            for j in i + 1..8 {
+                let (a, b) = (pal[i], pal[j]);
+                let d = (((a.r - b.r).powi(2) + (a.g - b.g).powi(2) + (a.b - b.b).powi(2)).sqrt())
+                    * 255.0;
+                assert!(d >= 25.0, "{name} 源色 {i} vs {j} 太近: {d:.1}");
+            }
+        }
+    }
+
+    #[test]
+    fn source_palette_entries_are_pairwise_distinguishable() {
+        // 「一眼分源」的构造保证。实测最小: 浅色 31.4 红-橙 / 暗色 47.2 红-橙, 阈值留余量。
+        assert_source_palette_distinguishable(LightTheme, "浅色");
+        assert_source_palette_distinguishable(DarkTheme, "暗色");
+    }
+
+    #[test]
+    fn source_palette_follows_background_luminance() {
+        // 默认实现按 background() 亮度自动选板: 内置两主题各拿各的, 且
+        // SceneTheme **零成本继承** —— 暗场景拿暗板、亮场景拿亮板 (选板机制的真锁)。
+        assert_eq!(LightTheme.source_palette(), SOURCE_PALETTE_LIGHT);
+        assert_eq!(DarkTheme.source_palette(), SOURCE_PALETTE_DARK);
+        assert_ne!(SOURCE_PALETTE_LIGHT, SOURCE_PALETTE_DARK);
+        let dark_scene = SceneTheme::new(sample_dark_palette());
+        assert_eq!(dark_scene.source_palette(), SOURCE_PALETTE_DARK);
+        let bright_scene = SceneTheme::new(sample_bright_palette());
+        assert_eq!(bright_scene.source_palette(), SOURCE_PALETTE_LIGHT);
     }
 }
