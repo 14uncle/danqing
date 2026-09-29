@@ -67,11 +67,6 @@ impl CheckboxColors {
     }
 }
 
-impl Checkbox {
-    /// 盒边长 (逻辑像素)。自绘消费者 (行列表) 的布局/居中与画法同源, 取此常量。
-    pub const BOX_SIZE: f32 = 14.0;
-}
-
 /// 未选态边框线宽。
 const BORDER_W: f32 = 1.5;
 /// 盒圆角。
@@ -109,6 +104,9 @@ pub struct Checkbox {
 }
 
 impl Checkbox {
+    /// 盒边长 (逻辑像素)。自绘消费者 (行列表) 的布局/居中与画法同源, 取此常量。
+    pub const BOX_SIZE: f32 = 14.0;
+
     /// 创建复选框, 使用默认浅色主题 token, 未选态。
     pub fn new() -> Self {
         Self::themed(&LightTheme)
