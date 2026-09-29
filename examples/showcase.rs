@@ -1849,7 +1849,10 @@ fn main() -> anyhow::Result<()> {
         clear_color: t.background(),
         background,
         topmost: topmost_at_boot,
-        // 位置记忆演示: 记住上次拖到的位置, 重启复原 (落点文件 target/tmp/)。
+        // 默认最大化启动 (框架在 GPU 就绪后才 set_maximized, 无全屏白屏)。
+        maximized: true,
+        // 位置记忆演示: 记住上次拖到的位置, 重启复原 (落点文件 target/tmp/;
+        // maximized 时框架自动跳过位置恢复)。
         placement: danqing::ShowPlacement::Remember,
         // 点击穿透演示的热键 (覆盖默认的番茄钟语义热键 —— showcase 本就不用它们,
         // 覆盖后不再白白全局吞掉 Ctrl+Shift+P/S/Q)。
