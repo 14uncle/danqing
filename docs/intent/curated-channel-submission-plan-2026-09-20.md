@@ -65,7 +65,7 @@
 | 5 | **反斗软件** | 邮件 `jzhone@qq.com` | pitch 邮件（低确定性，可选） | 文案 5 改称呼 | ~5 分钟 |
 | ~~6~~ | ~~**Show HN**~~ | — | — | — | **已砍掉（2026-09-21 用户决定）**：HN 国内不可达（本机实测 DNS 污染——域名被解析到 Facebook IPv6、HTTPS 连接超时），无代理通道；文案 3 留档备复用 |
 
-已划掉：~~大眼仔旭~~（互链前置）；~~算法泛渠道 / 开发者社区~~（实测无效，不再投入）；~~Show HN~~（HN 国内不可达，2026-09-21）。
+已划掉：~~大眼仔旭~~（互链前置）；~~算法泛渠道 / 开发者社区~~（实测无效，不再投入）；~~Show HN~~（HN 国内不可达，2026-09-21）；~~软餐 / 异次元 / 反斗 / 阮一峰周刊~~（2026-10-09 用户裁决不投：活跃度 / 适配度预判不足）。
 英文收录型（AlternativeTo / Product Hunt / Reddit）：**本轮不投**——规则未核实 + 需 VPN/养号，等中文站读数出来再定。
 
 **第二批（2026-09-21 用户指令追加）**：**HelloGitHub / 阮一峰周刊 / 开源中国**——开发者向策展渠道，见 C 组与文案 7–9。
@@ -349,6 +349,55 @@ HelloGitHub 审核标准（官方 issue #271）：文档完善（项目介绍/�
 
 **入口 ② 博客**：`my.oschina.net` 后台发文，**与 CSDN 同稿**（文案 2 全文，标题「1 GB 日志秒开：我用 Rust 写了一个日志查看器」），文末 GitHub 链接照放。⚠️ 同稿多发对搜索权重有轻微稀释，但本实验按 GitHub referrer 归因（`oschina.net` / `my.oschina.net` 可见），不受影响。
 
+### 文案 10 · dev.to 英文体验文（2026-10-09 新增，1.5 波次；顶替已砍的 Show HN 英文位）
+
+📌 dev.to 国内可达、允许外链、文章进 Google 索引 = HN 砍掉后的英文拦截位。网页编辑器贴 Markdown 发布；
+front matter 的 `published: false` 是防误发保险，发布时在编辑器里改 Published。
+
+> **Front matter**:
+> ```
+> ---
+> title: "Opening 1 GiB logs in 0.6 s: a native Windows log viewer built with mmap"
+> published: false
+> tags: rust, windows, devtools, logging
+> ---
+> ```
+>
+> **正文**:
+>
+> On-call debugging with multi-gigabyte logs on Windows is still surprisingly painful. I benchmarked everything I could find on a 1 GiB file (Windows 11, same machine):
+>
+> - VS Code on plain text: ~10 s to open
+> - VS Code + the Daucloud JSONL extension: ~7 s cold
+> - LogViewPlus (paid): 60 s cold — it parses everything into a table first, so it's slow by design
+> - klogg: fast (mmap-based, like this one), but no release in 4+ years and 273 open issues (checked 2026-09-16)
+>
+> None of them was a native desktop app that just opens the file. So I built one, in Rust. The trick is what it doesn't do: no parsing, no loading. It mmaps the file and builds a line-step index — opening a 1 GiB log takes about as long as that index pass.
+>
+> Numbers (release build, 1 GiB files, same machine):
+>
+> - Cold open: ~**0.6 s**; hot open: **92 ms**
+> - Regex search: **115 ms**; random access: **0.52 µs/line**
+> - 5 GiB ≈ 3 s; 10 GiB ≈ 6–7 s
+> - JSONL: auto-detected and columned, field filter (`level=ERROR status=500`) in **40 ms**
+> - GBK-encoded legacy logs open without mojibake (LogViewPlus garbles them by default in my test)
+>
+> New in 1.5 — the paid tier is mostly about batch work:
+>
+> - **Merge timeline**: stitch several services' logs into one timeline — 3 sources × 1 GiB (16.98 M lines) ready in **~0.95 s**, per-source clock offset calibration (±10 years / ±23 h timezone skew), req_id tracking across sources
+> - **Field analytics**: p50/p99 for a JSONL field over 1 GiB in ~1 s
+> - **Export**: 1 GiB of raw lines in **608 ms** (SSD-bound); CSV opens in Excel without mojibake
+>
+> What it deliberately doesn't do: no ANSI escape-code rendering; no cloud, no telemetry. The Store build makes zero network requests; the portable build only checks GitHub for updates once at startup.
+>
+> **Pricing** — the free tier is not a trial: the single-file viewer is full-featured and free forever (open source, MIT/Apache-2.0). Pro 1.5 is a one-time buyout — **$29 personal / $59 business** (no subscription), early bird **$19/$39** for the first month or first 50 orders.
+>
+> Download: [GitHub Releases](https://github.com/14uncle/danqing-log/releases) (portable zip, unzip and run) or Microsoft Store (search "LogLens").
+>
+> Built solo. Issues welcome.
+
+**纪律自检（本稿已过）**：数字全部出自 `PERFORMANCE_REPORT.md`/文案 2 已核口径（合并 947–967ms→「约 0.95 秒」同 §2.1 口径）✅；无 ANSI 主张 / 无「独家唯一」✅；不对 klogg 声称速度优势（「fast (mmap-based, like this one)」只陈述同构不比快）✅；价格挑明 + 早鸟仅进带日期帖子 ✅；竞品断言带日期 ✅。
+
 ---
 
 ## 三、记录表模板
@@ -357,19 +406,22 @@ HelloGitHub 审核标准（官方 issue #271）：文档完善（项目介绍/�
 
 | 渠道 | 投递日 | 形式 | 状态 | L1 曝光 | L1 互动 | GitHub uniques 增量 | 商店视图增量 | 安装增量 | acquisitions | 自购剔除 | 净陌生人付费 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 少数派 | **2026-09-21** | 体验文（文案 2，log） | **审核中**（当日提交，URL 待出） |  |  |  |  |  | —（付费层未上线） | — | — |
-| 小众软件论坛 | **2026-09-21** | 自荐新帖（模板稿，log） | **已发** [topic/92198](https://meta.appinn.net/t/topic/92198) | 33（09-21 读） | **1 回复（陌生人 tjsky：「下来试试，倒是 EmEditor 和 UltraEdit 之外的一个选择」）** |  |  |  | — | — | — |
-| 软餐 | 待定（用户动作） | pitch 邮件（文案 5，log） | 就绪待投（2 工作日时钟） |  |  |  |  |  | — | — | — |
-| 异次元 | 待定（用户动作） | 全文邮件（文案 6，log） | 就绪待投 |  |  |  |  |  | — | — | — |
-| 反斗软件 | 待定（用户动作） | pitch 邮件（文案 5 改，log） | 就绪待投（可选） |  |  |  |  |  | — | — | — |
-| CSDN | **2026-09-21** | 方案外自投（log） | **已发** [166250357](https://blog.csdn.net/GANWEIHUN/article/details/166250357) | 15 阅读（09-21 读） |  |  |  |  | — | — | — |
-| 知乎 | **2026-09-21** | 方案外自投（log） | **已发** [p/2085411801093633051](https://zhuanlan.zhihu.com/p/2085411801093633051) | 待补（外抓 403，后台读） |  |  |  |  | — | — | — |
-| 掘金 | **2026-09-21** | 方案外自投（log） | **已发** [7687796652300517416](https://juejin.cn/post/7687796652300517416) | 待补（JS 渲染抓不到，后台读） |  |  |  |  | — | — | — |
-| 微信公众号 | **2026-09-21** | 方案外自投（log） | **已发** [mp.weixin](https://mp.weixin.qq.com/s/VnR50DT4vS-cMWWw0Il43g)（无可点外链，预期 referrer 不可见） |  |  |  |  |  | — | — | — |
-| 抖音 | **2026-09-21** | 方案外自投（log） | **已发**（作品 ID `7687911042646691082`，[创作者后台](https://creator.douyin.com/creator-micro/work-management/work-detail/7687911042646691082?enter_from=content)；无公开链接入口，预期 referrer 不可见） | 待补（后台读） |  |  |  |  | — | — | — |
-| HelloGitHub | **2026-09-21** | 站内仓库收录提交（log）——用户实走 hellogithub.com 通道，文案 7（issue 通道）未用、留档 | **审核中** [提交管理页](https://hellogithub.com/user/jI1opkJLPdw2YE7/repo)（月刊，周期长） |  |  |  |  |  | — | — | — |
-| 阮一峰周刊 | 待定（用户动作） | 自荐 issue（文案 8，log） | 就绪待投（周刊，每周五发布） |  |  |  |  |  | — | — | — |
-| 开源中国 | **2026-09-21** | 博客（文案 9 入口②，log）；软件收录（入口①）当日未投 | **博客已发** [19764549](https://my.oschina.net/u/9765073/blog/19764549) | 待补（页面 JS 壳抓不到，后台读） |  |  |  |  | — | — | — |
+| 少数派 | **2026-09-21** | 体验文（文案 2，log） | **审核通过已发布**（10-09 用户确认） | 60（10-09 读） |  |  |  |  | —（付费层未上线） | — | — |
+| 小众软件论坛 | **2026-09-21** | 自荐新帖（模板稿，log） | **已发** [topic/92198](https://meta.appinn.net/t/topic/92198) | 33（09-21 读）/ **177（10-09 读）** | **1 回复（陌生人 tjsky：「下来试试，倒是 EmEditor 和 UltraEdit 之外的一个选择」）** |  |  |  | — | — | — |
+| 软餐 | 待定（用户动作） | pitch 邮件（文案 5，log） | **不投**（2026-10-09 用户裁决：活跃度预判不足） |  |  |  |  |  | — | — | — |
+| 异次元 | 待定（用户动作） | 全文邮件（文案 6，log） | **不投**（2026-10-09 用户裁决：活跃度预判不足） |  |  |  |  |  | — | — | — |
+| 反斗软件 | 待定（用户动作） | pitch 邮件（文案 5 改，log） | **不投**（2026-10-09 用户裁决：活跃度预判不足） |  |  |  |  |  | — | — | — |
+| CSDN | **2026-09-21** | 方案外自投（log） | **已发** [166250357](https://blog.csdn.net/GANWEIHUN/article/details/166250357) | 15（09-21 读）/ **228（10-09 读）** |  |  |  |  | — | — | — |
+| 知乎 | **2026-09-21** | 方案外自投（log） | **已发** [p/2085411801093633051](https://zhuanlan.zhihu.com/p/2085411801093633051) | 几十（10-09 读，口述合计口径，确数待后台补） |  |  |  |  | — | — | — |
+| 掘金 | **2026-09-21** | 方案外自投（log） | **已发** [7687796652300517416](https://juejin.cn/post/7687796652300517416) | 几十（10-09 读，口述合计口径，确数待后台补） |  |  |  |  | — | — | — |
+| 微信公众号 | **2026-09-21** | 方案外自投（log） | **已发** [mp.weixin](https://mp.weixin.qq.com/s/VnR50DT4vS-cMWWw0Il43g)（无可点外链，预期 referrer 不可见） | 116（10-09 读） |  |  |  |  | — | — | — |
+| 抖音 | **2026-09-21** | 方案外自投（log） | **已发**（作品 ID `7687911042646691082`，[创作者后台](https://creator.douyin.com/creator-micro/work-management/work-detail/7687911042646691082?enter_from=content)；无公开链接入口，预期 referrer 不可见） | 几十（10-09 读，口述合计口径，确数待后台补） |  |  |  |  | — | — | — |
+| HelloGitHub | **2026-09-21** | 站内仓库收录提交（log）——用户实走 hellogithub.com 通道，文案 7（issue 通道）未用、留档 | **审核中**（10-09 用户确认仍在审） [提交管理页](https://hellogithub.com/user/jI1opkJLPdw2YE7/repo)（月刊，周期长） |  |  |  |  |  | — | — | — |
+| 阮一峰周刊 | 待定（用户动作） | 自荐 issue（文案 8，log） | **不投**（2026-10-09 用户裁决：适配度预判不足，估计不会收录） |  |  |  |  |  | — | — | — |
+| 开源中国 | **2026-09-21** | 博客（文案 9 入口②，log）；软件收录（入口①）当日未投 | **博客已发** [19764549](https://my.oschina.net/u/9765073/blog/19764549) | 几十（10-09 读，口述合计口径，确数待后台补） |  |  |  |  | — | — | — |
+| 知乎回答（已有问题） | 待定（1.5 波） | 拦截式回答（选题包见 distribution-prep §2.4） | **待选题**（机器选题四路全空，人工挑） |  |  |  |  |  | — | — | — |
+| dev.to | 待定（1.5 波） | 英文体验文（文案 10） | **文案已备待投** |  |  |  |  |  | — | — | — |
+| WinGet / Scoop | 待定（1.5 波） | 收录 PR（清单草案见 distribution-prep §2.4） | **草案已备待 PR** |  |  |  |  |  | — | — | — |
 | ~~Show HN~~ | — | — | **已砍掉**（2026-09-21：HN 国内不可达） | — | — | — | — | — | — | — | — |
 
 **2026-09-21 实投记录（用户执行）**：当日实投 **7 渠道**——小众软件论坛、少数派 + 方案外 5 个（CSDN / 知乎 / 掘金 / 微信公众号 / 抖音）；3 个邮件渠道（软餐 / 异次元 / 反斗）当日未投，仍就绪。分析备注：开发者社区（CSDN / 知乎 / 掘金）对 pomodoro 是受众错配（198 阅读≈0），但 **log 的用户本来就是开发者——受众正对**，这是「同渠道换产品」的再测，不是重复烧；公众号 / 抖音无可点击外链，只作顶部认知，预期 GitHub referrer 里看不到它们。**同日晚间追加 2 渠道**：开源中国博客（已发）+ HelloGitHub 站内仓库收录（审核中）——C 组 3 家里实投 2 家，阮一峰周刊仍就绪待投。
@@ -377,6 +429,10 @@ HelloGitHub 审核标准（官方 issue #271）：文档完善（项目介绍/�
 **T0 基线快照**（2026-09-21 投放当日拉取，`gh api`）：近 14 天（09-07→09-20）**79 views / 14 uniques**；referrer **只有 github.com（19/4），外部来源为零** ✓；v1.0.0 zip 下载 **3**（sha256 0）；**star 1 / fork 0 / watcher 0**。**回读对照点：7 天 = 2026-09-28，30 天 = 2026-10-21**。
 
 **2026-09-21 晚间：MS Store 认证通过（09-19 提交，仅 2 天）**——v1.0 商店版（纯免费层，无 trial 无内购）上架，双渠道全部落地。**商店校准钟起算 09-21 → 回填 2026-10-21**（与渠道 30 天回读同日）；商店 impressions 走 Partner Center 收购报表（T+1~T+3 延迟，首批约 09-22~24 可见），本表「商店视图增量」列自此可读。商店页链接待用户贴（随后接 README 下载节 / 仓库 homepageUrl / launch-copy 速查表）。
+
+**2026-10-09 T+18 回读（用户提供后台读数）**：少数派 **审核通过已发布**（60 阅读）——策展渠道「会不会收」拿到第一个肯定答案（0 拒 1 收）；HelloGitHub 仍审核中（月刊节奏）。各自营渠道 18 天阅读：CSDN 228 / 小众论坛 177 / 公众号 116 / 少数派 60 / 知乎·掘金·抖音·开源中国各几十（口述合计口径，确数待后台补）。**流程漏记一笔**：模板定的「7 天回读」（09-28）未执行且无人发现——间隔期内 10-08 盘点曾把论坛 09-21 当日读数 33 当现值引用（本次已更正为 177）；读数不带拉取日就会冒充新读数，本表 L1 列自此全部带日期。30 天回读 = 10-21；sspai.com / meta.appinn.net 各带来多少 uniques 的归因，随 10-18 校准钟拉 referrers（T+20 那次 API 404 未取到）。
+
+**2026-10-09 渠道裁决（用户）**：就绪待投四家**全部不投**——软餐 / 异次元 / 反斗 = 活跃度预判不足；阮一峰周刊 = 适配度预判不足（估计不会收录）。方法上成立：判据要测的是「有受众的策展渠道收不收」，投预判已死的渠道只会产出混淆读数（收录后 <10 uniques 分不清是渠道不行还是该站没人）。agent 留一档异见备查：阮一峰「不太符合」一条未必准——其周刊工具栏常客就是「不知名作者的性能向小工具」，适配不差、只是收录率低；且拒稿同样喂反向判据，成本约 5 分钟。裁决仍归用户，文案 5/6/8 留档，复活即用。**策展实验分母随之缩小**：判据读在**少数派（已收）/ HelloGitHub（在审）/ 论坛→主站打捞（18 天未打捞，近软拒）/ ~~1.5 波 V2EX·LINUX DO~~（同日后续：用户报不可达，curl 实测双超时，同 HN 死法，见 distribution-prep §2.2）** 上，每个剩余数据点承重变大，HelloGitHub 成最大单发。编辑策展侧实际只剩三家。
 
 **读数工具**：
 - GitHub：`gh api repos/14uncle/danqing-log/traffic/views`（**仅 14 天窗口**，需按周期拉）
