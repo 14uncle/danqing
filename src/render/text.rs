@@ -167,6 +167,18 @@ impl TextBatch {
             / self.scale
     }
 
+    /// 单行文本在高度 `box_h` 的盒子里**垂直居中**时, 基线相对盒子顶的偏移
+    /// (**逻辑像素**, 不含盒子自身的 y)。
+    ///
+    /// 即 `(box_h - line_height(px)) / 2 + ascent(px)` —— 全家 3 仓 7 处手抄过同一式
+    /// (2026-10-10 下沉, 复盘 S6); 逐处迁移后像素级等价。
+    ///
+    /// 返回**偏移**而非绝对坐标: 调用方自己加 `y`(`plainsight`/`dropshelf` 原本就取偏移,
+    /// `log::analysis_panel::vcenter_base` 原本返回绝对基线, 迁移时补 `y +`)。
+    pub fn vcenter_baseline(&self, box_h: f32, px: f32) -> f32 {
+        (box_h - self.line_height(px)) / 2.0 + self.ascent(px)
+    }
+
     /// 指定逻辑字号下的 descent(基线到行底的距离, **逻辑像素**; `px` 预期整数值, 同 [`Self::line_height`])。
     pub fn descent(&self, px: f32) -> f32 {
         let phys = self.phys_px(px);
@@ -640,6 +652,33 @@ mod tests {
         let c = batch.instance_colors()[0];
         assert!((c.r - 0.21404).abs() < 1e-4, "r 实得 {} (未解码?)", c.r);
         assert_eq!(c.a, 1.0, "alpha 不参与色彩空间转换");
+    }
+
+    #[test]
+    fn vcenter_baseline_centers_the_glyph_line_in_the_box() {
+        // 语义锁 (不是把公式再抄一遍): 「垂直居中」= 字形行盒的顶底中点落在盒中点。
+        // 顶 = baseline − ascent; 底 = 顶 + line_height。
+        let b = TextBatch::new();
+        for (box_h, px) in [
+            (30.0f32, 14.0f32),
+            (28.0, 12.0),
+            (100.0, 33.0), // 分数行高/字号一例
+        ] {
+            let top = b.vcenter_baseline(box_h, px) - b.ascent(px);
+            let bottom = top + b.line_height(px);
+            let center = (top + bottom) / 2.0;
+            assert!(
+                (center - box_h / 2.0).abs() < 1e-3,
+                "box_h={box_h} px={px}: 行盒中点 {center} 未落在盒中点 {}",
+                box_h / 2.0
+            );
+        }
+    }
+
+    #[test]
+    fn vcenter_baseline_grows_with_box_height() {
+        let b = TextBatch::new();
+        assert!(b.vcenter_baseline(40.0, 14.0) > b.vcenter_baseline(20.0, 14.0));
     }
 
     #[test]

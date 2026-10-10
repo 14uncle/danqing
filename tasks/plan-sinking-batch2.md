@@ -45,7 +45,7 @@
   - 验收: 宏展开编译测试 + 双主题逐 token 抽查(dropshelf `delegation_is_verbatim` 形态); 33 个必填方法全委托
   - 估时: XS | 依赖: 无
 
-- [ ] **T4: 件4 `TextBatch::vcenter_baseline`(S6)** — `danqing/src/render/text.rs`
+- [x] **T4: 件4 `TextBatch::vcenter_baseline`(S6)** — `danqing/src/render/text.rs` ✅ 2026-10-10
   - 内容: `pub fn vcenter_baseline(&self, box_h: f32, px: f32) -> f32` = `(box_h - self.line_height(px)) / 2.0 + self.ascent(px)`(返回**偏移**, 不含 y; 入参 f32 与 `line_height`/`ascent` 同制)
   - 验收: 数值测试(奇/偶行高两例, 手算钉死); 三仓 7 处迁移后**像素级等价**(逐处对照原式)
   - 估时: XS | 依赖: 无
