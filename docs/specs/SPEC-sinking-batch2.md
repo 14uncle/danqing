@@ -88,3 +88,21 @@ cargo fmt
 1. toml 子模块交集范围:两仓现有格式都只用平铺 key=value 还是含 section?(plan 阶段读码定,spec 不预设)
 2. delegate 宏命名与委托面:log LogTheme 是否委托了 Theme 全部方法(含 source_palette)?plan 阶段定
 3. log 侧迁移排期:随批走还是挂 v1.x 发布后?(建议挂发布后,与 S8 log 侧同窗口)
+
+## 简化记(code-simplify,2026-10-10)
+
+Phase 1 六件(框架五 + encoding 一)已做 code-simplify 复核:**零代码改动收口**。本批是昨日新写、且已经过
+双路评审 + 一轮修复的代码,逐个化简点检查后判定**不动** —— 不为动而动。不动清单:
+
+- **toml.rs 四个取值口**(`str`/`bool`/`int`/`str_list` 同形 `match self.get(key)?` 各 4-6 行):
+  可抽 `Value::as_*` 方法把 match 挪进 impl —— 但那只是**搬移复杂度不是消减**(概念数不变),
+  按「不泛化到第三个用例」不动;`bool()` 的两条 guard arm 是 log 口径的有意显式。
+- **`epoch_millis` 的 `.map().unwrap_or(0)`**(可写 `.map_or(0,..)`): 这是 luoban 的逐字移植,
+  为保与源实现可比对而保留,不换写法。
+- **`Writer::str_list` 的中间 Vec 分配**: 冷路径(配置文件写出),`map().collect().join()` 可读性更好,
+  不为省一次分配改结构。
+- **`parse` 的重复键线性查找**(O(n²)): 配置文件键数 <20,换 HashMap 是负优化(引入散列依赖形态)。
+- **`parse_value` 的 if 链**: 顺序语义(先引号再数组再 bool 再整数)依赖显式次序,改 match 会丢这层可读性。
+
+**动过的地方全部是评审修复轮的产物**(F1 转义/F2 空串/F5 attempts 锁),不在本段重复记。
+verify: 本段为纯文档增记,代码零触碰,无需复跑三件套(上一轮 778 绿 / clippy 0 即当前状态)。
