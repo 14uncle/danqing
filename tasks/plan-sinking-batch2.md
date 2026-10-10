@@ -69,7 +69,8 @@
 - [x] review(双路: 五轴 + 红队) — `/agent-skills:code-review-and-quality` ✅ 2026-10-10
   - 五轴 REQUEST CHANGES(0 Critical, 2 Required 均文档级) + 红队 0 Critical、F1/F5 实锤(已修)
   - 修复批次见 `src/persist/toml.rs` / `src/clipboard.rs` / `src/theme.rs` / `src/time.rs` / `src/lib.rs` / 本 plan / spec
-- [ ] **push danqing + danqing-encoding**(**对外动作, 用户逐项点头**)
+- [x] **push danqing + danqing-encoding**(**对外动作, 用户逐项点头**) ✅ 2026-10-10
+  (encoding `573ad91` master + danqing `9c25929a` dev 上一批已推; 复评修复/简化记/Phase 2 落账随 `8039fe5`/`89ffbbd` 同日补推, dev→`89ffbbd`)
 - [ ] 用户过目
 
 ### Phase 2: 产品迁移(框架先 push → 产品 `cargo check` 最小重解, **顺序不能反**)
@@ -96,9 +97,9 @@
 ### Checkpoint 2: 全量验收
 
 - [x] 各仓三件套绿; 分仓分别提交, message 注明关联; 净删行数对账 ✅ 2026-10-10
-  (dropshelf `d6f7ae4` 84 绿 / luoban `42c0648` 95 绿 / plainsight `0a9556d` 47 绿; **三仓迁移 commit 均未 push**)
+  (dropshelf `d6f7ae4` 84 绿 / luoban `42c0648` 95 绿 / plainsight `0a9556d` 47 绿; 三仓迁移 commit 同日已推: dropshelf dev→`d6f7ae4` / luoban master→`42c0648` / plainsight dev→`0a9556d`, 快修批祖先随栈同推)
 - [ ] 人工过目(各仓既有测试零改动存活数)
-- [ ] 复盘报告 S2/S4/S5/S6 标落地; `framework-sinking.md` 使用方式节补「下沉验收须含既有消费者迁移」闸(S8 教训, 与 S1 plan T9 同笔)
+- [x] 复盘报告 S2/S4/S5/S6 标落地; `framework-sinking.md` 使用方式节补「下沉验收须含既有消费者迁移」闸(S8 教训, 与 S1 plan T9 同笔) ✅ 2026-10-10(`89ffbbd` 同笔)
 
 ## Risks
 

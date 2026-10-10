@@ -109,7 +109,7 @@ log 的 LogTheme 与 dropshelf app_theme.rs:28-75 同款宏壳 ~48 行/份。建
 
 **已批 (2026-10-10 用户「S1+B 批准」)**:
 - S1 授权栈:计划已批 → **建仓 `danqing-license` 成稿(T0–T5,`e843f24`)**;spec/plan 已迁入该仓(danqing 侧留指针防双份漂移);**闸 A 通过, T6 公开仓 `github.com/14uncle/danqing-license` 已建并 push (master 单分支)**;消费方迁移 T7 dropshelf / T8 log 未开始
-- B 批(S2/S4/S5/S6+小件包):**Phase 1 框架侧五件 + Phase 2 三仓迁移全闭(2026-10-10)** —— danqing `52cbfc8..9c25929a`(dev 已推) + danqing-encoding `dcc58cb..573ad91`(master 已推);迁移: dropshelf `d6f7ae4`(84 绿) / luoban `42c0648`(95 绿, encoding.rs 整模块删 —— 零生产调用点) / plainsight `0a9556d`(47 绿), **三仓迁移 commit 均未 push**;log(T10)挂 v1.x 发布后。双路评审零 Critical,红队实锤 F1(写侧不转义换行会写出非法 TOML 丢数据)/F5(attempts 下限无锁)已修
+- B 批(S2/S4/S5/S6+小件包):**Phase 1 框架侧五件 + Phase 2 三仓迁移全闭(2026-10-10)** —— danqing `52cbfc8..9c25929a`(dev 已推) + danqing-encoding `dcc58cb..573ad91`(master 已推);迁移: dropshelf `d6f7ae4`(84 绿) / luoban `42c0648`(95 绿, encoding.rs 整模块删 —— 零生产调用点) / plainsight `0a9556d`(47 绿), **三仓迁移 commit 当日已推**(dropshelf dev→`d6f7ae4` / luoban master→`42c0648` / plainsight dev→`0a9556d`, 快修批祖先随栈同推; danqing 余账 `8039fe5`/`89ffbbd` 同推);log(T10)挂 v1.x 发布后。双路评审零 Critical,红队实锤 F1(写侧不转义换行会写出非法 TOML 丢数据)/F5(attempts 下限无锁)已修
 - S3 RowList(设计重,殿后);S8 log 侧迁移排期;S7 rfd(裁决=维持产品直用)
 
 ## ⑥ 待裁决清单
