@@ -56,14 +56,16 @@
   - 估时: XS | 依赖: 无
   - 注: 两处**不逐字相同**(dropshelf 双向 `SystemTime↔i64`, luoban 单向 `now→u64`) —— 三个函数覆盖两者, 迁移时各取所需
 
-- [ ] **T6: 件5b `danqing-encoding::decode_bytes`(小件包)** — **兄弟 crate `danqing-encoding`**(独立仓)
+- [x] **T6: 件5b `danqing-encoding::decode_bytes`(小件包)** — `danqing-encoding/src/lib.rs`(独立仓 `573ad91`) ✅ 2026-10-10
   - 内容: `pub fn decode_bytes(raw: &[u8]) -> (String, Encoding)` —— detect → UTF-16 转码/行解码 → 剥 BOM(成稿 = luoban `encoding.rs:16-31` ~15 行组合层)
   - 验收: 五编码矩阵(UTF-8/BOM/UTF-16LE/BE/GBK)参数化搬 luoban 用例; 兄弟 crate 三件套绿
   - 估时: XS | 依赖: 无
 
 ### Checkpoint 1: 框架侧完成
 
-- [ ] 三件套全绿(danqing 含 `--features persist`; danqing-encoding 独立); 五件各自测试锁定
+- [x] 三件套全绿(danqing 含 `--features persist`; danqing-encoding 独立); 五件各自测试锁定 ✅ 2026-10-10
+  - danqing 678 lib + 集成全绿 / clippy 0;danqing-encoding 14 测试全绿 / clippy 0
+  - 六笔本地 commit:danqing T1 `9ceb1cb` / T2 `7eb1617` / T3 `259c2f7` / T4 `b3d72ae` / T5 `cf3ff03`;encoding T6 `573ad91`
 - [ ] review(五轴) — `/agent-skills:code-review-and-quality`
 - [ ] **push danqing + danqing-encoding**(**对外动作, 用户逐项点头**)
 - [ ] 用户过目
