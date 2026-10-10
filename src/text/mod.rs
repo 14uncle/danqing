@@ -13,6 +13,6 @@ pub mod line_layout;
 pub mod selection;
 
 pub use atlas::{AtlasError, GlyphAtlas, GlyphInfo};
-pub use crlf::to_crlf;
+pub use crlf::{to_crlf, to_lf};
 pub use font::{Font, FontError};
 pub use line_layout::{Line, break_lines};

@@ -1,11 +1,12 @@
 //! @author 十四叔
 //! @date 2026/09/10
 //!
-//! 剪贴板读取原语: 抽象 trait + 真实系统源。
+//! 剪贴板原语: 抽象 trait + 真实系统源。
 //!
-//! 下沉自 danqing-clipboard `monitor.rs` (2026-09-10, 簇E/E4)。
-//! 监听器 (隐私判定/落库/轮询循环) 是产品业务, 本模块只提供读取原语:
-//! `ClipSource` trait (序列号 + 多格式读取) + `SystemClipSource` (arboard + Win32)。
+//! 读侧下沉自 danqing-clipboard `monitor.rs` (2026-09-10, 簇E/E4):
+//! 监听器 (隐私判定/落库/轮询循环) 是产品业务, 本模块只提供读取原语。
+//! **写侧** (2026-10-10, 簇E/E3 补完): HTML 写 + 写后读回校验重试,
+//! 下沉自 danqing-luoban `clipboard.rs` —— 产品自填过的双路写/校验/归一收编于此。
 //! 平台代码驻地豁免见 CLAUDE.md (剪贴板域无法归入窗口域)。
 
 /// 剪贴板图片 (RGBA 原始字节)。
@@ -34,6 +35,75 @@ pub trait ClipSource {
     fn image(&mut self) -> Option<ClipImage> {
         None
     }
+    /// 写 HTML 富文本 (同时写纯文本备选)。默认**不支持** —— 只读源无需实现。
+    ///
+    /// 双路写是 arboard 单次调用的能力 (CF_HTML + 纯文本备选), 不是两次独立写。
+    fn set_html(&mut self, _html: &str, _alt_text: &str) -> Result<(), ClipWriteError> {
+        Err(ClipWriteError::Unsupported)
+    }
+}
+
+/// 剪贴板写入 / 写后校验的失败态。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipWriteError {
+    /// 该源不支持写入 (trait 默认实现)。
+    Unsupported,
+    /// 后端写入失败 (arboard 等)。
+    Backend(String),
+    /// 写后读回校验失败 (读空 / 内容不符), 重试耗尽。
+    Verify {
+        /// 已尝试次数。
+        attempts: u32,
+        /// 末次失败原因 (给人看)。
+        detail: String,
+    },
+}
+
+impl std::fmt::Display for ClipWriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ClipWriteError::Unsupported => write!(f, "该剪贴板源不支持写入"),
+            ClipWriteError::Backend(e) => write!(f, "写入剪贴板失败: {e}"),
+            ClipWriteError::Verify { attempts, detail } => {
+                write!(f, "复制失败 (已试 {attempts} 次): {detail}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ClipWriteError {}
+
+/// 写后读回比对前的归一: 行尾统一 LF ([`crate::to_lf`]) + 首尾空白裁剪。
+///
+/// 两边行尾口径常不同 (Windows 源多返 CRLF), 不归一就会假报「校验不符」。
+pub fn normalize_clip_text(s: &str) -> String {
+    crate::to_lf(s).trim().to_string()
+}
+
+/// 写 HTML 并读回校验, 不符则重试 (`attempts` 至少 1 次)。
+///
+/// 三种失败 —— 写失败 / 读回为空 / 内容不符 (归一比较) —— 都重试; 耗尽返回
+/// [`ClipWriteError`], **绝不静默**: 复制失败却没有反馈, 用户会以为成功了。
+pub fn copy_html_verified(
+    src: &mut impl ClipSource,
+    html: &str,
+    alt_text: &str,
+    attempts: u32,
+) -> Result<(), ClipWriteError> {
+    let attempts = attempts.max(1);
+    let mut detail = String::from("未知错误");
+    for _ in 0..attempts {
+        if let Err(e) = src.set_html(html, alt_text) {
+            detail = e.to_string();
+            continue;
+        }
+        match src.html() {
+            Some(back) if normalize_clip_text(&back) == normalize_clip_text(html) => return Ok(()),
+            Some(_) => detail = "自读回校验不符".to_string(),
+            None => detail = "写后读空".to_string(),
+        }
+    }
+    Err(ClipWriteError::Verify { attempts, detail })
 }
 
 /// DIB 来源的 RGBA 常带全 0 alpha (通道未定义), ALPHA_BLENDING 下整图隐形。
@@ -79,6 +149,12 @@ impl ClipSource for SystemClipSource {
 
     fn html(&mut self) -> Option<String> {
         self.clipboard.get().html().ok()
+    }
+
+    fn set_html(&mut self, html: &str, alt_text: &str) -> Result<(), ClipWriteError> {
+        self.clipboard
+            .set_html(html, Some(alt_text))
+            .map_err(|e| ClipWriteError::Backend(e.to_string()))
     }
 
     fn image(&mut self) -> Option<ClipImage> {
@@ -195,5 +271,140 @@ mod tests {
             let _ = src.files();
             let _ = src.image();
         }
+    }
+
+    // ── 写侧 (件2): 全走内存假源, **严禁真剪贴板** (2026-09-09 幻影粘贴教训) ──
+
+    /// 读回行为: 原样 / 读空 / 换一个内容 (模拟平台改写)。
+    enum Echo {
+        Stored,
+        Empty,
+        Text(String),
+    }
+
+    struct FakeClip {
+        stored: String,
+        /// 前 N 次 set 失败 (模拟后端瞬时故障)。
+        fail_sets: u32,
+        set_calls: u32,
+        echo: Echo,
+    }
+
+    impl FakeClip {
+        fn new() -> Self {
+            Self {
+                stored: String::new(),
+                fail_sets: 0,
+                set_calls: 0,
+                echo: Echo::Stored,
+            }
+        }
+    }
+
+    impl ClipSource for FakeClip {
+        fn sequence(&mut self) -> u32 {
+            0
+        }
+        fn text(&mut self) -> Option<String> {
+            None
+        }
+        fn html(&mut self) -> Option<String> {
+            match &self.echo {
+                Echo::Stored => Some(self.stored.clone()),
+                Echo::Empty => None,
+                Echo::Text(t) => Some(t.clone()),
+            }
+        }
+        fn set_html(&mut self, html: &str, _alt_text: &str) -> Result<(), ClipWriteError> {
+            self.set_calls += 1;
+            if self.fail_sets > 0 {
+                self.fail_sets -= 1;
+                return Err(ClipWriteError::Backend("模拟写失败".into()));
+            }
+            self.stored = html.to_string();
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn copy_html_verified_succeeds_first_try() {
+        let mut c = FakeClip::new();
+        assert!(copy_html_verified(&mut c, "<p>hi</p>", "hi", 3).is_ok());
+        assert_eq!(c.set_calls, 1, "首试成功不该重试");
+    }
+
+    #[test]
+    fn copy_html_verified_retries_on_set_failure_then_succeeds() {
+        let mut c = FakeClip::new();
+        c.fail_sets = 2;
+        assert!(copy_html_verified(&mut c, "<p>hi</p>", "hi", 3).is_ok());
+        assert_eq!(c.set_calls, 3, "写失败两次后第三次成");
+    }
+
+    #[test]
+    fn copy_html_verified_errors_after_attempts_exhausted() {
+        let mut c = FakeClip::new();
+        c.fail_sets = 5;
+        let err = copy_html_verified(&mut c, "<p>hi</p>", "hi", 3).unwrap_err();
+        assert!(
+            matches!(err, ClipWriteError::Verify { attempts: 3, .. }),
+            "耗尽须报 Verify 而非静默: {err:?}"
+        );
+        assert_eq!(c.set_calls, 3);
+    }
+
+    #[test]
+    fn copy_html_verified_errors_when_readback_empty() {
+        let mut c = FakeClip::new();
+        c.echo = Echo::Empty;
+        assert!(matches!(
+            copy_html_verified(&mut c, "<p>hi</p>", "hi", 2),
+            Err(ClipWriteError::Verify { .. })
+        ));
+    }
+
+    #[test]
+    fn copy_html_verified_errors_on_readback_mismatch() {
+        let mut c = FakeClip::new();
+        c.echo = Echo::Text("<p>别的</p>".into());
+        let err = copy_html_verified(&mut c, "<p>hi</p>", "hi", 2).unwrap_err();
+        assert!(err.to_string().contains("校验不符"), "{err}");
+    }
+
+    #[test]
+    fn copy_html_verified_normalizes_line_endings_on_readback() {
+        // 平台把写进去的 LF 回读成 CRLF —— 归一后应判相等, 不误报失败。
+        let mut c = FakeClip::new();
+        c.echo = Echo::Text("<p>a\r\nb</p>".into());
+        assert!(copy_html_verified(&mut c, "<p>a\nb</p>", "a\nb", 1).is_ok());
+    }
+
+    #[test]
+    fn default_set_html_is_unsupported() {
+        struct ReadOnly;
+        impl ClipSource for ReadOnly {
+            fn sequence(&mut self) -> u32 {
+                0
+            }
+            fn text(&mut self) -> Option<String> {
+                None
+            }
+        }
+        let mut s = ReadOnly;
+        assert_eq!(
+            s.set_html("<p>x</p>", "x"),
+            Err(ClipWriteError::Unsupported)
+        );
+        assert!(matches!(
+            copy_html_verified(&mut s, "<p>x</p>", "x", 2),
+            Err(ClipWriteError::Verify { .. })
+        ));
+    }
+
+    #[test]
+    fn normalize_clip_text_unifies_and_trims() {
+        assert_eq!(normalize_clip_text("  a\r\nb  "), "a\nb");
+        assert_eq!(normalize_clip_text("a\rb"), "a\nb");
+        assert_eq!(normalize_clip_text(""), "");
     }
 }

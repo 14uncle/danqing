@@ -32,7 +32,7 @@
   - 验收: 两仓既有 TOML 用例**参数化搬入并存活**(log 5 条 `round_trip_preserves_both_keys`/`legacy_file_without_view_section_still_loads`/`whitespace_free_assignment_is_honoured`/`commented_out_assignment_is_ignored`/`missing_file_yields_defaults`; dropshelf 5 条 `config_roundtrip_is_whole_file_source`/`parse_window_pos_shapes`/`config_bad_value_line_keeps_default`/`config_list_elements_escape_and_roundtrip`/`config_bad_lines_are_skipped_not_fatal`); 新增并集边界(空串/Unicode/含 `=` 的值/`[]` 空数组/尾逗号/未知节); **两仓真实 config 逐字段 round-trip 等价锁**
   - 估时: S-M | 依赖: 无
 
-- [ ] **T2: 件2 剪贴板写侧(S4, 旧账 E3 补完)** — `danqing/src/clipboard.rs`
+- [x] **T2: 件2 剪贴板写侧(S4, 旧账 E3 补完)** — `src/clipboard.rs` + `src/text/crlf.rs`(补 `to_lf`) + `lib.rs`/`text/mod.rs` 导出 ✅ 2026-10-10
   - 内容: `ClipSource` 加**带默认实现**的写侧方法 `set_html(&mut self, html, alt_text) -> Result<(), _>`(默认返 `Unsupported`, 不破既有实现者); `SystemClipSource` 落 arboard 实现(一次调用同时写 CF_HTML + 纯文本备选); 自由函数 `copy_html_verified(src, html, alt_text, attempts)`(写→读回→归一后**字符串相等**校验→不符/写空/失败均重试, 耗尽返 Err **绝不静默**); 归一出口 `normalize_clip_text`(**复用框架既有行尾归一**, 见下注)
   - 语义红线: **测试严禁碰真剪贴板**(2026-09-09 幻影粘贴教训) —— 全走注入假源
   - 验收: luoban 6 条测试参数化搬入并存活(首试成功/写失败重试成/耗尽报错/读回空/读回不符/CRLF 归一); 框架内自建内存假源
