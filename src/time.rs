@@ -58,6 +58,36 @@ pub fn local_tz_offset_seconds() -> i64 {
     chrono::Local::now().offset().local_minus_utc() as i64
 }
 
+/// 当前 Unix epoch 毫秒 (取不到系统时钟 = 0, 溢出 = 0, 不 panic)。
+///
+/// 下沉自 danqing-luoban `app.rs::epoch_millis` (2026-10-10, 复盘小件包)。
+pub fn epoch_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis().try_into().unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// [`SystemTime`] → Unix epoch 毫秒 (早于 1970 = 0; 超出 `i64` = `i64::MAX`; 均饱和不 panic)。
+///
+/// 下沉自 danqing-dropshelf `store.rs::time_to_ms` (2026-10-10, 复盘小件包)。
+pub fn system_time_to_millis(t: std::time::SystemTime) -> i64 {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(i64::MAX as u128) as i64
+}
+
+/// Unix epoch 毫秒 → [`SystemTime`] (负值按 0; 溢出饱和到 epoch —— 不 panic)。
+///
+/// `UNIX_EPOCH + Duration` 的溢出在 `panic = "abort"` 的 release 下是**启动即崩**,
+/// 故全程走 `checked_add` 兜底 (下沉自 danqing-dropshelf `store.rs::ms_to_time`)。
+pub fn millis_to_system_time(ms: i64) -> std::time::SystemTime {
+    std::time::SystemTime::UNIX_EPOCH
+        .checked_add(std::time::Duration::from_millis(ms.max(0) as u64))
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,5 +144,44 @@ mod tests {
         let now = seen + 3600;
         assert_eq!(relative_time(seen, now, 0), "昨天");
         assert_eq!(relative_time(seen, now, CST), "07:30");
+    }
+
+    // ── epoch 毫秒互转 (小件包) ──
+
+    #[test]
+    fn epoch_millis_is_a_plausible_wall_clock() {
+        // 真实值随机器时钟走, 只断言量级 (晚于 2020-01-01)。
+        assert!(epoch_millis() > 1_577_836_800_000, "应晚于 2020-01-01");
+    }
+
+    #[test]
+    fn system_time_to_millis_saturates_low() {
+        use std::time::{Duration, UNIX_EPOCH};
+        assert_eq!(system_time_to_millis(UNIX_EPOCH), 0);
+        assert_eq!(
+            system_time_to_millis(UNIX_EPOCH + Duration::from_millis(1500)),
+            1500
+        );
+        // 早于 1970: duration_since 失败 → 0, 不 panic
+        assert_eq!(
+            system_time_to_millis(UNIX_EPOCH - Duration::from_secs(1)),
+            0
+        );
+    }
+
+    #[test]
+    fn millis_to_system_time_saturates_never_panics() {
+        use std::time::UNIX_EPOCH;
+        assert_eq!(millis_to_system_time(0), UNIX_EPOCH);
+        assert_eq!(millis_to_system_time(-5), UNIX_EPOCH, "负值按 0");
+        assert_eq!(millis_to_system_time(i64::MIN), UNIX_EPOCH);
+        // 溢出走 checked_add → 饱和到 epoch (release panic=abort 下不炸)
+        assert_eq!(millis_to_system_time(i64::MAX), UNIX_EPOCH);
+    }
+
+    #[test]
+    fn millis_round_trips_through_system_time() {
+        let ms: i64 = 1_700_000_000_000;
+        assert_eq!(system_time_to_millis(millis_to_system_time(ms)), ms);
     }
 }

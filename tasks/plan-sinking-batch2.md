@@ -50,7 +50,7 @@
   - 验收: 数值测试(奇/偶行高两例, 手算钉死); 三仓 7 处迁移后**像素级等价**(逐处对照原式)
   - 估时: XS | 依赖: 无
 
-- [ ] **T5: 件5a `time` epoch 毫秒互转(小件包)** — `danqing/src/time.rs`
+- [x] **T5: 件5a `time` epoch 毫秒互转(小件包)** — `danqing/src/time.rs` ✅ 2026-10-10
   - 内容: `epoch_millis() -> u64`(当前时刻, 饱和) + `system_time_to_millis(SystemTime) -> i64` + `millis_to_system_time(i64) -> SystemTime`(均饱和不 panic, 成稿 = dropshelf `store.rs:257-271` 双向 + luoban `app.rs:271-276` 单向)
   - 验收: 饱和边界(负值/i64::MAX/u128 溢出); 两处调用点语义不变
   - 估时: XS | 依赖: 无
