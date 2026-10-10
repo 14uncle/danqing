@@ -112,5 +112,8 @@
 ## 使用方式
 
 - 每簇走独立 spec 流水线（spec→plan→build→review→code-simplify），spec 引用本文对应条目作为需求来源
+- **下沉验收须含「既有消费者迁移」闸**（2026-10-10 三新仓复盘 S8 教训）:AsyncJob 收编进框架后零消费
+  （log 仍用本地副本、plainsight 又写第四份）= 收编空转。此后任何下沉件落地不算完, 直到既有消费者
+  全部迁走并删除本地副本; plan 的 Checkpoint 必须显式列消费者清单。
 - 联动顺序照旧：danqing 提交并 push → 产品仓 `cargo update -p danqing` → 提交 lock，commit message 注明关联
 - 建议动手顺序：**A(anim) → B(job) → C(Overlay) → D(待裁决1) → E 链(E1 先) → F → 小件包**

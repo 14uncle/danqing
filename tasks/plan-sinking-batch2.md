@@ -74,22 +74,18 @@
 
 ### Phase 2: 产品迁移(框架先 push → 产品 `cargo check` 最小重解, **顺序不能反**)
 
-- [ ] **T7: dropshelf 迁 件1/件3/件4/件5a** — `danqing-dropshelf/src/{store,app_theme,shelf_list,group_picker}.rs`
-  - 内容: `store.rs` 手写 TOML(130 行)→ `persist::toml`; `app_theme.rs` 私有 `delegate!` → `delegate_theme!`; `shelf_list.rs`/`group_picker.rs` 两处 inline 基线 → `TextBatch::vcenter_baseline`; `store.rs` `time_to_ms`/`ms_to_time` → `time::*`
+- [x] **T7: dropshelf 迁 件1/件3/件4/件5a** — `danqing-dropshelf` `d6f7ae4` ✅ 2026-10-10(84 绿 / clippy 0; store.rs 净删 ~160 行)
+  - 内容: `store.rs` 手写 TOML 读写 → `persist::toml`(写出物逐字节不变); `app_theme.rs` 私有 `delegate!` → `delegate_theme!`; `shelf_list.rs`/`group_picker.rs` inline 基线 → `TextBatch::vcenter_baseline`; `time_to_ms`/`ms_to_time` → `time::*`
   - 验收: 三件套绿; `config.toml` 逐字段 round-trip 与迁移前**逐字节或逐字段等价**(含数组/转义/窗口位置); 净删可得
   - **迁移必读(评审记)**: ① 框架 `Table::bool` 取 **log 口径**(剥引号后比字面量), dropshelf 旧 `parse_bool` 只认裸字面量 —— 手改的 `dark = "true"` 在旧读法下保留默认、新读法 `Some(true)`; 两仓自己写出的 bool 永远是裸的, **存量文件不受影响**。② `Table::str_list` 对「键在但括号非法」返回 `None`(保留旧值), dropshelf 旧读法返回**空数组**(清空) —— 从 `default()` 起读时结果相同, 非默认基线起读才分叉。两条都是有意取法, 不是缺陷。
-  - 估时: S | 依赖: T1/T3/T4/T5 + danqing push
 
-- [ ] **T8: luoban 迁 件2/件5a/件5b** — `danqing-luoban/src/{clipboard,app,encoding}.rs`(**不含件4** —— 评审更正: luoban 无真 vcenter 站点)
-  - 内容: 删自填 `ClipboardIo` 写侧 + `copy_html_verified` + `normalize`(~45 行), 改框架件2; 读侧 `new()`+两行 arboard 一并消(复盘 ①#7); `app.rs` `epoch_millis` → 件5a; `encoding.rs` `decode_bytes` → 件5b(**经 `danqing::encoding` re-export 消费 → danqing 须先复钉 encoding rev**)
+- [x] **T8: luoban 迁 件2/件5a/件5b** — `danqing-luoban` `42c0648` ✅ 2026-10-10(95 绿 / clippy 0; net -66 行不计 lock)
+  - 内容: 删自填 `ClipboardIo` 写侧 + `copy_html_verified` + `normalize`, 改框架件2; 读侧 `SystemClipboard` 一并消(复盘 ①#7); `epoch_millis` 四处直呼 `danqing::time::epoch_millis()`; **`encoding.rs` 整模块删除**(decode_bytes 零生产调用点 —— F6 文件导入未接线, 组合层已在引擎; 5 条随迁测试由框架 `decode_bytes_matrix` 承接, 100→95 属预期)
   - **不动**: `preview.rs:245` 的 `y + ascent` 是**顶对齐**不是居中, 保留原样(改成件4会下移 1px)
-  - 验收: 三件套绿; **`FakeClip` 改实现框架 trait 后 6 条写侧锁零改动存活**; 「不丢稿」链未受影响
-  - 估时: S | 依赖: T2/T5/T6 + danqing push + danqing 复钉 encoding
+  - 验收: 三件套绿; **FakeClip 改实现框架 trait 后 6 条写侧锁逐字存活**; 「不丢稿」链未受影响
+  - 注: danqing manifest 对 encoding 是纯 git 浮动(无 rev 钉), 故 T8 只需 luoban 自己 lock 复钉 encoding, **无需 danqing 仓再提交**(原 plan「danqing 须先复钉 encoding」在此证伪 —— 那条只在「框架自身消费新 API」时才需要)
 
-- [ ] **T9: plainsight 迁 件4** — `danqing-plainsight/src/view/mod.rs`
-  - 内容: 删仓内 `vcenter_baseline` helper, 四处调用改 `texts.vcenter_baseline(...)`(复盘快修批已先收口成单 helper, 本件换框架版)
-  - 验收: 三件套绿; 47+ 测试绿; 数值等价
-  - 估时: XS | 依赖: T4 + danqing push
+- [x] **T9: plainsight 迁 件4** — `danqing-plainsight` `0a9556d` ✅ 2026-10-10(47 绿 / clippy 0; 仓内 helper 删除, 4 处换框架件)
 
 - [ ] **T10: log 迁 件1/件3/件4(挂 v1.x 发布后)** — `danqing-log/src/{config,analysis_panel}.rs` + 新 `app_theme` 面
   - 内容: `config.rs` 手写 TOML + **整文件写出** → `persist::toml`(需在 Cargo.toml 开 `persist` feature); `impl Theme for LogTheme` 手写 **170 行 → 一行列表**(件3); `analysis_panel.rs::vcenter_base` → 件4(补 `y +`)。**件4 在 log 的实际面远大于 1 处** —— 红队 2026-10-10 实测同式 ≥10 处(`pick_list`/`settings`×3/`toast`/`view`×5/`analysis_panel`), 按实际数安排, 别按 spec 的「1 处」估时
@@ -99,7 +95,8 @@
 
 ### Checkpoint 2: 全量验收
 
-- [ ] 各仓三件套绿; 分仓分别提交, message 注明关联; 净删行数对账
+- [x] 各仓三件套绿; 分仓分别提交, message 注明关联; 净删行数对账 ✅ 2026-10-10
+  (dropshelf `d6f7ae4` 84 绿 / luoban `42c0648` 95 绿 / plainsight `0a9556d` 47 绿; **三仓迁移 commit 均未 push**)
 - [ ] 人工过目(各仓既有测试零改动存活数)
 - [ ] 复盘报告 S2/S4/S5/S6 标落地; `framework-sinking.md` 使用方式节补「下沉验收须含既有消费者迁移」闸(S8 教训, 与 S1 plan T9 同笔)
 
