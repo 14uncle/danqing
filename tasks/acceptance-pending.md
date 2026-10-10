@@ -26,7 +26,7 @@
 
 ## S1 · 授权栈(crate: `danqing-license`, plan: `../danqing-license/tasks/plan-danqing-license.md`)
 
-- ⬜ **闸 B**(T7 dropshelf 迁移落地后执行): dropshelf 便携版 key 激活人工走通 —— keygen 签 key → 激活 → 四功能门开(验收细则见 plan「闸 B」节)
+- ⬜ **闸 B**(T7 机器侧已落地 `20129af`, 待实机): dropshelf 便携版 key 激活人工走通 —— 在 danqing-license 仓跑 keygen (`--features keygen`, 私钥仓库外) 签 key → dropshelf 设置面激活 → F2/F3/F6/F11 四门开(验收细则见 plan「闸 B」节)
 - ⬜ **闸 C**(T8 log 迁移落地后执行, 排期挂 log v1.x 发布窗口): log 侧人工验收(细则见 plan「闸 C」节)
 
 ## 验收中缺陷记录
