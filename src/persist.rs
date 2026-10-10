@@ -14,7 +14,7 @@
 //! | API | 解决的问题 | 复杂度 |
 //! |-----|-----------|--------|
 //! | [`config_dir`] | 配置目录定位 (appdata/name) | 单函数 |
-//! | [`atomic_save`] | 崩溃安全写入 (pid tmp+rename) | 单函数 |
+//! | [`atomic_save`] | 崩溃安全写入 (唯一名 tmp+rename+残渣清扫) | 单函数 |
 //! | [`load_or_default`] | 缺省即正常 (missing → Default) | 单函数 |
 //! | [`DirtyFlag`] | 脏标记+节流 (小窗隐藏/退出时 flush) | 结构体+方法 |
 //! | [`VersionedDoc`] | 版本化文档 (拒绝降级覆盖) | 结构体+方法 |
@@ -23,6 +23,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -68,9 +69,11 @@ pub fn config_dir(name: &str) -> Option<PathBuf> {
 /// 崩溃安全原子写入：写唯一名临时文件 → rename 覆盖目标。
 ///
 /// 保证：写一半断电不会损坏已有文件。rename 在同一目录下是原子操作。
-/// 临时文件名带 pid（`x.tmp.<pid>`）：多实例/多进程同写同一目标时各自
-/// 持有独立 tmp，不会共用 `x.tmp` 互踩（半截 tmp 被 rename 上位即坏文件）。
-/// rename 失败时清掉半截 tmp，不留垃圾。
+/// 临时名 = `<文件名>.tmp.<pid>.<序号>`：pid 防跨进程互踩 (复核 H2)，序号防
+/// **同进程多线程**同写同一路径互踩 (红队 F2 实证: pid-only 命名下同进程并发
+/// 写约 10% 虚假报错)；崩溃残留由成功后的陈旧残渣清扫回收 (红队 F1: pid 后缀
+/// 失去「下次同名覆盖」自愈, 不扫会永久累积; 时龄阈值保护并行实例的在飞 tmp)。
+/// rename 失败时清掉自己的半截 tmp。
 ///
 /// # Errors
 ///
@@ -86,13 +89,61 @@ pub fn atomic_save(path: &Path, data: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
+    let tmp = tmp_name_for(path);
     fs::write(&tmp, data)?;
     if let Err(e) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
         return Err(e);
     }
+    sweep_stale_tmp(path, STALE_TMP_MAX_AGE);
     Ok(())
+}
+
+/// 临时文件序号 (进程内单调递增)。
+static TMP_SEQ: AtomicU32 = AtomicU32::new(0);
+
+/// tmp 文件超过此时龄视为崩溃残渣 (在飞 tmp 生命期是毫秒级; 阈值同时保护
+/// 并行实例刚写的在飞 tmp 不被本实例误清)。
+const STALE_TMP_MAX_AGE: Duration = Duration::from_secs(3600);
+
+/// 本调用的唯一临时文件名：`<文件名>.tmp.<pid>.<序号>` (追加式; 不用
+/// `with_extension` —— `config.toml`/`config.json` 同 stem 替换式会撞名, F2)。
+fn tmp_name_for(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    path.with_file_name(format!(
+        "{name}.tmp.{}.{}",
+        std::process::id(),
+        TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+/// 崩溃残渣清扫：每次成功落盘后顺手清同前缀的陈旧残渣。best-effort：
+/// 任何一步失败都忽略，绝不影响主链。
+fn sweep_stale_tmp(path: &Path, max_age: Duration) {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return;
+    };
+    let prefix = format!("{}.tmp.", name.to_string_lossy());
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let fname = entry.file_name().to_string_lossy().into_owned();
+        if !fname.starts_with(&prefix) {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| t.elapsed().unwrap_or_default() >= max_age)
+            .unwrap_or(false);
+        if stale {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 // ── 3. load_or_default ───────────────────────────────────────────────
@@ -298,7 +349,17 @@ impl<T: Serialize + DeserializeOwned + Clone> VersionedDoc<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+
+    /// 刮擦目录: temp_dir 下按测试名+pid 唯一化 (红队 F9: 此前刮擦写真实
+    /// %APPDATA% 且 panic 路径不留清理, 残渣跨运行污染后续测试)。
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("danqing-persist-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir); // 上次同名残留先清场
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn config_dir_returns_path() {
@@ -310,12 +371,11 @@ mod tests {
 
     #[test]
     fn atomic_save_writes_file() {
-        let dir = config_dir("danqing-test-atomic").unwrap();
+        let dir = scratch_dir("atomic");
         let path = dir.join("test.txt");
         atomic_save(&path, b"hello world").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "hello world");
-        assert!(!path.with_extension("tmp").exists());
-        // 成功后不留任何 tmp 残渣（含 pid 后缀形态）。
+        // 成功后不留任何 tmp 残渣（含 pid+序号后缀形态）。
         let leftovers: Vec<_> = fs::read_dir(&dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -328,18 +388,18 @@ mod tests {
 
     #[test]
     fn atomic_save_keeps_foreign_tmp_untouched() {
-        // H2 回归锁: 旧实现固定 `x.tmp` 名 —— 别实例在飞的 `x.tmp` 会被本写
-        // 覆盖并 rename 走(对方数据被劫)。pid 后缀后: 外来 tmp 原样保留。
-        let dir = config_dir("danqing-test-atomic-foreign").unwrap();
+        // H2 回归锁: 别实例在飞的 tmp (`<文件名>.tmp.<它pid>.<序号>`) 不许被本写
+        // 覆盖/劫走; 且新鲜的它不许被残渣清扫误杀 (时龄阈值保护, F1)。
+        let dir = scratch_dir("atomic-foreign");
         let path = dir.join("test.txt");
-        let foreign = path.with_extension("tmp");
+        let foreign = dir.join("test.txt.tmp.999999.0");
         fs::write(&foreign, b"other instance in-flight").unwrap();
         atomic_save(&path, b"mine").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "mine");
         assert_eq!(
             fs::read_to_string(&foreign).unwrap(),
             "other instance in-flight",
-            "外来 tmp 被覆盖/劫走"
+            "外来 tmp 被覆盖/劫走/误清"
         );
         let _ = fs::remove_dir_all(&dir);
     }
@@ -347,7 +407,7 @@ mod tests {
     #[test]
     fn atomic_save_cleans_tmp_on_rename_failure() {
         // rename 失败(目标被同名目录占位) → 报错且不留半截 tmp。
-        let dir = config_dir("danqing-test-atomic-fail").unwrap();
+        let dir = scratch_dir("atomic-fail");
         let path = dir.join("occupied");
         fs::create_dir_all(&path).unwrap();
         assert!(atomic_save(&path, b"data").is_err());
@@ -362,8 +422,47 @@ mod tests {
     }
 
     #[test]
+    fn atomic_save_sweeps_stale_residue_only() {
+        // F1 锁: 陈旧残渣被清扫 (失去同名覆盖自愈后的回收通道),
+        // 新鲜在飞 tmp 不动 (阈值保护并行实例)。
+        let dir = scratch_dir("atomic-sweep");
+        let path = dir.join("test.txt");
+        let foreign = dir.join("test.txt.tmp.999999.0");
+        // 阈值为零 = 一切都算陈旧 → 扫掉
+        fs::write(&foreign, b"crashed residue").unwrap();
+        sweep_stale_tmp(&path, Duration::ZERO);
+        assert!(!foreign.exists(), "陈旧残渣没被扫掉");
+        // 正常阈值: 刚写的在飞 tmp 不许被扫
+        fs::write(&foreign, b"fresh in-flight").unwrap();
+        sweep_stale_tmp(&path, STALE_TMP_MAX_AGE);
+        assert!(foreign.exists(), "新鲜在飞 tmp 被误清");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn atomic_save_concurrent_same_path_no_false_errors() {
+        // F2 锁: 同进程多线程同写同一路径 —— pid+序号命名下零虚假报错
+        // (pid-only 时红队实测 2×300 约 10% 假错)。
+        let dir = scratch_dir("atomic-concurrent");
+        let path = Arc::new(dir.join("shared.json"));
+        let mut handles = Vec::new();
+        for t in 0..2 {
+            let p = Arc::clone(&path);
+            handles.push(std::thread::spawn(move || {
+                for i in 0..100 {
+                    atomic_save(&p, format!("thread{t} iter{i}").as_bytes()).unwrap();
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn load_or_default_existing_file() {
-        let dir = config_dir("danqing-test-load").unwrap();
+        let dir = scratch_dir("load");
         let path = dir.join("config.json");
         fs::write(&path, r#"{"key":"value"}"#).unwrap();
         let data: serde_json::Value = load_or_default(&path);
@@ -380,7 +479,7 @@ mod tests {
 
     #[test]
     fn load_or_default_corrupt_json() {
-        let dir = config_dir("danqing-test-corrupt").unwrap();
+        let dir = scratch_dir("corrupt");
         let path = dir.join("bad.json");
         fs::write(&path, "not json!!!").unwrap();
         let data: serde_json::Value = load_or_default(&path);
@@ -447,7 +546,7 @@ mod tests {
 
     #[test]
     fn versioned_doc_roundtrip() {
-        let dir = config_dir("danqing-test-versioned").unwrap();
+        let dir = scratch_dir("versioned");
         let path = dir.join("doc.json");
 
         let doc = VersionedDoc::new(1, vec![1, 2, 3]);
@@ -460,7 +559,7 @@ mod tests {
 
     #[test]
     fn versioned_doc_rejects_higher_version() {
-        let dir = config_dir("danqing-test-reject").unwrap();
+        let dir = scratch_dir("reject");
         let path = dir.join("doc.json");
 
         // 写入 version=2
@@ -482,7 +581,7 @@ mod tests {
 
     #[test]
     fn versioned_doc_corrupt_json_returns_default() {
-        let dir = config_dir("danqing-test-vcorrupt").unwrap();
+        let dir = scratch_dir("vcorrupt");
         let path = dir.join("bad.json");
         fs::write(&path, "not json").unwrap();
         let loaded = VersionedDoc::<u32>::load(&path, 1);
