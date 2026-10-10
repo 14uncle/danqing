@@ -14,7 +14,7 @@
 //! | API | 解决的问题 | 复杂度 |
 //! |-----|-----------|--------|
 //! | [`config_dir`] | 配置目录定位 (appdata/name) | 单函数 |
-//! | [`atomic_save`] | 崩溃安全写入 (tmp+rename) | 单函数 |
+//! | [`atomic_save`] | 崩溃安全写入 (pid tmp+rename) | 单函数 |
 //! | [`load_or_default`] | 缺省即正常 (missing → Default) | 单函数 |
 //! | [`DirtyFlag`] | 脏标记+节流 (小窗隐藏/退出时 flush) | 结构体+方法 |
 //! | [`VersionedDoc`] | 版本化文档 (拒绝降级覆盖) | 结构体+方法 |
@@ -65,9 +65,12 @@ pub fn config_dir(name: &str) -> Option<PathBuf> {
 
 // ── 2. atomic_save ───────────────────────────────────────────────────
 
-/// 崩溃安全原子写入：写临时文件 → rename 覆盖目标。
+/// 崩溃安全原子写入：写唯一名临时文件 → rename 覆盖目标。
 ///
 /// 保证：写一半断电不会损坏已有文件。rename 在同一目录下是原子操作。
+/// 临时文件名带 pid（`x.tmp.<pid>`）：多实例/多进程同写同一目标时各自
+/// 持有独立 tmp，不会共用 `x.tmp` 互踩（半截 tmp 被 rename 上位即坏文件）。
+/// rename 失败时清掉半截 tmp，不留垃圾。
 ///
 /// # Errors
 ///
@@ -83,9 +86,12 @@ pub fn atomic_save(path: &Path, data: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("tmp");
+    let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
     fs::write(&tmp, data)?;
-    fs::rename(&tmp, path)?;
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
     Ok(())
 }
 
@@ -309,6 +315,49 @@ mod tests {
         atomic_save(&path, b"hello world").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "hello world");
         assert!(!path.with_extension("tmp").exists());
+        // 成功后不留任何 tmp 残渣（含 pid 后缀形态）。
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "残留 tmp: {leftovers:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn atomic_save_keeps_foreign_tmp_untouched() {
+        // H2 回归锁: 旧实现固定 `x.tmp` 名 —— 别实例在飞的 `x.tmp` 会被本写
+        // 覆盖并 rename 走(对方数据被劫)。pid 后缀后: 外来 tmp 原样保留。
+        let dir = config_dir("danqing-test-atomic-foreign").unwrap();
+        let path = dir.join("test.txt");
+        let foreign = path.with_extension("tmp");
+        fs::write(&foreign, b"other instance in-flight").unwrap();
+        atomic_save(&path, b"mine").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "mine");
+        assert_eq!(
+            fs::read_to_string(&foreign).unwrap(),
+            "other instance in-flight",
+            "外来 tmp 被覆盖/劫走"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn atomic_save_cleans_tmp_on_rename_failure() {
+        // rename 失败(目标被同名目录占位) → 报错且不留半截 tmp。
+        let dir = config_dir("danqing-test-atomic-fail").unwrap();
+        let path = dir.join("occupied");
+        fs::create_dir_all(&path).unwrap();
+        assert!(atomic_save(&path, b"data").is_err());
+        let leftovers: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "rename 失败残留 tmp: {leftovers:?}");
         let _ = fs::remove_dir_all(&dir);
     }
 
