@@ -18,6 +18,7 @@
 //! | [`load_or_default`] | 缺省即正常 (missing → Default) | 单函数 |
 //! | [`DirtyFlag`] | 脏标记+节流 (小窗隐藏/退出时 flush) | 结构体+方法 |
 //! | [`VersionedDoc`] | 版本化文档 (拒绝降级覆盖) | 结构体+方法 |
+//! | [`toml`] | 朴素 TOML 子集读写 (零依赖) | 子模块 |
 
 use std::fs;
 use std::io;
@@ -26,6 +27,9 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+
+/// 朴素 TOML 子集读写 (log / dropshelf 两处手写实现的并集成稿)。
+pub mod toml;
 
 // ── 1. config_dir ────────────────────────────────────────────────────
 

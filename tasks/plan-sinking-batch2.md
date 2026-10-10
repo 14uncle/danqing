@@ -26,7 +26,7 @@
 
 ### Phase 1: 框架侧(danqing 四件 + encoding 一件)
 
-- [ ] **T1: 件1 `persist::toml` 子模块(S2)** — `danqing/src/persist.rs` 内新增 `pub mod toml`(feature `persist` 内) + `lib.rs` 无需改(随 persist 导出)
+- [x] **T1: 件1 `persist::toml` 子模块(S2)** — `danqing/src/persist/toml.rs`(新建) + `persist.rs` 挂 `pub mod toml` ✅ 2026-10-10
   - 内容: 无依赖的朴素 TOML 子集 —— **读**: `TomlDoc::parse(text)` 容忍节头/`#` 注释/空行/无 `=` 行, key/value 各自 trim, 保序, 未知键忽略; 取值口 `str / bool / int / u32 / str_list / pair_i32`(均 `Option`, **None = 保留调用方旧值**, 复刻两仓「坏值不致命」语义)。**写**: 保序 `set_*` + 可选**分节**(`[theme]`) —— 保住 log 现文件形态, dropshelf 走无节平铺。
   - 语义红线: ① 引号字符串两侧剥引号 + `\"`/`\\` 转义(dropshelf 现制); ② 字符串数组 `["a","b"]` 要求括号, 逗号只在引号外切; ③ bool **严格** `true/false`。
   - 验收: 两仓既有 TOML 用例**参数化搬入并存活**(log 5 条 `round_trip_preserves_both_keys`/`legacy_file_without_view_section_still_loads`/`whitespace_free_assignment_is_honoured`/`commented_out_assignment_is_ignored`/`missing_file_yields_defaults`; dropshelf 5 条 `config_roundtrip_is_whole_file_source`/`parse_window_pos_shapes`/`config_bad_value_line_keeps_default`/`config_list_elements_escape_and_roundtrip`/`config_bad_lines_are_skipped_not_fatal`); 新增并集边界(空串/Unicode/含 `=` 的值/`[]` 空数组/尾逗号/未知节); **两仓真实 config 逐字段 round-trip 等价锁**
