@@ -39,13 +39,13 @@
 
 - 重复证据:同一公式 `(line_h - texts.line_height(px))/2 + texts.ascent(px)` 全家 3 仓 7 处:plainsight text.rs:125-126/table.rs:293-294/358-360/view/mod.rs:44-46;dropshelf shelf_list.rs:258-259/group_picker.rs:111-112;log analysis_panel.rs:562(`vcenter_base`)
 - 收编:`TextBatch` 加方法(名定 plan 阶段,候选 `vcenter_baseline`/`baseline_vcenter`)
-- 迁移:四仓 7 处(plainsight 仓内 helper 已在复盘快修批先收口,届时换框架件)
+- 迁移:**三仓**(plainsight 4 处 —— 仓内 helper 已在复盘快修批先收口, 届时换框架件; dropshelf 2 处; log `vcenter_base` 1 处)。**luoban 不在此列** —— 其 `preview.rs:245` 是**顶对齐**(`y + ascent`)不是居中, 列入会引入 1px 偏移, 违「像素级等价」判据(2026-10-10 双路评审核正)。另: log 仓内同式远不止 1 处(实测 ≥10), 迁移工作量按实际数, 别按本条计数安排
 - 判据:通用 ✓ / 第二消费者 ✓(3 仓)/ 质量 ✓ / 框架未有 ✓
 
 ### 件 5:小件包
 
 - `time::epoch_millis` / `millis_to_epoch`(或 plan 定名):dropshelf store.rs:258-271(14 行)+ luoban app.rs:269-274 各手搓一份 → danqing time.rs
-- `encoding::decode_bytes(bytes) -> (Encoding, String)`:整段字节→检测→UTF-16 转码→解码→剥 BOM 组合 API,收编 luoban encoding.rs:16-31 的组合层(~15 行)→ danqing-encoding crate
+- `encoding::decode_bytes(bytes) -> (String, Encoding)`:整段字节→检测→UTF-16 转码→解码→剥 BOM 组合 API,收编 luoban encoding.rs:16-31 的组合层(~15 行)→ danqing-encoding crate
 - plainsight `raw_nul_ratio`(state.rs:446-456)引擎外露 raw 头采样:**本期不做**,引擎 UTF-16 门已加固(2026-10-10 红队),产品侧保险带保留,观察
 
 ## Commands(框架仓)
@@ -74,7 +74,7 @@ cargo fmt
 ## 迁移顺序(plan 细化,原则:框架先落地,产品后跟进)
 
 1. danqing 侧四件 + encoding 侧一件,各带测试,一次 push(用户点头)
-2. 产品仓按依赖顺序迁移:dropshelf(件 1/3/4/5)→ luoban(件 2/4/5)→ plainsight(件 4)→ log(件 1/3/4;**log 在 v1.x 发布窗口期,排期用户定,可挂到发布后**)
+2. 产品仓按依赖顺序迁移:dropshelf(件 1/3/4/5)→ luoban(件 2/5)→ plainsight(件 4)→ log(件 1/3/4;**log 在 v1.x 发布窗口期,排期用户定,可挂到发布后**)
 3. 每仓迁移后三件套绿 + 本地 commit 注明关联,push 逐项点头
 
 ## Success Criteria

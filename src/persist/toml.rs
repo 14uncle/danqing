@@ -52,8 +52,13 @@ impl Table {
         }
     }
 
-    /// 取 bool 值。**兼容带引号写法** (`histogram = "false"`) —— log 的读侧会先剥引号
-    /// 再比字面量, 为保迁移前后等价, 这里对 `"true"` / `"false"` 也认。
+    /// 取 bool 值。**兼容带引号写法** (`histogram = "false"`) —— 这是 **log 口径**
+    /// (它先 `trim_matches('"')` 再比字面量)。
+    ///
+    /// ⚠️ **与 dropshelf 口径不同**: dropshelf 的 `parse_bool` 只认裸字面量, 不剥引号。
+    /// 一个统一的取值口不可能同时对上两者, 本件取 log 向。差别只在**手改文件**:
+    /// 手写 `dark = "true"` 在 dropshelf 旧读法下是「坏值 → 保留默认」, 新读法是 `Some(true)`。
+    /// 两仓**自己写出**的 bool 永远是裸的, 故存量文件不受影响。
     pub fn bool(&self, key: &str) -> Option<bool> {
         match self.get(key)? {
             Value::Bool(b) => Some(*b),
@@ -77,6 +82,10 @@ impl Table {
     }
 
     /// 取字符串数组 (仅 `[…]` 形态)。不存在或非数组 = `None`。
+    ///
+    /// ⚠️ dropshelf 旧读法把「键在但括号不合法」也算成空数组 (即**清空**), 本件返回
+    /// `None` (调用方 `unwrap_or` 保留旧值)。今日两仓从 `Config::default()` 起读、默认就是
+    /// 空, 结果相同; 若将来有调用方从**非空基线**起读, 此处语义不同 —— 迁移时留意。
     pub fn str_list(&self, key: &str) -> Option<&[String]> {
         match self.get(key)? {
             Value::List(v) => Some(v),
@@ -84,13 +93,10 @@ impl Table {
         }
     }
 
-    /// 末次出现优先 (重复键后者胜)。
+    /// 取键值。`parse` 在插入时就地覆盖重复键, 故 `entries` 里同键**至多一条**,
+    /// 无需「末次优先」的反向查找。
     fn get(&self, key: &str) -> Option<&Value> {
-        self.entries
-            .iter()
-            .rev()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v)
+        self.entries.iter().find(|(k, _)| k == key).map(|(_, v)| v)
     }
 }
 
@@ -140,11 +146,19 @@ fn parse_value(raw: &str) -> Value {
 }
 
 /// 两端去引号: 仅当整段被**一对** `"` 包住。
+///
+/// 注: log 旧读法用 `trim_matches('"')`, 两端**任意数量**引号都剥。对本子集写出的文件
+/// 两者等价; 病理手改 (`mode = ""dark""`) 下 log 得 `dark`、本件得 `"dark"` —— 取更严的一对。
 fn unquote(raw: &str) -> Option<&str> {
     raw.strip_prefix('"').and_then(|s| s.strip_suffix('"'))
 }
 
-/// 字符串反转义: 只认 `\"` 与 `\\`, 其余反斜杠原样保留 (与 dropshelf 列表口径一致)。
+/// 字符串反转义: `\"` `\\` `\n` `\r` `\t` 五式; 其余 `\x` 原样保留 (反斜杠 + 字母)。
+///
+/// `\n` `\r` `\t` 是对**写侧** [`escape`] 的配套 —— 没有它, 含换行的值写出即成非法 TOML
+/// 且读回丢数据 (红队 2026-10-10 实跑: 随机对拍 20000 组 5098 组不等)。
+/// 这三式与**真 TOML 基本串**同义, 故手写 `"C:\temp"` 也会被读成 tab —— 与真解析器一致,
+/// 要字面反斜杠必须写成 `\\` (写侧本来就这么产出)。
 fn unescape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars();
@@ -153,6 +167,9 @@ fn unescape(s: &str) -> String {
             match chars.next() {
                 Some('"') => out.push('"'),
                 Some('\\') => out.push('\\'),
+                Some('n') => out.push('\n'),
+                Some('r') => out.push('\r'),
+                Some('t') => out.push('\t'),
                 Some(other) => {
                     out.push('\\');
                     out.push(other);
@@ -166,12 +183,13 @@ fn unescape(s: &str) -> String {
     out
 }
 
-/// 数组元素解析: 逗号只在引号外切分; `\` 转义只认 `\"` 与 `\\`, 其余反斜杠原样保留;
-/// 空元素丢弃。
+/// 数组元素解析: 逗号只在引号外切分; `\` 转义走 [`unescape`] 那五式 (扫描期只做配对,
+/// 不提前解释, 免得 `\"` 被当成引号翻转)。
 ///
-/// **与 dropshelf 原实现的一处有意加严**: 原版对每个元素一律 `trim()`, 于是
-/// `["  padded  "]` 读回变 `padded` (引号内的空白被吃掉)。本件**带引号的元素保留原样**,
-/// 只对旧式无引号元素两端 trim —— 写出→读回才真正逐字相等, 且不破两仓既有用例。
+/// **与 dropshelf 原实现的两处有意加严**: ① 原版对每个元素一律 `trim()`, 于是
+/// `["  padded  "]` 读回变 `padded` (引号内空白被吃掉) —— 本件带引号的元素保留原样;
+/// ② 原版把空串元素也丢掉, 本件保留显式写出的 `""`。两处都是为让「写出→读回逐字相等」
+/// 这个承诺**真成立**, 且不破两仓既有用例。
 fn parse_list(inner: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -202,22 +220,27 @@ fn parse_list(inner: &str) -> Vec<String> {
 }
 
 /// 收一个数组元素: 整段两端 trim 后, 若被一对引号包住则剥引号 + 反转义
-/// (**内层空白保留**); 否则按旧式裸元素原样取用。空元素丢弃。
+/// (**内层空白保留; 显式写出的空串 `""` 也保留** —— 它是一个值, 丢了就不叫逐字相等);
+/// 否则按旧式裸元素原样取用, 空串丢弃 (`[a,,b]` / 尾逗号这类分隔符残留)。
 fn push_list_element(out: &mut Vec<String>, cur: &mut String) {
     let raw = cur.trim();
-    let elem = match unquote(raw) {
-        Some(inner) => unescape(inner),
-        None => raw.to_string(),
-    };
-    if !elem.is_empty() {
-        out.push(elem);
+    match unquote(raw) {
+        Some(inner) => out.push(unescape(inner)),
+        None if !raw.is_empty() => out.push(raw.to_string()),
+        None => {}
     }
     cur.clear();
 }
 
-/// 字符串转义: `\` → `\\`, `"` → `\"` (与 dropshelf `quote_str` 同口径)。
+/// 字符串转义: `\` `"` 与三个控制字符 `\n` `\r` `\t`, 使**任何**字符串都能写进一行
+/// 基本串且读回逐字相等 (红队 2026-10-10: 不转义换行会写出非法 TOML 并丢数据)。
+/// 顺序有讲究: 先加倍反斜杠, 再补引号与转义 (否则会把自己插入的 `\` 再翻一倍)。
 fn escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 /// TOML 写侧 (保序构造)。
@@ -451,6 +474,70 @@ mod tests {
             parse(&w.to_string()).str_list("xs"),
             Some(["a=b".to_string(), "c=d,e".to_string()].as_slice())
         );
+    }
+
+    // ── 转义强度 (红队 2026-10-10: F1 换行 / F2 空串 / F8 反斜杠连写) ──
+
+    #[test]
+    fn control_chars_round_trip_in_scalar_and_list() {
+        // F1: 写侧不转义换行 → 写出非法 TOML 且读回丢数据 (随机对拍 20000 组 5098 组不等)。
+        let v = "第一行\n第二行\r\n带\t制表".to_string();
+        let mut w = Writer::new();
+        w.str("k", &v);
+        w.str_list("xs", &[v.clone(), "a\nb".to_string()]);
+        let text = w.to_string();
+        assert_eq!(
+            text.lines().count(),
+            2,
+            "写出物必须是两行(值里不许出现真换行): {text:?}"
+        );
+        let t = parse(&text);
+        assert_eq!(t.str("k"), Some(v.as_str()));
+        assert_eq!(t.str_list("xs"), Some([v, "a\nb".to_string()].as_slice()));
+    }
+
+    #[test]
+    fn backslash_runs_round_trip() {
+        // F8 判别输入: 含**连续反斜杠**、反斜杠+字母、反斜杠+引号。
+        // 原用例的 `\ `(反斜杠+空格) 恰好是不动点, 锁不住 `\`→`\\` 这一步。
+        let vals = [
+            r"C:\server\share".to_string(),
+            r"\\双反斜杠\\".to_string(),
+            r"\n 不是换行".to_string(),
+            r#""引号" 与 \\"#.to_string(),
+            "尾部反斜杠\\".to_string(),
+        ];
+        let mut w = Writer::new();
+        w.str("p", &vals[1]);
+        w.str_list("xs", &vals);
+        let t = parse(&w.to_string());
+        assert_eq!(t.str("p"), Some(vals[1].as_str()));
+        assert_eq!(t.str_list("xs"), Some(vals.as_slice()));
+    }
+
+    #[test]
+    fn empty_string_list_element_is_preserved() {
+        // F2: 显式写出的空串元素是一个值, 丢了就不叫「逐字相等」。
+        let mut w = Writer::new();
+        w.str_list("xs", &["".to_string(), "a".to_string(), "".to_string()]);
+        assert_eq!(
+            parse(&w.to_string()).str_list("xs"),
+            Some(["".to_string(), "a".to_string(), "".to_string()].as_slice())
+        );
+        // 但分隔符产出的空槽仍丢弃 (`[a,,b]` 与尾逗号)
+        assert_eq!(
+            parse("xs = [a,,b]").str_list("xs"),
+            Some(["a".to_string(), "b".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn quoted_bool_divergence_is_log_oriented() {
+        // F3: 本件 bool() 取 log 口径 (剥引号后比字面量); dropshelf 旧读法只认裸字面量。
+        // 这条锁把「有意向 log 靠」钉住 —— 改口径必须改这里并同步 dropshelf 迁移验收。
+        assert_eq!(parse(r#"dark = "true""#).bool("dark"), Some(true));
+        // 而 int() 取 dropshelf 口径 (不剥引号)
+        assert_eq!(parse(r#"n = "68""#).int("n"), None);
     }
 
     // ── 杂项 ──

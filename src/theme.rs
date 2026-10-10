@@ -236,9 +236,9 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
 /// 产品侧手写三十余个 `match self { Light => …, Dark => … }` 是纯噪声 —— 本宏把它
 /// 压成一行列表 (下沉自 danqing-dropshelf `app_theme.rs`, 2026-10-10)。
 ///
-/// **契约**: 调用方枚举必须有两个变体 `Light` / `Dark`。委托面只列产品自己要的方法;
-/// 有默认实现的 [`Theme::source_palette`] / [`Theme::font_size_display`] /
-/// [`Theme::control_height`] 列与不列都合法 (列则显式委托同一值)。
+/// **契约**: 调用方枚举必须有两个变体 `Light` / `Dark`; 调用点须让 `Theme` 在作用域内。
+/// 委托面只列产品自己要的方法; 有默认实现的 [`Theme::source_palette`] /
+/// [`Theme::font_size_display`] / [`Theme::control_height`] 列与不列都合法 (列则显式委托同一值)。
 ///
 /// ```ignore
 /// use danqing::{Color, Theme, delegate_theme};
@@ -248,6 +248,10 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
 ///
 /// impl Theme for MyTheme {
 ///     delegate_theme! {
+///         // ⚠️ 这里只列 2 个方法, **仅是语法示意**。真写产品主题时必须列全
+///         // `Theme` 的 33 个必填方法, 少一个就 E0046「not all trait items
+///         // implemented」编译不过 —— 完整可抄的 33 行列表见本文件的测试
+///         // `delegate_theme_macro_covers_every_required_method`。
 ///         background -> Color;
 ///         accent -> Color;
 ///     }
@@ -260,7 +264,7 @@ macro_rules! delegate_theme {
             fn $name(&self) -> $ret {
                 match self {
                     Self::Light => $crate::LightTheme.$name(),
-                    Self::Dark => $crate::theme::DarkTheme.$name(),
+                    Self::Dark => $crate::DarkTheme.$name(),
                 }
             }
         )+

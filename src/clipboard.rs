@@ -94,6 +94,11 @@ pub fn copy_html_verified(
     let mut detail = String::from("未知错误");
     for _ in 0..attempts {
         if let Err(e) = src.set_html(html, alt_text) {
+            // 只读源 (不支持写入) 重试多少次都一样 —— 立即返回并保住 `Unsupported` 语义,
+            // 不给调用方一个「试了 N 次仍校验失败」的假象 (它无法据此分辨「写不了」)。
+            if matches!(e, ClipWriteError::Unsupported) {
+                return Err(e);
+            }
             detail = e.to_string();
             continue;
         }
@@ -350,6 +355,8 @@ mod tests {
             matches!(err, ClipWriteError::Verify { attempts: 3, .. }),
             "耗尽须报 Verify 而非静默: {err:?}"
         );
+        // 末次失败原因必须传到调用方 (文案是给人看的唯一反馈通道)
+        assert!(err.to_string().contains("已试 3 次"), "{err}");
         assert_eq!(c.set_calls, 3);
     }
 
@@ -357,10 +364,23 @@ mod tests {
     fn copy_html_verified_errors_when_readback_empty() {
         let mut c = FakeClip::new();
         c.echo = Echo::Empty;
-        assert!(matches!(
-            copy_html_verified(&mut c, "<p>hi</p>", "hi", 2),
-            Err(ClipWriteError::Verify { .. })
-        ));
+        let err = copy_html_verified(&mut c, "<p>hi</p>", "hi", 2).unwrap_err();
+        assert!(
+            matches!(err, ClipWriteError::Verify { attempts: 2, .. }),
+            "{err:?}"
+        );
+        // 「写后读空」与「内容不符」是两种病因, 文案不许混 (luoban 原测试同断言)
+        assert!(err.to_string().contains("写后读空"), "{err}");
+    }
+
+    #[test]
+    fn copy_html_verified_attempts_zero_still_writes_once() {
+        // 契约: attempts 下限 1 (「至少写一次」)。删掉 `.max(1)` 会让 attempts=0
+        // 变成「一次都不写就报失败」, 且文案是「未知错误」—— 红队 2026-10-10 实测该变异
+        // 不被任何测试拦住, 故补此锁。
+        let mut c = FakeClip::new();
+        assert!(copy_html_verified(&mut c, "<p>hi</p>", "hi", 0).is_ok());
+        assert_eq!(c.set_calls, 1, "attempts=0 也必须真写一次");
     }
 
     #[test]
@@ -395,10 +415,11 @@ mod tests {
             s.set_html("<p>x</p>", "x"),
             Err(ClipWriteError::Unsupported)
         );
-        assert!(matches!(
+        // 不支持写入 = 重试无意义: 立即原样返回 Unsupported, 不伪装成「校验失败」
+        assert_eq!(
             copy_html_verified(&mut s, "<p>x</p>", "x", 2),
-            Err(ClipWriteError::Verify { .. })
-        ));
+            Err(ClipWriteError::Unsupported)
+        );
     }
 
     #[test]

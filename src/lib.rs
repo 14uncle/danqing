@@ -53,8 +53,8 @@ pub use text::{
 };
 pub use text::{fit, selection};
 pub use theme::{
-    Easing, LightTheme, ScenePalette, SceneSpec, SceneTheme, Shadow, Theme, composite_over,
-    contrast_ratio, relative_luminance,
+    DarkTheme, Easing, LightTheme, ScenePalette, SceneSpec, SceneTheme, Shadow, Theme,
+    composite_over, contrast_ratio, relative_luminance,
 };
 pub use window::tray::TrayHandle;
 pub use window::{

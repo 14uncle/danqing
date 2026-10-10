@@ -71,6 +71,10 @@ pub fn epoch_millis() -> u64 {
 /// [`SystemTime`] → Unix epoch 毫秒 (早于 1970 = 0; 超出 `i64` = `i64::MAX`; 均饱和不 panic)。
 ///
 /// 下沉自 danqing-dropshelf `store.rs::time_to_ms` (2026-10-10, 复盘小件包)。
+///
+/// 注: 在 Windows 上 `.min(i64::MAX)` 那一支**构造不出触发输入** (SystemTime 域上限
+/// ≈ 公元 5.8 万年 ⇒ 毫秒数 ≪ `i64::MAX`), 属跨平台防御 —— 红队实测该分支无判别力,
+/// 不是漏锁, 别为此反复考古。
 pub fn system_time_to_millis(t: std::time::SystemTime) -> i64 {
     t.duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -82,6 +86,9 @@ pub fn system_time_to_millis(t: std::time::SystemTime) -> i64 {
 ///
 /// `UNIX_EPOCH + Duration` 的溢出在 `panic = "abort"` 的 release 下是**启动即崩**,
 /// 故全程走 `checked_add` 兜底 (下沉自 danqing-dropshelf `store.rs::ms_to_time`)。
+///
+/// 注: Windows 上 `ms.max(0)` 的分支被 `checked_add` 的溢出兜底掩蔽 (实测两者等效);
+/// 在 `SystemTime` 域更大的平台才会分叉 —— 保留是为跨平台正确, 非死代码。
 pub fn millis_to_system_time(ms: i64) -> std::time::SystemTime {
     std::time::SystemTime::UNIX_EPOCH
         .checked_add(std::time::Duration::from_millis(ms.max(0) as u64))

@@ -28,7 +28,7 @@
 
 - [x] **T1: 件1 `persist::toml` 子模块(S2)** — `danqing/src/persist/toml.rs`(新建) + `persist.rs` 挂 `pub mod toml` ✅ 2026-10-10
   - 内容: 无依赖的朴素 TOML 子集 —— **读**: `TomlDoc::parse(text)` 容忍节头/`#` 注释/空行/无 `=` 行, key/value 各自 trim, 保序, 未知键忽略; 取值口 `str / bool / int / u32 / str_list / pair_i32`(均 `Option`, **None = 保留调用方旧值**, 复刻两仓「坏值不致命」语义)。**写**: 保序 `set_*` + 可选**分节**(`[theme]`) —— 保住 log 现文件形态, dropshelf 走无节平铺。
-  - 语义红线: ① 引号字符串两侧剥引号 + `\"`/`\\` 转义(dropshelf 现制); ② 字符串数组 `["a","b"]` 要求括号, 逗号只在引号外切; ③ bool **严格** `true/false`。
+  - 语义红线: ① 引号字符串两侧剥引号 + 五式转义 `\` `"` `\n` `\r` `\t`(红队 2026-10-10 补后三式: 原只转义前两者, 含换行的值会写出**非法 TOML 并丢数据**); ② 字符串数组 `["a","b"]` 要求括号, 逗号只在引号外切; ③ bool 取 **log 口径**(裸字面量与带引号写法都认 —— dropshelf 旧读法只认裸的, 差异见 T7 迁移必读)。
   - 验收: 两仓既有 TOML 用例**参数化搬入并存活**(log 5 条 `round_trip_preserves_both_keys`/`legacy_file_without_view_section_still_loads`/`whitespace_free_assignment_is_honoured`/`commented_out_assignment_is_ignored`/`missing_file_yields_defaults`; dropshelf 5 条 `config_roundtrip_is_whole_file_source`/`parse_window_pos_shapes`/`config_bad_value_line_keeps_default`/`config_list_elements_escape_and_roundtrip`/`config_bad_lines_are_skipped_not_fatal`); 新增并集边界(空串/Unicode/含 `=` 的值/`[]` 空数组/尾逗号/未知节); **两仓真实 config 逐字段 round-trip 等价锁**
   - 估时: S-M | 依赖: 无
 
@@ -66,7 +66,9 @@
 - [x] 三件套全绿(danqing 含 `--features persist`; danqing-encoding 独立); 五件各自测试锁定 ✅ 2026-10-10
   - danqing 678 lib + 集成全绿 / clippy 0;danqing-encoding 14 测试全绿 / clippy 0
   - 六笔本地 commit:danqing T1 `9ceb1cb` / T2 `7eb1617` / T3 `259c2f7` / T4 `b3d72ae` / T5 `cf3ff03`;encoding T6 `573ad91`
-- [ ] review(五轴) — `/agent-skills:code-review-and-quality`
+- [x] review(双路: 五轴 + 红队) — `/agent-skills:code-review-and-quality` ✅ 2026-10-10
+  - 五轴 REQUEST CHANGES(0 Critical, 2 Required 均文档级) + 红队 0 Critical、F1/F5 实锤(已修)
+  - 修复批次见 `src/persist/toml.rs` / `src/clipboard.rs` / `src/theme.rs` / `src/time.rs` / `src/lib.rs` / 本 plan / spec
 - [ ] **push danqing + danqing-encoding**(**对外动作, 用户逐项点头**)
 - [ ] 用户过目
 
@@ -75,12 +77,14 @@
 - [ ] **T7: dropshelf 迁 件1/件3/件4/件5a** — `danqing-dropshelf/src/{store,app_theme,shelf_list,group_picker}.rs`
   - 内容: `store.rs` 手写 TOML(130 行)→ `persist::toml`; `app_theme.rs` 私有 `delegate!` → `delegate_theme!`; `shelf_list.rs`/`group_picker.rs` 两处 inline 基线 → `TextBatch::vcenter_baseline`; `store.rs` `time_to_ms`/`ms_to_time` → `time::*`
   - 验收: 三件套绿; `config.toml` 逐字段 round-trip 与迁移前**逐字节或逐字段等价**(含数组/转义/窗口位置); 净删可得
+  - **迁移必读(评审记)**: ① 框架 `Table::bool` 取 **log 口径**(剥引号后比字面量), dropshelf 旧 `parse_bool` 只认裸字面量 —— 手改的 `dark = "true"` 在旧读法下保留默认、新读法 `Some(true)`; 两仓自己写出的 bool 永远是裸的, **存量文件不受影响**。② `Table::str_list` 对「键在但括号非法」返回 `None`(保留旧值), dropshelf 旧读法返回**空数组**(清空) —— 从 `default()` 起读时结果相同, 非默认基线起读才分叉。两条都是有意取法, 不是缺陷。
   - 估时: S | 依赖: T1/T3/T4/T5 + danqing push
 
-- [ ] **T8: luoban 迁 件2/件4/件5a/件5b** — `danqing-luoban/src/{clipboard,app,encoding}.rs`
-  - 内容: 删自填 `ClipboardIo` 写侧 + `copy_html_verified` + `normalize`(~45 行), 改框架件2; 读侧 `new()`+两行 arboard 一并消(复盘 ①#7); `preview.rs` 基线 → 件4; `app.rs` `epoch_millis` → 件5a; `encoding.rs` `decode_bytes` → 件5b(**经 `danqing::encoding` re-export 消费 → danqing 须先复钉 encoding rev**)
+- [ ] **T8: luoban 迁 件2/件5a/件5b** — `danqing-luoban/src/{clipboard,app,encoding}.rs`(**不含件4** —— 评审更正: luoban 无真 vcenter 站点)
+  - 内容: 删自填 `ClipboardIo` 写侧 + `copy_html_verified` + `normalize`(~45 行), 改框架件2; 读侧 `new()`+两行 arboard 一并消(复盘 ①#7); `app.rs` `epoch_millis` → 件5a; `encoding.rs` `decode_bytes` → 件5b(**经 `danqing::encoding` re-export 消费 → danqing 须先复钉 encoding rev**)
+  - **不动**: `preview.rs:245` 的 `y + ascent` 是**顶对齐**不是居中, 保留原样(改成件4会下移 1px)
   - 验收: 三件套绿; **`FakeClip` 改实现框架 trait 后 6 条写侧锁零改动存活**; 「不丢稿」链未受影响
-  - 估时: S | 依赖: T2/T4/T5/T6 + danqing push + danqing 复钉 encoding
+  - 估时: S | 依赖: T2/T5/T6 + danqing push + danqing 复钉 encoding
 
 - [ ] **T9: plainsight 迁 件4** — `danqing-plainsight/src/view/mod.rs`
   - 内容: 删仓内 `vcenter_baseline` helper, 四处调用改 `texts.vcenter_baseline(...)`(复盘快修批已先收口成单 helper, 本件换框架版)
@@ -88,7 +92,7 @@
   - 估时: XS | 依赖: T4 + danqing push
 
 - [ ] **T10: log 迁 件1/件3/件4(挂 v1.x 发布后)** — `danqing-log/src/{config,analysis_panel}.rs` + 新 `app_theme` 面
-  - 内容: `config.rs` 手写 TOML + **整文件写出** → `persist::toml`(需在 Cargo.toml 开 `persist` feature); `impl Theme for LogTheme` 手写 **170 行 → 一行列表**(件3); `analysis_panel.rs::vcenter_base` → 件4(补 `y +`)
+  - 内容: `config.rs` 手写 TOML + **整文件写出** → `persist::toml`(需在 Cargo.toml 开 `persist` feature); `impl Theme for LogTheme` 手写 **170 行 → 一行列表**(件3); `analysis_panel.rs::vcenter_base` → 件4(补 `y +`)。**件4 在 log 的实际面远大于 1 处** —— 红队 2026-10-10 实测同式 ≥10 处(`pick_list`/`settings`×3/`toast`/`view`×5/`analysis_panel`), 按实际数安排, 别按 spec 的「1 处」估时
   - 验收: 三件套绿(521 基线); `config.toml` round-trip 等价(**节头形态保住**); 主题逐 token 等价; **行为变化进 changelog**: bool 宽松→严格(实测对现文件等价)
   - 估时: S | 依赖: T1/T3/T4 + danqing push; **排期 = v1.x 发布后**(与 S8 log 侧迁移同窗口)
   - 观察(非本件任务, 待裁): log `config.rs:96` 写侧是**裸 `fs::write` 非原子** —— 若顺势改 `persist::atomic_save` 是一次质量单兑现(dropshelf 快修批同款), 但超出「去重」范围, 先记不动
