@@ -19,6 +19,8 @@
 //! - `handler`    ApplicationHandler 实现 (本模块最大，单独拆出)
 
 mod event;
+mod file_drag;
+mod file_icon;
 #[cfg(target_os = "windows")]
 pub mod foreground;
 mod frame_budget;
@@ -26,6 +28,7 @@ mod fullscreen;
 mod handler;
 mod hotkey;
 mod icon;
+mod opacity;
 mod passthrough;
 mod placement;
 pub mod startup;
@@ -42,6 +45,8 @@ use crate::widget::Node;
 use crate::{Color, Size};
 
 pub use event::{WindowAppEvent, WindowEventSender};
+pub use file_drag::{DragOutcome, start_file_drag, start_text_drag};
+pub use file_icon::{ShellIcon, file_icon};
 pub use hotkey::{GlobalHotkey, hotkey_ids};
 pub use placement::ShowPlacement;
 pub use tray::tray_action_ids;

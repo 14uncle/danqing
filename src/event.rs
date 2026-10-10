@@ -9,7 +9,11 @@
 //! 分发语义 (M1):
 //! - `CursorMoved`: 广播全树，各组件自行判定 hover;
 //! - `MouseInput`/`MouseWheel`: 沿命中路径分发 (后绘制者优先);
-//! - 键盘：不送组件树，直送应用层 (M1 无焦点系统)。
+//! - 键盘/IME：经焦点路由 (焦点组件优先，忽略回退应用层);
+//! - 文件拖放 (`FileHovered`/`FileDropped`/`FileDragCancelled`)：直送应用层
+//!   (`App::event`)，不经组件树 —— 消费者是产品层 (拖入收集/拖入打开)。
+
+use std::path::PathBuf;
 
 use crate::Point;
 
@@ -166,6 +170,12 @@ pub enum Event {
     Cut,
     /// 粘贴请求 (系统剪贴板文本将通过 `Event::Ime(Commit)` 送达 )。
     Paste,
+    /// 文件拖放悬停 (拖着文件经过窗口; winit 逐文件上报, 事件不带坐标)。
+    FileHovered(PathBuf),
+    /// 文件拖放落下 (释放在窗口内; winit 逐文件上报, 事件不带坐标)。
+    FileDropped(PathBuf),
+    /// 文件拖放取消 (拖出窗口或按 Esc 中止)。
+    FileDragCancelled,
     /// 当前组件获得焦点。
     FocusIn,
     /// 当前组件失去焦点。

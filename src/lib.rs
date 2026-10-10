@@ -60,5 +60,6 @@ pub use window::{
     WindowEventSender, WindowMode, foreground, hotkey_ids, run, run_app, shortcut_for_id, startup,
     tray, tray_action_ids,
 };
+pub use window::{DragOutcome, ShellIcon, file_icon, start_file_drag, start_text_drag};
 // 托盘子模块：re-export tray-icon (含 menu), 供例子构建菜单使用。
 pub use ::tray_icon;

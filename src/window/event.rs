@@ -41,6 +41,9 @@ pub enum WindowAppEvent {
     SetClickThrough(bool),
     /// 切换置顶层级: true = 恒在普通窗口之上; false = 普通层级。
     SetTopmost(bool),
+    /// 设置窗口整体不透明度 (0.0 全透明 ~ 1.0 全不透明)。
+    /// 瞬时反馈用 (如拖出期间半透明); 1.0 回到创建时的不透明呈现。
+    SetOpacity(f32),
     /// 请求调整窗口内尺寸 (逻辑像素, 与 `WindowConfig.size` 同约定)。
     /// winit 异步生效, 实际结果以随后的 `Resized` 事件为准。
     SetInnerSize(Size),
@@ -100,6 +103,20 @@ impl WindowEventSender {
     /// 切换置顶层级 (true = 恒在普通窗口之上)。
     pub fn set_topmost(&self, topmost: bool) {
         let _ = self.sender.send(WindowAppEvent::SetTopmost(topmost));
+    }
+
+    /// 设置窗口整体不透明度 (0.0~1.0; 1.0 = 回到不透明呈现)。
+    ///
+    /// **同步直调、立即生效** (窗口就绪后): 拖出期间的半透明反馈发在
+    /// `DoDragDrop` 阻塞之前, 走 mpsc 通道会被卡到拖完才生效 (评审 R4-
+    /// Optional 实证)。窗口未就绪才退回通道排队。
+    pub fn set_opacity(&self, opacity: f32) {
+        let opacity = opacity.clamp(0.0, 1.0);
+        if let Some(hwnd) = super::opacity::main_hwnd() {
+            super::opacity::set_opacity_hwnd(hwnd, opacity);
+            return;
+        }
+        let _ = self.sender.send(WindowAppEvent::SetOpacity(opacity));
     }
 
     /// 请求调整窗口内尺寸 (逻辑像素)。winit 异步生效, 实际尺寸
@@ -215,6 +232,10 @@ pub(super) fn convert_event(
                 value: value.clone(),
             })),
         },
+        // 文件拖放 (拖入侧): winit 逐文件上报, 无坐标载荷。
+        WindowEvent::HoveredFile(path) => Some(Event::FileHovered(path.clone())),
+        WindowEvent::DroppedFile(path) => Some(Event::FileDropped(path.clone())),
+        WindowEvent::HoveredFileCancelled => Some(Event::FileDragCancelled),
         _ => None,
     }
 }
@@ -331,6 +352,38 @@ mod tests {
             (position.x, position.y),
             (cursor.x, cursor.y),
             "cursor 由 handler 保证已是逻辑域, 此处原样透传"
+        );
+    }
+
+    // ---- 文件拖放 (拖入) ----
+
+    /// 拖放悬停逐文件转换为 FileHovered。
+    #[test]
+    fn hovered_file_converts_to_file_hovered() {
+        let ev = WindowEvent::HoveredFile(std::path::PathBuf::from(r"C:\a.txt"));
+        assert_eq!(
+            convert_event(&ev, Point::new(0.0, 0.0), WinitModifiers::empty(), 1.0),
+            Some(Event::FileHovered(std::path::PathBuf::from(r"C:\a.txt")))
+        );
+    }
+
+    /// 拖放落下逐文件转换为 FileDropped。
+    #[test]
+    fn dropped_file_converts_to_file_dropped() {
+        let ev = WindowEvent::DroppedFile(std::path::PathBuf::from(r"C:\b.log"));
+        assert_eq!(
+            convert_event(&ev, Point::new(0.0, 0.0), WinitModifiers::empty(), 1.0),
+            Some(Event::FileDropped(std::path::PathBuf::from(r"C:\b.log")))
+        );
+    }
+
+    /// 拖放取消转换为 FileDragCancelled。
+    #[test]
+    fn hovered_file_cancelled_converts_to_file_drag_cancelled() {
+        let ev = WindowEvent::HoveredFileCancelled;
+        assert_eq!(
+            convert_event(&ev, Point::new(0.0, 0.0), WinitModifiers::empty(), 1.0),
+            Some(Event::FileDragCancelled)
         );
     }
 }

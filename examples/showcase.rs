@@ -72,6 +72,8 @@ struct Showcase {
     /// 窗口置顶演示：当前是否置顶 (env DANQING_SHOWCASE_TOPMOST=1 出生即置顶,
     /// 供脚本验证创建路径的 WS_EX_TOPMOST 落位)。
     topmost: bool,
+    /// 窗口不透明度演示：当前是否半透明 (Drop Shelf T6 以用代测)。
+    opacity_demo: bool,
     /// 窗口事件发送器 (点击穿透演示用; run_app 启动时注入)。
     sender: Option<WindowEventSender>,
     /// 启动后待开穿透标记 (env DANQING_SHOWCASE_CLICK_THROUGH=1 触发,
@@ -109,6 +111,10 @@ struct Showcase {
     job_demo: AsyncJob<Result<String, String>>,
     /// 异步作业演示: 状态回显文本。
     job_demo_status: String,
+    /// 文件拖放演示回执 (Drop Shelf T1 以用代测)。
+    drop_status: String,
+    /// 最后一次拖入的文件 (拖出演示的载荷)。
+    last_dropped: Option<std::path::PathBuf>,
     /// 异步作业演示: 发起轮次号 (连点演示旧轮丢弃)。
     job_demo_round: u64,
     /// Dropdown 演示: 当前选中的选项索引 (展开态/hover 由组件自管)。
@@ -153,6 +159,8 @@ enum Msg {
     ClickThroughToggle,
     /// 窗口置顶演示：切换置顶层级。
     TopmostToggle,
+    /// 窗口不透明度演示：半透明 0.5 / 不透明 1.0 来回切 (Drop Shelf T6 以用代测)。
+    OpacityDemo,
     /// 时辰调色演示: 设置演示小时 (None = 复位渐变背景)。
     SetTod(Option<f32>),
     /// 音频演示: 播放 440Hz 正弦测试音 (2s)。
@@ -173,6 +181,11 @@ enum Msg {
     JobDemoStart,
     /// 异步作业演示: 起 panic 作业 (护栏转 Err, 不卡死)。
     JobDemoPanic,
+    /// 拖出演示 (Drop Shelf T2 以用代测): 把最后拖入的文件拖出到资源管理器。
+    DragOutDemo {
+        /// true = Move 语义, false = Copy。
+        allow_move: bool,
+    },
     /// Dropdown 演示: 选中选项 (开合/键盘导航/点外收起均由组件自管)。
     DropdownSelect(usize),
     /// 模态浮层演示: 打开浮层。
@@ -236,6 +249,12 @@ impl App for Showcase {
                     sender.set_topmost(self.topmost);
                 }
             }
+            Msg::OpacityDemo => {
+                self.opacity_demo = !self.opacity_demo;
+                if let Some(sender) = &self.sender {
+                    sender.set_opacity(if self.opacity_demo { 0.5 } else { 1.0 });
+                }
+            }
             Msg::SetTod(hour) => self.tod_hour = hour,
             Msg::PlayTestTone => {
                 use rodio::Source;
@@ -284,6 +303,14 @@ impl App for Showcase {
                     || -> Result<String, String> { panic!("showcase 演示 panic") },
                     || "panic 已被护栏转为 Err (应用不卡 Loading)".to_string(),
                 );
+            }
+            Msg::DragOutDemo { allow_move } => {
+                let Some(path) = self.last_dropped.clone() else {
+                    self.drop_status = "无拖入文件可拖出".into();
+                    return;
+                };
+                let outcome = danqing::start_file_drag(&[path], allow_move);
+                self.drop_status = format!("拖出结果：{outcome:?}");
             }
             Msg::DropdownSelect(idx) => self.dropdown_selected = idx,
             Msg::OverlayDemoOpen => self.overlay_demo_open = true,
@@ -360,6 +387,28 @@ impl App for Showcase {
     }
 
     fn event(&mut self, event: &Event) {
+        // 文件拖放演示 (以用代测): 悬停/落下/取消各有回执, 逐文件上报。
+        match event {
+            Event::FileHovered(path) => {
+                self.drop_status = format!("悬停：{}", path.display());
+                return;
+            }
+            Event::FileDropped(path) => {
+                // 顺带探一把 Shell 图标抽取 (Drop Shelf T5 以用代测)。
+                let icon_note = match danqing::file_icon(path, 16) {
+                    Some(ic) => format!("; Shell 图标 {}×{} 已提取", ic.width, ic.height),
+                    None => "; 无 Shell 图标".to_string(),
+                };
+                self.drop_status = format!("落下：{}{icon_note}", path.display());
+                self.last_dropped = Some(path.clone());
+                return;
+            }
+            Event::FileDragCancelled => {
+                self.drop_status = "拖放取消".into();
+                return;
+            }
+            _ => {}
+        }
         let Event::Key { key, pressed, .. } = event else {
             return;
         };
@@ -1202,6 +1251,7 @@ fn page_layout(t: &LightTheme) -> impl Widget + 'static {
             .cross_stretch()
             .child(card(t, "品牌色与圆角", palette_and_rounded_card(t)))
             .child(card(t, "DragArea 拖拽层", drag_area_card(t)))
+            .child(card(t, "文件拖放", drag_drop_card(t)))
             .child(card(t, "时辰调色 + 双蒙版", tod_card(t)))
             .child(card(t, "音频 (audio)", audio_card(t)))
             .child(card(t, "动画原语 (anim)", anim_card(t)))
@@ -1294,6 +1344,43 @@ fn job_card(t: &LightTheme) -> impl Widget + 'static {
         )
         .child(
             Text::bind(|s: &Showcase| s.job_demo_status.clone())
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+}
+
+/// 文件拖放演示卡 (Drop Shelf T1 以用代测): 拖文件进本窗口,
+/// 悬停/落下/取消回执上屏。winit 逐文件上报, 多文件落下时显示最后到达的一个。
+fn drag_drop_card(t: &LightTheme) -> impl Widget + 'static {
+    let label = |text: &'static str| {
+        Text::new(text)
+            .font_size(t.font_size_body())
+            .color(Color::WHITE)
+    };
+    Column::new()
+        .gap(t.spacing_sm())
+        .cross_stretch()
+        .child(
+            Text::new("拖文件进本窗口: 悬停/落下/取消各有回执 (逐文件上报, 多文件显示最后一个)。")
+                .font_size(t.font_size_body())
+                .color(t.text_primary()),
+        )
+        .child(
+            Row::new()
+                .gap(t.spacing_sm())
+                .cross_center()
+                .child(
+                    Button::themed(t, label("拖出最后文件 (Copy)"))
+                        .on_click(|| Msg::DragOutDemo { allow_move: false }),
+                )
+                .child(
+                    Button::themed(t, label("拖出最后文件 (Move)"))
+                        .on_click(|| Msg::DragOutDemo { allow_move: true }),
+                )
+                .child(Button::themed(t, label("窗口半透明切换")).on_click(|| Msg::OpacityDemo)),
+        )
+        .child(
+            Text::bind(|s: &Showcase| s.drop_status.clone())
                 .font_size(t.font_size_body())
                 .color(t.text_primary()),
         )
@@ -1797,6 +1884,7 @@ fn main() -> anyhow::Result<()> {
         checkbox_pair: true,
         click_through: false,
         topmost: topmost_at_boot,
+        opacity_demo: false,
         sender: None,
         pending_click_through: std::env::var_os("DANQING_SHOWCASE_CLICK_THROUGH").is_some(),
         // env DANQING_TOD_DEMO=19.0: 预置时辰演示小时 (脚本截图验证用,
@@ -1826,6 +1914,8 @@ fn main() -> anyhow::Result<()> {
         anim_cross_text: "场景 0 → 0 · fade 1.00".into(),
         job_demo: AsyncJob::new(),
         job_demo_status: "未发起".into(),
+        drop_status: "未拖入".into(),
+        last_dropped: None,
         job_demo_round: 0,
         dropdown_selected: 0,
         overlay_demo_open: false,

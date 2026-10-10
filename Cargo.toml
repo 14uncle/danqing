@@ -53,6 +53,11 @@ open = { version = "5", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+# 文件拖出壳层 (Drop Shelf T2): OLE DoDragDrop + IDataObject/IDropSource 实现
+# (`implement` 宏开 COM 接口实现)。版本与 danqing-log 商店 COM 成稿同代 (0.61)。
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Ole", "Win32_System_Memory", "Win32_System_SystemServices", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# implement 宏生成物直呼 `windows_core::` 路径, 须直连 (windows 的 core 重导出不够)。
+windows-core = "0.61"
 
 [dev-dependencies]
 resvg = "0.44"

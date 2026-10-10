@@ -877,6 +877,11 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
             context.set_scale_factor(self.scale);
         }
         self.window = Some(Arc::clone(&window));
+        // 登记主窗口 HWND: 不透明度走同步直调 (通道会被 DoDragDrop 类阻塞
+        // 调用卡住, 拖出反馈等不起 —— 见 opacity.rs 模块注释)。
+        if let Some(hwnd) = super::foreground::hwnd_of(&window) {
+            super::opacity::register_main_hwnd(hwnd as isize);
+        }
         // 预渲染首帧: 隐藏时渲染 + present, 显示时直接见内容 — 避免首帧就绪前白屏。
         // 平台注: 已在 Windows/DX12 验证。Wayland 上隐藏表面未映射, get_current_texture
         // 返回 Outdated/Lost 导致预渲染帧被跳过 — 优雅退化为旧行为 (无白屏增益, 无崩溃)。
@@ -1018,9 +1023,16 @@ impl<A: App> ApplicationHandler for Handler<'_, A> {
         } else if let Some(internal) =
             convert_event(&event, self.cursor, self.modifiers, self.scale)
         {
-            // 键盘 /IME 事件经焦点路由
             Self::note_activity(self.config.mode, &mut self.last_activity);
-            self.dispatch_focused_event(&internal);
+            match &internal {
+                // 文件拖放直送应用层 (不经组件树/焦点路由): 消费者是产品层
+                // (拖入收集/拖入打开), 组件级落点日后有真需求再开。
+                Event::FileHovered(_) | Event::FileDropped(_) | Event::FileDragCancelled => {
+                    self.app.event(&internal);
+                }
+                // 键盘 /IME 事件经焦点路由
+                _ => self.dispatch_focused_event(&internal),
+            }
         }
 
         // 消费组件产出的消息
@@ -1431,6 +1443,14 @@ impl<A: App> Handler<'_, A> {
                     } else {
                         WindowLevel::Normal
                     });
+                }
+                true
+            }
+            WindowAppEvent::SetOpacity(opacity) => {
+                // 立即生效 (SetLayeredWindowAttributes 不等帧); 拖出期间的
+                // 半透明反馈正是发在阻塞调用之前, 不能依赖下一帧。
+                if let Some(window) = &self.window {
+                    super::opacity::set_opacity(window, opacity);
                 }
                 true
             }
