@@ -230,6 +230,43 @@ pub trait Theme: Clone + Copy + std::fmt::Debug {
     fn easing_accelerate(&self) -> Easing;
 }
 
+/// 双主题委托宏: 为一个「明 / 暗」两态主题枚举逐 token 转发到框架
+/// [`LightTheme`] / [`DarkTheme`]。
+///
+/// 产品侧手写三十余个 `match self { Light => …, Dark => … }` 是纯噪声 —— 本宏把它
+/// 压成一行列表 (下沉自 danqing-dropshelf `app_theme.rs`, 2026-10-10)。
+///
+/// **契约**: 调用方枚举必须有两个变体 `Light` / `Dark`。委托面只列产品自己要的方法;
+/// 有默认实现的 [`Theme::source_palette`] / [`Theme::font_size_display`] /
+/// [`Theme::control_height`] 列与不列都合法 (列则显式委托同一值)。
+///
+/// ```ignore
+/// use danqing::{Color, Theme, delegate_theme};
+///
+/// #[derive(Clone, Copy, Debug)]
+/// enum MyTheme { Light, Dark }
+///
+/// impl Theme for MyTheme {
+///     delegate_theme! {
+///         background -> Color;
+///         accent -> Color;
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! delegate_theme {
+    ($($name:ident -> $ret:ty;)+) => {
+        $(
+            fn $name(&self) -> $ret {
+                match self {
+                    Self::Light => $crate::LightTheme.$name(),
+                    Self::Dark => $crate::theme::DarkTheme.$name(),
+                }
+            }
+        )+
+    };
+}
+
 /// 浅色主题。
 ///
 /// 采用毛玻璃风格：低饱和度背景 + 半透明白色表面 + 青绿 (玉色) 强调。
@@ -850,6 +887,65 @@ impl Theme for SceneTheme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `delegate_theme!` 的覆盖锁: 一次列**全部 33 个必填方法** ——
+    /// 宏少生成一个, 这个 impl 就编译不过 (即「宏能盖住整个必填面」的构造性证明)。
+    #[test]
+    fn delegate_theme_macro_covers_every_required_method() {
+        #[derive(Debug, Clone, Copy)]
+        enum T {
+            Light,
+            Dark,
+        }
+
+        impl Theme for T {
+            crate::delegate_theme! {
+                background -> Color;
+                surface -> Color;
+                surface_input -> Color;
+                surface_variant -> Color;
+                accent -> Color;
+                text_primary -> Color;
+                text_secondary -> Color;
+                divider -> Color;
+                border -> Color;
+                selection -> Color;
+                caret -> Color;
+                danger -> Color;
+                traffic_close -> Color;
+                traffic_minimize -> Color;
+                traffic_maximize -> Color;
+                scrim -> Color;
+                font_size_small -> u16;
+                font_size_body -> u16;
+                font_size_heading -> u16;
+                spacing_xs -> f32;
+                spacing_sm -> f32;
+                spacing_md -> f32;
+                spacing_lg -> f32;
+                spacing_xl -> f32;
+                radius_sm -> f32;
+                radius_md -> f32;
+                radius_lg -> f32;
+                radius_xl -> f32;
+                shadow_sm -> Shadow;
+                shadow_md -> Shadow;
+                shadow_lg -> Shadow;
+                easing_standard -> Easing;
+                easing_accelerate -> Easing;
+            }
+        }
+
+        // 委托必须逐字相等 (改色去框架 token 层, 不许中途改值)。
+        assert_eq!(T::Light.background(), LightTheme.background());
+        assert_eq!(T::Dark.background(), DarkTheme.background());
+        assert_eq!(T::Light.accent(), LightTheme.accent());
+        assert_eq!(T::Dark.text_primary(), DarkTheme.text_primary());
+        assert_eq!(T::Light.spacing_md(), LightTheme.spacing_md());
+        assert_eq!(T::Dark.radius_lg(), DarkTheme.radius_lg());
+        assert_eq!(T::Dark.shadow_md(), DarkTheme.shadow_md());
+        assert_eq!(T::Light.easing_accelerate(), LightTheme.easing_accelerate());
+    }
 
     #[test]
     fn light_theme_traffic_colors_match_macos_palette() {

@@ -39,7 +39,7 @@
   - 估时: S | 依赖: 无
   - 注: build 时先确认框架既有行尾归一 API 名(复盘记 `to_crlf` 已落 `text/`), 有则复用、无则在本件内联一行并记
 
-- [ ] **T3: 件3 主题委托宏(S5)** — `danqing/src/theme.rs` 导出宏(候选名 `delegate_theme!`)
+- [x] **T3: 件3 主题委托宏(S5)** — `danqing/src/theme.rs` 导出宏 `delegate_theme!` ✅ 2026-10-10
   - 内容: `#[macro_export] macro_rules! delegate_theme` —— 按 `name -> Type;` 列表生成 `match self { Light => LightTheme.$m(), Dark => DarkTheme.$m() }`(成稿 = dropshelf `app_theme.rs:28-37` 版)
   - 语义红线: 委托面**只列各产品自己要的**方法; `source_palette` / `font_size_display` / `control_height` 有 trait 默认实现, 列与不列都合法(列则显式委托同一值)
   - 验收: 宏展开编译测试 + 双主题逐 token 抽查(dropshelf `delegation_is_verbatim` 形态); 33 个必填方法全委托
