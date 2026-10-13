@@ -156,18 +156,21 @@ danqing 窗口层只做 `with_decorations(false)`(handler.rs:808), TitleBar 由�
 **状态**: T1–T12 全勾; Checkpoint A–D 全过。danqing 侧已 commit+push(`1ebc339`);
 dropshelf/luoban/plainsight 的改动**按根约定仍等用户口令**(未 commit)。
 
-**账面**: danqing 687 测试绿(+2 几何锁); dropshelf 81(原 78, +标题栏接线锁 +两件主题跟随锁);
-luoban 96(原 95, +标题栏接线锁)。三仓 clippy 零警告 / fmt 净。
+**账面**: danqing 688 测试绿(+2 几何锁 +1 栏高锁); dropshelf 82(原 78);
+luoban 96(原 95)。三仓 clippy 零警告 / fmt 净。
 
 **与 plan 的偏差(3 条, 均记账)**:
 
-1. **T5 栏高 28px**: TitleBar 无高度 API, 自然高 = `spacing_xl + spacing_lg` = 40px。
-   用 `UiBox::new(Color::TRANSPARENT).height(28.0)` 夹住子级约束兑现裁决①, 未改框架。
+1. **T5 栏高 28px** —— ~~用 `UiBox::new(Color::TRANSPARENT).height(28.0)` 夹住子级约束
+   兑现裁决①, 未改框架~~。**评审 R1 推翻**: `UiBox` 只夹住**带宽**(28px), TitleBar
+   内部几何 (logo_rect / button_rect) 仍按自然高 40 算 → 内容整体偏下约 6px、按钮方框
+   40px 越出带外。改法: 框架加 `TitleBar::height(f32)` builder (内部几何按本值算,
+   改高后自然重新居中), dropshelf 改调 `.height(28.0)`、去掉 UiBox 包装。
 2. **T7 `new` 未保留**: plan 说「`ShelfList::new`/`GroupPicker::new` 保留(= themed(&LightTheme) 兜底)」,
    但两件 `pub(crate)` 且改调点全部有主题在手 → 留着即 dead_code(`-D warnings` 不过)。
    故只留 `themed(theme, ...)`, 两处测试内构造同步改调; 行为不变。
 3. **测试数**: plan 估「dropshelf ≥84 / luoban ≥86」是建单期陈旧值; 实测基线
-   dropshelf 78 / luoban 95, 本批后 81 / 96(无测试被破)。
+   dropshelf 78 / luoban 95, 本批后 82 / 96(无测试被破)。
 
 **新增框架件**: `LogoKind::Dropshelf` / `LogoKind::Luoban` 两分支 + `LOGO_SEAL_FILL`
 (落版印章白文的不透明白; 与 `LOGO_GLASS_FILL` 0.85 是两种白)。**零新增 Theme token**
@@ -175,3 +178,27 @@ luoban 96(原 95, +标题栏接线锁)。三仓 clippy 零警告 / fmt 净。
 
 **T12 入账**: dropshelf 新建 `tasks/release-checklist.md`; luoban/plainsight 既有单补登
 「指南发布前闸」节; 两仓标题栏肉眼验收项记 `acceptance-pending.md`。
+
+## 评审收口(2026-10-13 双路: 自审变异 + fresh-context agent)
+
+**总判**: Request changes → 两条 Required 全修后转 Approve。
+
+- **R1 栏高 28px 只兑现了带宽**: 见偏差①修订。框架加 `TitleBar::height(f32)` +
+  新增 `explicit_height_recenters_logo_and_buttons` 锁。
+- **R2 「接线锁」名不副实**(自审变异 + 二路同判): 两条测试只断言提纯 `title_logo_kind()` ——
+  **变异实验**: 把 `.logo_kind(title_logo_kind())` 改成 `LogoKind::Default`, 两仓全套测试
+  **依旧全绿**。这正是本批要治的 B9 病换层复发。修法: 框架加 `TitleBar::logo_variant()`
+  getter(产品侧观测点), 两仓把标题栏构造提成单一构造点 `title_bar()`, 断言该实例 ——
+  复验: 同一变异现将 `view_title_bar_wires_*` 打红。
+- **几何锁容差过粗**(自审): `close(a,b) < 0.5px` 而 logo 方框仅 24px = 0.094px/单位 →
+  **5 单位以内的坐标走样逃逸**(实测 42→40 绿 / 42→34 红)。三条 logo 几何锁容差收紧为
+  半个设计单位 `s / 256.0 * 0.5`; 复验: 同一 2 单位漂移现被打红。
+- **Nit 采纳**: 测试数回填(82); dropshelf `release-checklist.md` E3 `logo_name` 核实为
+  已接(`"shelf"` + `assets/logo/shelf_*.png` 齐) -> 勾销。
+- **Nit 记录不改**: `persist::config_dir` 建目录失败与「找不到目录」同归一错误串 ——
+  语义略含混, 但调用方只做「失败即提示」, 不阻断。
+- **评审期异常(观察)**: 二路首跑曾见 `dropshelf_logo_paints...` 一次 FAILED, 其后 80+
+  次(含全量/强制重编)全绿; 左右两边是同一表达式, 疑为陈旧测试二进制, 非代码缺陷。
+
+**框架 rev 链路**: `1ebc339`(两变体) → `696cfc1`(doc 收口) → **`d98c51b`**(R1/R2 修复)。
+dropshelf/luoban lock 已复钉 `d98c51b`。
