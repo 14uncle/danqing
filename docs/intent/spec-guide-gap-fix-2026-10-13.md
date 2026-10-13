@@ -144,3 +144,17 @@ fn title_logo_kind_lock() {
    再消费; main.rs:1189 `clear_color` rgba 0.92 (hold-to-show 半透明) 为有意设计, 不在范围
 3. **dropshelf release-checklist.md**: 借本批新建, P2 发布前闸待办入账
 4. **存档位**: 认可 `danqing/docs/intent/`(跨仓工作文档成例)
+
+## 勘误(2026-10-13 plan/build 期实证, 目标不变)
+
+plan 期实测: **dropshelf/luoban 两仓视图根均无 TitleBar 组件**(全仓 grep 零命中;
+dropshelf `ui.rs` 与 luoban `app.rs` 的「标题」都是纯 Text)。spec 原文假设「有 TitleBar
+未接线」→ 实为「**补 TitleBar 组件 + 接线**」; 成功标准 1–2 的目标不变(标题栏画自家 logo)。
+build 期已按此执行。
+
+另: 成功标准 2 的「既有测试 84/86」为建单期估数; 实测基线 dropshelf 78 / luoban 95,
+本批后 81 / 96。色板(裁决②)实测**全部有既有等价 token**, 未新增 Theme token。
+
+补充: T5 栏高 28px 由 `UiBox::height(28.0)` 夹住子级约束兑现(TitleBar 无高度 API);
+T7 因 `pub(crate)` + `-D warnings` 未保留 `new`, 只留 `themed(theme, ...)`。详见
+`tasks/plan-guide-gap-fix-2026-10-13.md` 收口记录。

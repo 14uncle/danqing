@@ -67,71 +67,71 @@ danqing 窗口层只做 `with_decorations(false)`(handler.rs:808), TitleBar 由�
 
 ### Phase 1: danqing 框架侧(G1 上游)
 
-- [ ] **T1** danqing: `LogoKind::Dropshelf` 分支 + 几何锁测试
+- [x] **T1** danqing: `LogoKind::Dropshelf` 分支 + 几何锁测试
   - Acceptance: paint 产出 7 矩形(层板×2/玉色件×4/朱砂件×1); 锁测试断言朱砂件挂出
     上层板右端且下沉(SVG 176,92,44,42)、玉色层板恰两条; `cargo test --lib` 绿
   - Files: `danqing/src/widget/title_bar.rs`
   - Verify: `cargo test widget::title_bar -- --exact`-级聚焦 + 全量
-- [ ] **T2** danqing: `LogoKind::Luoban` 分支 + 几何锁测试
+- [x] **T2** danqing: `LogoKind::Luoban` 分支 + 几何锁测试
   - Acceptance: 竖版纸张框+玻璃内填+三排版行+朱砂印章+白文内块; 锁测试断言印章在
     纸内右下角、排版行恰三条左缘齐 x=82/256; 测试绿
   - Files: `danqing/src/widget/title_bar.rs`
-- [ ] **T3** danqing 三件套 + commit + push(spec 批准即授权; T1+T2 一次提交, message 注明
+- [x] **T3** danqing 三件套 + commit + push(spec 批准即授权; T1+T2 一次提交, message 注明
   关联本批与两产品仓后续 lock 复钉)
   - Acceptance: origin/dev 含新 rev, 记录 rev 号备用
   - Verify: `git log origin/dev -1` + `git branch -r --contains`
 
 ### Checkpoint A(Phase 1 后)
-- [ ] danqing `cargo test --lib --tests` 全绿、clippy 零警告、fmt 净、rev 已 push
+- [x] danqing `cargo test --lib --tests` 全绿、clippy 零警告、fmt 净、rev 已 push
 
 ### Phase 2: dropshelf(G1+G2)
 
-- [ ] **T4** dropshelf 升 rev: `cargo check` 驱动重解(禁 `cargo update -p danqing`), lock 复钉
+- [x] **T4** dropshelf 升 rev: `cargo check` 驱动重解(禁 `cargo update -p danqing`), lock 复钉
   - Acceptance: lock 钉 T3 新 rev; `grep 'source = "path+'` 零命中; 三件套绿
     (persist 测试若因 atomic_save 新语义翻黄 → 按新语义修, 记 plan 偏差)
   - Files: `Cargo.lock`(±受影响测试)
-- [ ] **T5** dropshelf 补 TitleBar + 接线 + 锁(形制按开放问题①裁决)
+- [x] **T5** dropshelf 补 TitleBar + 接线 + 锁(形制按开放问题①裁决)
   - Acceptance: `ui.rs` 主列顶端 TitleBar(替换纯 Text 标题); `.logo_kind(title_logo_kind())`;
     on_close/on_drag 接通(照 plainsight/log 成例); 锁测试双断言绿; 既有 84 测试零破
   - Files: `src/ui.rs`(或 main.rs, 以视图根实际为准)
-- [ ] **T6** dropshelf `save_paste_image` 改 `persist::config_dir` + Cargo.toml 砍 `dirs`
+- [x] **T6** dropshelf `save_paste_image` 改 `persist::config_dir` + Cargo.toml 砍 `dirs`
   - Acceptance: 全仓 `grep dirs::` 零命中; Cargo.toml 无 dirs; 落盘路径不变
     (`%APPDATA%/danqing-dropshelf/paste/`); 测试绿
   - Files: `src/main.rs`, `Cargo.toml`, `Cargo.lock`
-- [ ] **T7** dropshelf ShelfList/GroupPicker 色板 token 化
+- [x] **T7** dropshelf ShelfList/GroupPicker 色板 token 化
   - Acceptance: 两件 `themed()` 注入, ui.rs 构造点改调; 硬编码色零残留
     (`grep 'Color::rgb' src/shelf_list.rs src/group_picker.rs` 零命中);
     `main.rs:1189 clear_color` 不动(豁免在案); 测试绿
   - Files: `src/shelf_list.rs`, `src/group_picker.rs`, `src/ui.rs`
 
 ### Checkpoint B(Phase 2 后)
-- [ ] dropshelf 三件套全绿、测试数 ≥84 入账、肉眼验收项记 acceptance-pending.md
+- [x] dropshelf 三件套全绿、测试数 ≥84 入账、肉眼验收项记 acceptance-pending.md
 
 ### Phase 3: luoban(G1)
 
-- [ ] **T8** luoban 升 rev: 同 T4 手法; Acceptance 同形(lock 钉新 rev、纯 git 态、三件套绿)
-- [ ] **T9** luoban 补 TitleBar + `logo_name` + 接线 + 锁
+- [x] **T8** luoban 升 rev: 同 T4 手法; Acceptance 同形(lock 钉新 rev、纯 git 态、三件套绿)
+- [x] **T9** luoban 补 TitleBar + `logo_name` + 接线 + 锁
   - Acceptance: `app.rs` 视图根顶端 TitleBar(替换纯 Text); 标准三键 +
     on_close→WindowAction::Close(默认 Exit 语义不变); `main.rs` WindowConfig 补
     `logo_name: "luoban"`; 锁测试双断言绿; 既有 86 测试零破
   - Files: `src/app.rs`, `src/main.rs`, `Cargo.lock`
 
 ### Checkpoint C(Phase 3 后)
-- [ ] luoban 三件套全绿、测试数 ≥86 入账、肉眼验收项记 acceptance-pending.md
+- [x] luoban 三件套全绿、测试数 ≥86 入账、肉眼验收项记 acceptance-pending.md
 
 ### Phase 4: 杂项 + 入账(G3, 无依赖可穿插)
 
-- [ ] **T10** luoban 删 `.cargo/config.toml`(磁盘残留, 未入 git); plainsight `.gitignore`
+- [x] **T10** luoban 删 `.cargo/config.toml`(磁盘残留, 未入 git); plainsight `.gitignore`
   补 `tools/sdk-tools/` `*.secret` `*.license.key` 三行
-- [ ] **T11** 根 `CLAUDE.md` 仓库地图补三行 + 路由补三条(dropshelf=第五件在制未发布 /
+- [x] **T11** 根 `CLAUDE.md` 仓库地图补三行 + 路由补三条(dropshelf=第五件在制未发布 /
   luoban=A1 体裁落地层在制未发布 / plainsight=明见发布 hold 10-21)
-- [ ] **T12** 入账: dropshelf 新建 `tasks/release-checklist.md`(P2 待办: E1 关于页 /
+- [x] **T12** 入账: dropshelf 新建 `tasks/release-checklist.md`(P2 待办: E1 关于页 /
   E2 update feature / D5 截图 / A7 复用表 / F8 商店物料); luoban/plainsight 既有
   release-checklist.md 补登缺口(plainsight 关于页缺仓库地址等); dropshelf/luoban
   `acceptance-pending.md` 记标题栏肉眼验收
 
 ### Checkpoint D(全批收口)
-- [ ] 对照 spec Success Criteria 1–9 逐项勾; spec 勘误节回写 spec 文件;
+- [x] 对照 spec Success Criteria 1–9 逐项勾; spec 勘误节回写 spec 文件;
       各仓改动分仓 commit(联动注明关联; dropshelf/luoban/plainsight 的 commit/push
       按根约定仍等用户口令——本批已授权仅 danqing push)
 
@@ -150,3 +150,28 @@ danqing 窗口层只做 `with_decorations(false)`(handler.rs:808), TitleBar 由�
 1. **dropshelf 标题栏形制**: **仅关闭键**——`show_maximize(false)` + `show_minimize(false)`,
    on_close=ToggleShelf(收起语义, 与 CloseBehavior::Hide 一致), 栏高 28px 从列表区扣,
    窗高 360×420 不变。luoban 标准三键(无异议默认)。
+
+## 收口记录(2026-10-13 全批完成)
+
+**状态**: T1–T12 全勾; Checkpoint A–D 全过。danqing 侧已 commit+push(`1ebc339`);
+dropshelf/luoban/plainsight 的改动**按根约定仍等用户口令**(未 commit)。
+
+**账面**: danqing 687 测试绿(+2 几何锁); dropshelf 81(原 78, +标题栏接线锁 +两件主题跟随锁);
+luoban 96(原 95, +标题栏接线锁)。三仓 clippy 零警告 / fmt 净。
+
+**与 plan 的偏差(3 条, 均记账)**:
+
+1. **T5 栏高 28px**: TitleBar 无高度 API, 自然高 = `spacing_xl + spacing_lg` = 40px。
+   用 `UiBox::new(Color::TRANSPARENT).height(28.0)` 夹住子级约束兑现裁决①, 未改框架。
+2. **T7 `new` 未保留**: plan 说「`ShelfList::new`/`GroupPicker::new` 保留(= themed(&LightTheme) 兜底)」,
+   但两件 `pub(crate)` 且改调点全部有主题在手 → 留着即 dead_code(`-D warnings` 不过)。
+   故只留 `themed(theme, ...)`, 两处测试内构造同步改调; 行为不变。
+3. **测试数**: plan 估「dropshelf ≥84 / luoban ≥86」是建单期陈旧值; 实测基线
+   dropshelf 78 / luoban 95, 本批后 81 / 96(无测试被破)。
+
+**新增框架件**: `LogoKind::Dropshelf` / `LogoKind::Luoban` 两分支 + `LOGO_SEAL_FILL`
+(落版印章白文的不透明白; 与 `LOGO_GLASS_FILL` 0.85 是两种白)。**零新增 Theme token**
+(裁决②: dropshelf 硬编码色全部有既有等价物)。
+
+**T12 入账**: dropshelf 新建 `tasks/release-checklist.md`; luoban/plainsight 既有单补登
+「指南发布前闸」节; 两仓标题栏肉眼验收项记 `acceptance-pending.md`。
