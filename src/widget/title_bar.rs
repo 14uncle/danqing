@@ -33,6 +33,12 @@ pub enum LogoKind {
     /// 明见：玉色宽幅视窗 (查看器族剪影, 与 Log 同框) + 三条两段对齐数据行
     /// (列对齐表格, 断口对齐) + 左缘朱砂行号槽 (行数可信)。
     Plainsight,
+    /// 暂存架：两条玉色层板 + 四块在架玉件 + 一件朱砂件挂出上层板右端且下沉
+    /// (正在被拖走交付的那一件)。架无围框 —— 家族里唯一不带玻璃白的 logo。
+    Dropshelf,
+    /// 落版：玉色描边竖版纸张 (玻璃白内填, 与日志的横向视窗一眼区分) +
+    /// 纸内三条排版行 + 右下角一枚朱砂印章 (白文) = 定稿盖印。
+    Luoban,
 }
 
 /// 标题栏按钮布局样式。
@@ -204,6 +210,10 @@ const BRAND_JADE: Color = Color::rgb(15.0 / 255.0, 118.0 / 255.0, 110.0 / 255.0)
 /// LOGO 玻璃内填 (白 0.85)：与 SVG/PNG 一致; 走 surface_input token 会在浅色
 /// 底上几乎隐形 (6% 黑), 「玻璃」感丢失。
 const LOGO_GLASS_FILL: Color = Color::rgba(1.0, 1.0, 1.0, 0.85);
+
+/// LOGO 印章白文内块 (不透明白)：落版印章里的「白文」方块 —— SVG 用不透明白
+/// (`fill="white"`), 与上面 0.85 的玻璃内填是两种白, 混用会透出底下朱砂。
+const LOGO_SEAL_FILL: Color = Color::rgb(1.0, 1.0, 1.0);
 
 /// 随主题流动的标题栏颜色子集 (构建后仍可经 [`TitleBar::bind_theme`] 每帧刷新)。
 #[derive(Debug, Clone, Copy)]
@@ -1063,6 +1073,98 @@ impl Widget for TitleBar {
                         d(9.0),
                     );
                 }
+            }
+            LogoKind::Dropshelf => {
+                // ── 暂存架：两条玉色层板 + 四块在架玉件 + 一件朱砂挂出件 ──
+                // 几何与 danqing-dropshelf `assets/logo/shelf.svg` (256 设计空间)
+                // 手工同步; 用品牌资产色 + 朱砂点睛, 不走主题 token (同 Log 分支理由)。
+                // **架无围框、无玻璃内填** —— 与 Log/Plainsight 的视窗剪影刻意不同:
+                // 文件从任何地方来, 到任何地方去, 架是开放的。
+                let x = logo_rect.origin.x;
+                let y = logo_rect.origin.y;
+                let s = logo_size;
+                let jade = BRAND_JADE;
+                let d = |v: f32| s * (v / 256.0);
+
+                // 层板: 两条玉色圆角横板 (SVG 24,94 / 24,186; 168×14, rx=7)。
+                for py in [94.0, 186.0] {
+                    rects.push_rect(
+                        Rect::from_xywh(x + d(24.0), y + d(py), d(168.0), d(14.0)),
+                        jade,
+                        d(7.0),
+                    );
+                }
+
+                // 在架件: 四块玉色 (上二下二, 高低错落; SVG 44,58 / 94,70 / 44,152 / 100,160)。
+                let blocks: [(f32, f32, f32, f32); 4] = [
+                    (44.0, 58.0, 40.0, 36.0),
+                    (94.0, 70.0, 34.0, 24.0),
+                    (44.0, 152.0, 44.0, 34.0),
+                    (100.0, 160.0, 34.0, 26.0),
+                ];
+                for (bx, by, bw, bh) in blocks {
+                    rects.push_rect(
+                        Rect::from_xywh(x + d(bx), y + d(by), d(bw), d(bh)),
+                        jade,
+                        d(6.0),
+                    );
+                }
+
+                // 朱砂件: 挂出上层板右端 (16px 搭板边) 且整体下沉 = 正在翻下架交付。
+                rects.push_rect(
+                    Rect::from_xywh(x + d(176.0), y + d(92.0), d(44.0), d(42.0)),
+                    self.logo_dot_color,
+                    d(6.0),
+                );
+            }
+            LogoKind::Luoban => {
+                // ── 落版：竖版纸张 (玉色描边 + 玻璃白内填) + 三排版行 + 朱砂印章 ──
+                // 几何与 danqing-luoban `assets/logo/luoban.svg` (256 设计空间)
+                // 手工同步; 竖版 = 公众号文章的阅读流, 剪影与日志的横向视窗一眼区分。
+                let x = logo_rect.origin.x;
+                let y = logo_rect.origin.y;
+                let s = logo_size;
+                let jade = BRAND_JADE;
+                let d = |v: f32| s * (v / 256.0);
+
+                // 纸张: 玉色圆角矩形 (SVG 48,24,160,208, rx=28) —— 描边环的底。
+                let px0 = d(48.0);
+                let py0 = d(24.0);
+                let pw = d(160.0);
+                let ph = d(208.0);
+                let pr = d(28.0);
+                rects.push_rect(Rect::from_xywh(x + px0, y + py0, pw, ph), jade, pr);
+
+                // 玻璃白内填 (SVG stroke-width=20 → 代码取 inset 20/256, 同 Log 手法)。
+                let gi = d(20.0);
+                rects.push_rect(
+                    Rect::from_xywh(x + px0 + gi, y + py0 + gi, pw - gi * 2.0, ph - gi * 2.0),
+                    LOGO_GLASS_FILL,
+                    (pr - gi).max(0.0),
+                );
+
+                // 排版行: 三条玉色 (SVG 82,60 / 82,92 / 82,124; h=16, rx=8, 长短错落)。
+                let rows: [(f32, f32); 3] = [(60.0, 92.0), (92.0, 96.0), (124.0, 60.0)];
+                for (ry0, rw0) in rows {
+                    rects.push_rect(
+                        Rect::from_xywh(x + d(82.0), y + d(ry0), d(rw0), d(16.0)),
+                        jade,
+                        d(8.0),
+                    );
+                }
+
+                // 印章: 朱砂方印落纸内右下角 (SVG 136,160,44,44, rx=6) + 白文内块
+                // (SVG 150,174,16,16, 直角) —— 「落版」的「落」: 定稿盖印。
+                rects.push_rect(
+                    Rect::from_xywh(x + d(136.0), y + d(160.0), d(44.0), d(44.0)),
+                    self.logo_dot_color,
+                    d(6.0),
+                );
+                rects.push_rect(
+                    Rect::from_xywh(x + d(150.0), y + d(174.0), d(16.0), d(16.0)),
+                    LOGO_SEAL_FILL,
+                    0.0,
+                );
             }
         }
 
@@ -2130,5 +2232,164 @@ mod tests {
         // 玻璃内填在位 (查看器族剪影的玻璃白)。
         let glass = rgba_of(LOGO_GLASS_FILL);
         assert!(rects.instance_colors().contains(&glass), "缺玻璃白内填");
+    }
+
+    /// 暂存架 logo 几何锁: 与 danqing-dropshelf `assets/logo/shelf.svg` (256 设计空间)
+    /// 手工同步 —— 两条玉色层板承载四块玉色在架件, 一件朱砂件挂出上层板右端且下沉
+    /// (正在被拖走交付的那一件)。**架无围框、无玻璃内填** —— 与 Log/Plainsight 的
+    /// 视窗剪影刻意不同 (文件从任何地方来, 到任何地方去, 架是开放的)。
+    #[test]
+    fn dropshelf_logo_paints_open_shelf_with_dangling_item() {
+        let mut bar = TitleBar::themed(&LightTheme, "暂存架").logo_kind(LogoKind::Dropshelf);
+        let area = title_bar_area();
+        let mut texts = TextBatch::new();
+        bar.layout(Constraints::tight(area.size), &mut texts);
+
+        let mut rects = RectBatch::new();
+        texts.clear();
+        bar.paint(area, &mut rects, &mut texts);
+
+        let logo_r = bar.logo_rect(area);
+        let s = logo_r.size.width;
+        let close = |a: f32, b: f32| (a - b).abs() < 0.5;
+        let px = |v: f32| logo_r.origin.x + s * (v / 256.0);
+
+        let jade = rgba_of(BRAND_JADE);
+        let cin = rgba_of(BRAND_CINNABAR);
+        let items: Vec<_> = rects
+            .instance_rects()
+            .iter()
+            .zip(rects.instance_colors())
+            .map(|(r, c)| (c, *r))
+            .collect();
+
+        // 层板: 恰两条玉色横板 (SVG h=14, 宽 168)。
+        let plate_h = s * (14.0 / 256.0);
+        let plates: Vec<_> = items
+            .iter()
+            .filter(|(c, r)| *c == jade && close(r.size.height, plate_h))
+            .map(|(_, r)| *r)
+            .collect();
+        assert_eq!(plates.len(), 2, "玉色层板应恰两条: {plates:?}");
+        assert!(
+            plates
+                .iter()
+                .all(|r| close(r.size.width, s * (168.0 / 256.0))),
+            "层板全宽应为 168/256"
+        );
+
+        // 在架玉色件: 四块 (上二下二, 高低错落)。
+        let blocks = items
+            .iter()
+            .filter(|(c, r)| *c == jade && !close(r.size.height, plate_h))
+            .count();
+        assert_eq!(blocks, 4, "在架玉色件应四块");
+
+        // 朱砂件: 唯一朱砂矩形, 挂出上层板右端 (右缘越过板右缘 x=192) 且下沉。
+        let cin_rects: Vec<_> = items
+            .iter()
+            .filter(|(c, _)| *c == cin)
+            .map(|(_, r)| *r)
+            .collect();
+        assert_eq!(cin_rects.len(), 1, "朱砂件应恰一件: {cin_rects:?}");
+        let dangling = cin_rects[0];
+        assert!(close(dangling.origin.x, px(176.0)));
+        assert!(close(dangling.size.height, s * (42.0 / 256.0)));
+        assert!(
+            dangling.origin.x + dangling.size.width > px(24.0 + 168.0),
+            "朱砂件须挂出上层板右端 (板右缘 {:?})",
+            px(24.0 + 168.0)
+        );
+
+        // 架无围框无玻璃内填 —— 家族里唯一不带玻璃白的 logo。
+        assert!(
+            !rects.instance_colors().contains(&rgba_of(LOGO_GLASS_FILL)),
+            "暂存架无围框, 不应有玻璃内填"
+        );
+    }
+
+    /// 落版 logo 几何锁: 与 danqing-luoban `assets/logo/luoban.svg` (256 设计空间)
+    /// 手工同步 —— 竖版纸张 (玉色描边 + 玻璃白内填, 与日志的横向视窗一眼区分) +
+    /// 纸内三条玉色排版行 (左缘齐 x=82) + 右下角一枚朱砂印章 (内含白文内块)。
+    #[test]
+    fn luoban_logo_paints_portrait_page_with_seal() {
+        let mut bar = TitleBar::themed(&LightTheme, "落版").logo_kind(LogoKind::Luoban);
+        let area = title_bar_area();
+        let mut texts = TextBatch::new();
+        bar.layout(Constraints::tight(area.size), &mut texts);
+
+        let mut rects = RectBatch::new();
+        texts.clear();
+        bar.paint(area, &mut rects, &mut texts);
+
+        let logo_r = bar.logo_rect(area);
+        let s = logo_r.size.width;
+        let close = |a: f32, b: f32| (a - b).abs() < 0.5;
+        let px = |v: f32| logo_r.origin.x + s * (v / 256.0);
+        let py = |v: f32| logo_r.origin.y + s * (v / 256.0);
+
+        let jade = rgba_of(BRAND_JADE);
+        let cin = rgba_of(BRAND_CINNABAR);
+        let items: Vec<_> = rects
+            .instance_rects()
+            .iter()
+            .zip(rects.instance_colors())
+            .map(|(r, c)| (c, *r))
+            .collect();
+
+        // 纸张外框: 玉色竖版 (SVG 48,24,160,208; 高 > 宽 = 竖版阅读流)。
+        let page_h = s * (208.0 / 256.0);
+        let pages: Vec<_> = items
+            .iter()
+            .filter(|(c, r)| *c == jade && close(r.size.height, page_h))
+            .map(|(_, r)| *r)
+            .collect();
+        assert_eq!(pages.len(), 1, "玉色纸张外框应恰一块: {pages:?}");
+        assert!(pages[0].size.height > pages[0].size.width, "纸张应为竖版");
+
+        // 玻璃白内填: 恰一块, inset 20/256 (描边手法同 Log)。
+        let glass = rgba_of(LOGO_GLASS_FILL);
+        let fills: Vec<_> = items
+            .iter()
+            .filter(|(c, _)| *c == glass)
+            .map(|(_, r)| *r)
+            .collect();
+        assert_eq!(fills.len(), 1, "玻璃内填应恰一块: {fills:?}");
+        assert!(close(fills[0].origin.x, px(68.0)), "内填 inset 应为 20/256");
+
+        // 排版行: 三条玉色 (h=16), 左缘齐 x=82 (SVG 82,60/92/124)。
+        let rows: Vec<_> = items
+            .iter()
+            .filter(|(c, r)| *c == jade && close(r.size.height, s * (16.0 / 256.0)))
+            .map(|(_, r)| *r)
+            .collect();
+        assert_eq!(rows.len(), 3, "排版行应恰三条: {rows:?}");
+        assert!(
+            rows.iter().all(|r| close(r.origin.x, px(82.0))),
+            "排版行左缘须齐 x=82/256"
+        );
+
+        // 印章: 唯一朱砂, 落在纸内右下角 (SVG 136,160,44,44; 右/下缘不出纸)。
+        let seals: Vec<_> = items
+            .iter()
+            .filter(|(c, _)| *c == cin)
+            .map(|(_, r)| *r)
+            .collect();
+        assert_eq!(seals.len(), 1, "朱砂印章应恰一枚: {seals:?}");
+        let seal = seals[0];
+        assert!(close(seal.origin.x, px(136.0)) && close(seal.origin.y, py(160.0)));
+        assert!(
+            seal.origin.x + seal.size.width < px(208.0),
+            "印章须落在纸内"
+        );
+        assert!(
+            seal.origin.y + seal.size.height < py(232.0),
+            "印章须落在纸内"
+        );
+
+        // 白文内块: 印章里的白方块 (SVG 150,174,16,16), 不透明白一处。
+        let seal_white = rgba_of(LOGO_SEAL_FILL);
+        let whites = items.iter().filter(|(c, _)| *c == seal_white).count();
+        assert_eq!(whites, 1, "印章白文内块应恰一块");
     }
 }
