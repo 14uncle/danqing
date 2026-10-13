@@ -364,6 +364,25 @@ impl TitleBar {
         self
     }
 
+    /// 读取当前 LOGO 变体 —— 产品侧「视图树接线」的观测点:
+    /// 提纯 `title_logo_kind()` 只能锁住变体选择，锁不住 `.logo_kind(...)` 那次接线;
+    /// 断言本 getter 才能把接线钉死 (2026-10-13 评审 R2: 只锁纯函数 = 接线变异照样全绿)。
+    ///
+    /// 取名 `logo_variant` 而非 `logo_kind`: 后者已被同名 builder 占用 (Rust 无重载)。
+    pub fn logo_variant(&self) -> LogoKind {
+        self.logo_kind
+    }
+
+    /// 设置栏高 (默认 `spacing_xl + spacing_lg`)。
+    ///
+    /// 内部几何 (LOGO / 窗控按钮的竖向居中与按钮方框边长) 一律**按本值**算，
+    /// 故改高后内容自然重新居中 —— 窄带场景 (托盘小窗) 不要靠父级夹高度:
+    /// 父级夹出的高度与内部几何不一致，内容会整体偏下 (2026-10-13 评审 R1)。
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = height;
+        self
+    }
+
     /// 设置内嵌栏槽：在标题文字与窗口按钮之间托管一个子节点 (如搜索/过滤输入)。
     ///
     /// 未设置时 TitleBar 保持叶子行为 (children 为空)，完全向后兼容。
@@ -2178,6 +2197,26 @@ mod tests {
         );
     }
 
+    /// 栏高 builder 重居中锁 (2026-10-13 评审 R1): 改高后 LOGO 与窗控按钮按
+    /// **新高度**竖向居中 —— 靠父级夹高度会让内部几何停在自然高，内容整体偏下
+    /// (dropshelf 28px 窄带实测偏下约 6px)。
+    #[test]
+    fn explicit_height_recenters_logo_and_buttons() {
+        let bar = TitleBar::themed(&LightTheme, "x").height(28.0);
+        let area = Rect::from_xywh(0.0, 0.0, 360.0, 28.0);
+
+        // LOGO 方框 (24×24) 竖向居中于 28px 带 → 上下各 2px。
+        let l = bar.logo_rect(area);
+        assert_eq!(l.size.height, 24.0);
+        assert_eq!(l.origin.y, 2.0, "LOGO 应居中于 28px 带");
+        assert_eq!(l.origin.y + l.size.height / 2.0, 14.0);
+
+        // 窗控按钮方框边长 = 栏高 (竖向铺满且不溢出带外)。
+        let b = bar.button_rect(area, ButtonRole::Close);
+        assert_eq!(b.size.height, 28.0, "按钮方框应随栏高");
+        assert_eq!(b.origin.y, 0.0);
+    }
+
     /// 明见 logo 几何锁: 与 danqing-plainsight `assets/logo/plainsight.svg`
     /// (256 设计空间) 手工同步 —— 朱砂行号槽贴左缘恰一条、数据行六段分两列
     /// 对齐、玻璃内填在位。2026-10-13 明见标题栏误用母 logo (`LogoKind::Default`)
@@ -2195,8 +2234,9 @@ mod tests {
 
         let logo_r = bar.logo_rect(area);
         let s = logo_r.size.width;
-        // 16px 档下子像素几何, 容差取半像素。
-        let close = |a: f32, b: f32| (a - b).abs() < 0.5;
+        // 容差 = 半个设计单位 ("+ s / 256.0 * 0.5 +"): logo 方框仅 24px, 1 单位 = 0.094px,
+        // 取半像素(0.5px)会吞掉 5 单位以内的坐标走样 —— 评审 R2 收紧。
+        let close = |a: f32, b: f32| (a - b).abs() < s / 256.0 * 0.5;
 
         // 行号槽: 唯一朱砂矩形 (SVG x=62, y=84, w=18, h=86)。
         let cin = rgba_of(BRAND_CINNABAR);
@@ -2251,7 +2291,7 @@ mod tests {
 
         let logo_r = bar.logo_rect(area);
         let s = logo_r.size.width;
-        let close = |a: f32, b: f32| (a - b).abs() < 0.5;
+        let close = |a: f32, b: f32| (a - b).abs() < s / 256.0 * 0.5;
         let px = |v: f32| logo_r.origin.x + s * (v / 256.0);
 
         let jade = rgba_of(BRAND_JADE);
@@ -2324,7 +2364,7 @@ mod tests {
 
         let logo_r = bar.logo_rect(area);
         let s = logo_r.size.width;
-        let close = |a: f32, b: f32| (a - b).abs() < 0.5;
+        let close = |a: f32, b: f32| (a - b).abs() < s / 256.0 * 0.5;
         let px = |v: f32| logo_r.origin.x + s * (v / 256.0);
         let py = |v: f32| logo_r.origin.y + s * (v / 256.0);
 
