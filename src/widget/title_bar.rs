@@ -30,6 +30,9 @@ pub enum LogoKind {
     Clipboard,
     /// 日志：玉色宽幅视窗 (玻璃内填) + 四条水平日志行, 底部一条朱砂 = live tail。
     Log,
+    /// 明见：玉色宽幅视窗 (查看器族剪影, 与 Log 同框) + 三条两段对齐数据行
+    /// (列对齐表格, 断口对齐) + 左缘朱砂行号槽 (行数可信)。
+    Plainsight,
 }
 
 /// 标题栏按钮布局样式。
@@ -1008,6 +1011,57 @@ impl Widget for TitleBar {
                     let by = y + s * (y0 / 256.0);
                     let bw = s * (w0 / 256.0);
                     rects.push_rect(Rect::from_xywh(bx, by, bw, bh), color, br);
+                }
+            }
+            LogoKind::Plainsight => {
+                // ── 明见：宽幅视窗 (与日志同框剪影) + 两段对齐数据行 + 左缘朱砂行号槽 ──
+                // 几何与 danqing-plainsight `assets/logo/plainsight.svg` (256 设计空间)
+                // 手工同步; 框/内填/行块用品牌资产色, 不走主题 token (同 Log 分支理由)。
+                let x = logo_rect.origin.x;
+                let y = logo_rect.origin.y;
+                let s = logo_size;
+                let jade = BRAND_JADE;
+                let d = |v: f32| s * (v / 256.0);
+
+                // 外框窗口: 玉色圆角矩形 (SVG 28..228 / 48..208, rx=28)。
+                let wx0 = d(28.0);
+                let wy0 = d(48.0);
+                let ww = d(200.0);
+                let wh = d(160.0);
+                let wr = d(28.0);
+                rects.push_rect(Rect::from_xywh(x + wx0, y + wy0, ww, wh), jade, wr);
+
+                // 玻璃内填 (SVG stroke-width=20 → inset 20): 形成描边环效果。
+                let gi = d(20.0);
+                rects.push_rect(
+                    Rect::from_xywh(x + wx0 + gi, y + wy0 + gi, ww - gi * 2.0, wh - gi * 2.0),
+                    LOGO_GLASS_FILL,
+                    (wr - gi).max(0.0),
+                );
+
+                // 行号槽: 朱砂左缘竖条 (SVG 62/84/18/86, rx=9) = 数得清的那一栏。
+                rects.push_rect(
+                    Rect::from_xywh(x + d(62.0), y + d(84.0), d(18.0), d(86.0)),
+                    self.logo_dot_color,
+                    d(9.0),
+                );
+
+                // 三条数据行, 每条两段 (SVG 六矩形, rx=9): 断口对齐 x=132/144 =
+                // 列对齐网格; 第二段右端错落 (54/42/48) = 单元格长短不一。
+                let segs: [(f32, f32, f32); 6] = [
+                    (92.0, 84.0, 40.0),
+                    (144.0, 84.0, 54.0),
+                    (92.0, 118.0, 40.0),
+                    (144.0, 118.0, 42.0),
+                    (92.0, 152.0, 40.0),
+                    (144.0, 152.0, 48.0),
+                ];
+                for (sx0, sy0, sw0) in segs {
+                    rects.push_rect(
+                        Rect::from_xywh(x + d(sx0), y + d(sy0), d(sw0), d(18.0)),
+                        jade,
+                        d(9.0),
+                    );
                 }
             }
         }
@@ -2020,5 +2074,61 @@ mod tests {
             "标题碰按钮时应零宽槽: {:?}",
             bar.embed_area
         );
+    }
+
+    /// 明见 logo 几何锁: 与 danqing-plainsight `assets/logo/plainsight.svg`
+    /// (256 设计空间) 手工同步 —— 朱砂行号槽贴左缘恰一条、数据行六段分两列
+    /// 对齐、玻璃内填在位。2026-10-13 明见标题栏误用母 logo (`LogoKind::Default`)
+    /// 事故补锁: 变体画错/画空由此逮。
+    #[test]
+    fn plainsight_logo_paints_gutter_and_aligned_segments() {
+        let mut bar = TitleBar::themed(&LightTheme, "明见").logo_kind(LogoKind::Plainsight);
+        let area = title_bar_area();
+        let mut texts = TextBatch::new();
+        bar.layout(Constraints::tight(area.size), &mut texts);
+
+        let mut rects = RectBatch::new();
+        texts.clear();
+        bar.paint(area, &mut rects, &mut texts);
+
+        let logo_r = bar.logo_rect(area);
+        let s = logo_r.size.width;
+        // 16px 档下子像素几何, 容差取半像素。
+        let close = |a: f32, b: f32| (a - b).abs() < 0.5;
+
+        // 行号槽: 唯一朱砂矩形 (SVG x=62, y=84, w=18, h=86)。
+        let cin = rgba_of(BRAND_CINNABAR);
+        let gutters: Vec<_> = rects
+            .instance_rects()
+            .iter()
+            .zip(rects.instance_colors())
+            .filter(|(_, c)| *c == cin)
+            .map(|(r, _)| *r)
+            .collect();
+        assert_eq!(gutters.len(), 1, "朱砂行号槽应恰有一条: {gutters:?}");
+        let g = gutters[0];
+        assert!(close(g.origin.x, logo_r.origin.x + s * (62.0 / 256.0)));
+        assert!(close(g.size.height, s * (86.0 / 256.0)));
+
+        // 数据行: 六段玉色行块 (行高 18/256, 不含外框), 左段齐 x=92、
+        // 右段齐 x=144 (断口对齐 = 列对齐网格)。
+        let jade = rgba_of(BRAND_JADE);
+        let seg_h = s * (18.0 / 256.0);
+        let segs: Vec<_> = rects
+            .instance_rects()
+            .iter()
+            .zip(rects.instance_colors())
+            .filter(|(r, c)| *c == jade && close(r.size.height, seg_h))
+            .map(|(r, _)| *r)
+            .collect();
+        assert_eq!(segs.len(), 6, "三条数据行各两段, 共六块: {segs:?}");
+        let col1 = logo_r.origin.x + s * (92.0 / 256.0);
+        let col2 = logo_r.origin.x + s * (144.0 / 256.0);
+        assert_eq!(segs.iter().filter(|r| close(r.origin.x, col1)).count(), 3);
+        assert_eq!(segs.iter().filter(|r| close(r.origin.x, col2)).count(), 3);
+
+        // 玻璃内填在位 (查看器族剪影的玻璃白)。
+        let glass = rgba_of(LOGO_GLASS_FILL);
+        assert!(rects.instance_colors().contains(&glass), "缺玻璃白内填");
     }
 }
