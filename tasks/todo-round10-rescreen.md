@@ -34,13 +34,13 @@
 
 ### Checkpoint 1：存量处置建议确认
 
-- [ ] 两行台账完整可复核
-- [ ] 用户对 dropshelf / luoban 给出「继续 / 埋掉」明确裁决
-- [ ] 未获裁决不执行任何处置
+- [x] 两行台账完整可复核
+- [x] 用户对 dropshelf / luoban 给出「继续 / 埋掉」明确裁决（2026-10-20：**两件均埋掉**）
+- [x] 未获裁决不执行任何处置
 
 ## Phase 2：round9 幸存者
 
-- [ ] **Task 3：复审 物格 + 徒弟**
+- [x] **Task 3：复审 物格 + 徒弟**
   - Description：两条各走 Gate 0→1→2→3。第一证据源为 round9 深卷、0→1 卷与 redteam 卷；只做增量查证。
   - Acceptance：
     - [ ] 每条一行，Gate 1 判定 + 理由
@@ -52,7 +52,7 @@
   - Files：`danqing/docs/intent/round10-rescreen-2026-10-20.md`
   - Scope：M
 
-- [ ] **Task 4：复审 A2 log 家族 + A3 iPhone + A4 多显示器**
+- [x] **Task 4：复审 A2 log 家族 + A3 iPhone + A4 多显示器**
   - Description：三条串行过闸。A2 是产品线延伸，A3 / A4 是载体与场景变体；重点判 Gate 1（用户会不会自己让 agent 造）。
   - Acceptance：
     - [ ] 每条一行，Gate 1 判定 + 理由
@@ -62,7 +62,7 @@
   - Files：`danqing/docs/intent/round10-rescreen-2026-10-20.md`
   - Scope：M
 
-- [ ] **Task 5：复审 5 采访员 + Hazel**
+- [x] **Task 5：复审 5 采访员 + Hazel**
   - Description：两条串行过闸。5 采访员此前未做深调研，若证据不足按「不足」落行，不硬判活。
   - Acceptance：
     - [ ] 每条一行，Gate 1 判定 + 理由
@@ -74,13 +74,13 @@
 
 ### Checkpoint 2：round9 全部有结论
 
-- [ ] 7 个条目全部落行（A1 体裁 = luoban，不重复审）
-- [ ] 每个条目 Gate 1 判定明确；活着的已走完 Gate 2 / 3
-- [ ] 死者有一句话死因 + 证据
+- [x] 7 个条目全部落行（A1 体裁 = luoban，不重复审）
+- [x] 每个条目 Gate 1 判定明确；活着的已走完 Gate 2 / 3
+- [x] 死者有一句话死因 + 证据
 
 ## Phase 3：0→1 六案
 
-- [ ] **Task 6：六案 Gate 1 快筛**
+- [x] **Task 6：六案 Gate 1 快筛**
   - Description：对 `intent-0to1-innovation-2026-10-17.md` 候选池 1–6 只做 Gate 1，产出存活名单。物格已在 Task 3 审过，此处只引用结论。
   - Acceptance：
     - [ ] 六案各一行 Gate 1 判定 + 理由
@@ -91,7 +91,7 @@
   - Files：`danqing/docs/intent/round10-rescreen-2026-10-20.md`
   - Scope：M
 
-- [ ] **Task 7：存活者走 Gate 2 / 3**
+- [x] **Task 7：存活者走 Gate 2 / 3**
   - Description：对 Task 6 存活名单逐条补 Gate 2（≥3 来源 + 日期 + 失效标志）与 Gate 3（陌生人付费）。
   - Acceptance：
     - [ ] 每个存活者 Gate 2 / 3 完整
@@ -103,12 +103,12 @@
 
 ### Checkpoint 3：0→1 全部有结论
 
-- [ ] 六案全部落行
-- [ ] 存活名单明确，且已完成 Gate 2 / 3
+- [x] 六案全部落行
+- [x] 存活名单明确，且已完成 Gate 2 / 3
 
 ## Phase 4：汇总与裁决材料
 
-- [ ] **Task 8：台账定稿 + 结论**
+- [x] **Task 8：台账定稿 + 结论**
   - Description：汇总全部行，写出总结论：候选卷（含存活者清单）或零候选记录（逐条死因 + 一句总评 + 开新域扫描请示）。
   - Acceptance：
     - [ ] 台账覆盖 C + A + B 全部条目，无遗漏
@@ -122,7 +122,7 @@
     - `danqing/docs/intent/selection-round10-intent-2026-10-20.md`
   - Scope：S
 
-- [ ] **Task 9：候选走调研三闸（仅当有候选）**
+- [x] **Task 9：候选走调研三闸（仅当有候选）**
   - Description：对每个存活候选执行调研三闸：裁决段（继续 / 放弃 / 转向 + 依据）、红队（逐条攻击）、一页粗算（渠道可见流量 × 转化 × 单价 vs 工时）。
   - Acceptance：
     - [ ] 每个候选三项齐全
