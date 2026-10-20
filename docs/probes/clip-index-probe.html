@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>片段即单位 · 产品调研</title>
+<style>
+  :root{
+    --ink:#1f2a26; --muted:#5b6b64; --paper:#eef2f0;
+    --jade:#2f6f5e; --jade-soft:#dce9e4; --cinnabar:#b6402c;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; display:grid; place-items:center;
+    background:radial-gradient(1200px 600px at 80% 0%, #f8fbf9, var(--paper));
+    color:var(--ink);
+    font:16px/1.7 "Noto Serif SC","Source Han Serif SC","Songti SC",Georgia,serif;
+    padding:32px 20px;
+  }
+  .card{
+    width:min(760px,100%); background:#fdfefd; border:1px solid #dbe5df;
+    border-radius:18px; padding:48px 52px 40px;
+    box-shadow:0 18px 50px rgba(47,111,94,.10), 0 2px 0 #eef4f1 inset;
+  }
+  .eyebrow{
+    margin:0 0 18px; color:var(--cinnabar); font-size:13px;
+    letter-spacing:.18em; font-family:system-ui,sans-serif;
+  }
+  h1{ margin:0 0 14px; font-size:34px; line-height:1.25; font-weight:700; }
+  .lede{ margin:0 0 26px; color:var(--muted); font-size:17px; }
+  ul{ margin:0 0 30px; padding:0; list-style:none; }
+  li{ position:relative; padding-left:26px; margin:12px 0; }
+  li::before{
+    content:""; position:absolute; left:0; top:.62em;
+    width:9px; height:9px; border-radius:2px; background:var(--jade);
+  }
+  .cta{ display:flex; flex-wrap:wrap; gap:12px; margin:30px 0 22px; }
+  a{ text-decoration:none; border-radius:999px; padding:13px 22px; font-size:15px;
+     font-family:system-ui,sans-serif; transition:transform .12s ease; }
+  a:hover{ transform:translateY(-1px); }
+  .primary{ background:var(--jade); color:#fff; }
+  .secondary{ background:var(--jade-soft); color:var(--jade); }
+  .foot{ margin:0; color:var(--muted); font-size:13px; font-family:system-ui,sans-serif; }
+  @media (max-width:560px){
+    .card{padding:34px 26px 30px; border-radius:14px}
+    h1{font-size:26px}
+  }
+</style>
+</head>
+<body>
+<main class="card">
+  <p class="eyebrow">产品调研 · 不销售 · 不收款</p>
+  <h1>30TB 素材，一句话找到那个镜头</h1>
+  <p class="lede">不改文件夹、不上传。本地索引，片段直接拖进时间线。</p>
+  <ul>
+    <li>按内容、台词、画面找，不靠文件名和记忆。</li>
+    <li>素材入库时透明生成代理与索引，不打断现有工作流。</li>
+    <li>片段卡直接拖进 Premiere / Resolve；Windows、本地、买断。</li>
+  </ul>
+  <div class="cta">
+    <a class="primary" href="mailto:gwhun@qq.com?subject=%E7%89%87%E6%AE%B5%E5%8D%B3%E5%8D%95%E4%BD%8D%20%E8%AE%BF%E8%B0%88%E9%A2%84%E7%BA%A6&body=%E4%BD%A0%E5%A5%BD%EF%BC%8C%E6%88%91%E6%83%B3%E8%81%8A%2015%20%E5%88%86%E9%92%9F%EF%BC%9A%E6%88%91%E7%8E%B0%E5%9C%A8%E6%80%8E%E4%B9%88%E6%89%BE%E4%B8%80%E4%B8%AA%E6%9C%88%E5%89%8D%E7%9A%84%E9%95%9C%E5%A4%B4%E2%80%A6%E2%80%A6">预约 15 分钟访谈</a>
+    <a class="secondary" href="mailto:gwhun@qq.com?subject=%E7%89%87%E6%AE%B5%E5%8D%B3%E5%8D%95%E4%BD%8D%20%C2%A599%20%E9%A2%84%E5%94%AE%E6%84%8F%E5%90%91&body=%E6%88%91%E6%84%BF%E6%84%8F%E7%99%BB%E8%AE%B0%20%C2%A599%20%E9%A2%84%E5%94%AE%E6%84%8F%E5%90%91%EF%BC%88%E4%B8%8D%E6%89%A3%E6%AC%BE%EF%BC%89%EF%BC%9A%E6%88%91%E7%9A%84%E7%B3%BB%E7%BB%9F%E6%98%AF%E2%80%A6%E2%80%A6">¥99 预售意向（不扣款）</a>
+  </div>
+  <p class="foot">这是产品调研页面，不是正式销售。预售只登记意向，不收款、不扣款。</p>
+</main>
+</body>
+</html>
