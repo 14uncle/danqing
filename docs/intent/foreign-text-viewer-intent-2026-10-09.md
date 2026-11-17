@@ -130,6 +130,24 @@
 
 **用户裁决（2026-10-09）：a** —— 进 spec。锁定：形态 **B 姊妹产品**（独立命名**不用 LogLens 前缀**；一 key 双产品=否，各自独立 key，收银台复用 log Paddle 轨）；目标=「Excel 丢行人群独立产品」；v1 刀刃=行数可信/截断可见+RFC4180+GBK+列对齐+mmap 秒开只读；失效标志全档写进 spec（intent 编号 ⑤ 有重叠，spec 内理顺为 FM1–FM8 共 8 条 = 原 2 + D3 3 + 补环 3，总失效并入 FM2）；发布 hold 至 10-21 回填后；让位条款生效（Paddle 落地→log v1.x 优先，暂停点=spec 完成、build 未起）。spec **已获批**（2026-10-09 用户「go」，四题按推荐落定：名=PlainSight（明见）/免费层+买断/搜索 v1.x/csv.rs 入 logfile）：`danqing-plainsight/docs/specs/foreign-text-viewer-spec-v1-2026-10-09.md`（2026-10-09 迁入产品仓）。
 
+## 站台四件批裁决补环（2026-10-13，interview-me 会话）
+
+**起因**：用户问「plainsight 还缺什么 → 产品本体」；interview-me 盘缺（目标用户 day-one 工作流 × 竞品站台双尺）→ 确认意图书「站台四件批」，用户「go」（分档处置批准）。
+
+**裁决（分档）**：
+
+1. **四件进 v1（免费层站台）**：查找（Ctrl+F）/ 复制（Ctrl+C）/ 跳行（Ctrl+G）/ 拖放打开 —— 理由：day-one 动作链死角（「看得到找不到 / 拿不走 / 跳不过 / 拖不开」），竞品（EmEditor/SmoothCSV/Modern CSV/Rons/Excel）全员标配；免费层站台不齐 = 把目标用户送回 Excel。
+2. **过滤立 v1.x 账**：「整理」是买断层天然刀口素材（付费实证在编辑器/整理侧），刀口未定前不进 v1。
+3. **问题定位单裁挂号**：差异化（竞品全员没有），本轮不动。
+4. **小站台立账不进**：重载变更文件 / 最近文件。
+5. **不跟竞品**（红线确认）：排序（行序=数据语义）/ 导出另存 / 编辑 / 多标签。
+
+**显式 scope 变更**：本裁决**推翻** spec 获批四开放题之「③ 全文搜索 = v1.x」——「查找」子集（字面量）进 v1；**正则暴露 / 替换仍 v1.x**。产品 spec「Ask first：范围增删（搜索等）」一问已问已答（2026-10-13，用户「go」）。
+
+**拖放挂账订正**：产品 spec 入口本含拖放（L57），挂账因「等框架 drop 事件」——框架事件已在（danqing `Event::FileDropped`，`window/event.rs`），挂账销账，站台四件批接线。
+
+**不变项**：FM1–FM8 全档不动；发布 hold 至 10-21 不动；刀口（免费层+买断锚 $29/$59）不动；只读红线不动。
+
 ## 执行进度
 
 | 步骤 | 状态 |
@@ -146,4 +164,7 @@
 | 建仓 danqing-plainsight（六件套+lock 钉 rev） | ✅ 2026-10-09（零 commit 待收口点头） |
 | build T1 引擎 csv.rs（danqing-logfile） | ✅ 2026-10-10 C1 过（28 新测/127 全绿/clippy 零警告） |
 | build T2–T8（/build auto 全跑） | ✅ 2026-10-10 C2/C3/C4 全过（40 测全绿；8 提交含 init；1.2GB 开 94ms 实测；对抗样本 8/8；便携包已出；**发布 hold 至 10-21 生效**） |
-| review + code-simplify（五阶段余两段） | 待办 |
+| review + code-simplify（五阶段余两段） | ✅ 2026-10-10 全闭（双路评审 Critical×4+Required×12 全修；simplify 4 项零变化；详见产品仓 release-checklist） |
+| 人工验收 20 条 + 设置卡/悬停批收口 | ✅ 2026-10-13（产品仓 acceptance-pending.md / todo.md 在账） |
+| 站台四件批裁决（interview-me 盘缺→分档） | ✅ 2026-10-13（见「站台四件批裁决补环」段） |
+| 站台四件批 spec（五阶段之一） | 进行中 2026-10-13（`danqing-plainsight/docs/specs/find-copy-goto-drop-spec-v1-2026-10-13.md`） |
