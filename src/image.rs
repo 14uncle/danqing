@@ -1,10 +1,11 @@
 //! @author 十四叔
 //! @date 2026/09/10
 //!
-//! 图像处理工具: RGBA 降采样、等比缩进。
+//! 图像处理工具: RGBA 降采样、等比缩进、RGBA→PNG 纯编码。
 //!
 //! 下沉自 danqing-clipboard `history_list.rs:370-423` (2026-09-10, 小件包 S3)。
-//! 纯 f32/usize 逻辑, 零依赖, 任何图片 UI 必遇。
+//! 降采样/缩进为纯 f32/usize 逻辑零依赖; encode_png 复用现有 `image` crate
+//! (png feature) 做纯内存编码 —— 不做文件 IO, 磁盘写入留在调用方 (2026-11-19, 场景 A)。
 
 /// RGBA 数据降采样到目标尺寸 (双线性插值, 平滑边缘)。
 ///
@@ -63,9 +64,127 @@ pub fn aspect_fit(w: u32, h: u32, max: f32) -> (f32, f32) {
     (w * scale, h * scale)
 }
 
+/// PNG 编码失败原因。
+///
+/// 做什么: 穷举编码前校验与编码器两类失败; 不做什么: 不含文件 IO 错误
+/// (本模块纯内存编码, 磁盘写入与清理留在调用方)。
+#[derive(Debug)]
+pub enum PngEncodeError {
+    /// 宽或高为零
+    ZeroDimension,
+    /// `width × height × 4` 算术溢出
+    DimensionOverflow,
+    /// RGBA 字节数不足以覆盖全部像素
+    BufferTooShort {
+        /// 需要的字节数 (width × height × 4)
+        need: usize,
+        /// 实际拿到的字节数
+        got: usize,
+    },
+    /// PNG 编码器返回失败 (含原因文本)
+    Encode(String),
+}
+
+impl std::fmt::Display for PngEncodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PngEncodeError::ZeroDimension => write!(f, "宽或高为零"),
+            PngEncodeError::DimensionOverflow => write!(f, "width × height × 4 算术溢出"),
+            PngEncodeError::BufferTooShort { need, got } => {
+                write!(f, "RGBA 字节数不足: 需要 {need}, 实际 {got}")
+            }
+            PngEncodeError::Encode(e) => write!(f, "PNG 编码器失败: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for PngEncodeError {}
+
+/// RGBA 像素编码为 PNG 字节 (无损 RGBA8, 纯内存)。
+///
+/// 做什么: 把 `width × height × 4` 的原始 RGBA 编码成 PNG 文件字节,
+/// 保留原始宽高与全部像素, 不缩放不裁切。
+/// 不做什么: 不写文件、不碰磁盘; 文件路径与 IO 留在调用方。
+/// 为什么: 场景导出需要真实 PNG 文件, 历史存储链路的 raw RGBA 格式不受影响
+/// (danqing-clipboard 场景 A, 2026-11-19)。
+///
+/// `rgba` 只要求长度覆盖 `width × height × 4`, 多余字节忽略;
+/// 零尺寸、算术溢出、长度不足返回显式错误, 不 panic。
+pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, PngEncodeError> {
+    if width == 0 || height == 0 {
+        return Err(PngEncodeError::ZeroDimension);
+    }
+    let need = (width as u64)
+        .checked_mul(height as u64)
+        .and_then(|px| px.checked_mul(4))
+        .ok_or(PngEncodeError::DimensionOverflow)? as usize;
+    if rgba.len() < need {
+        return Err(PngEncodeError::BufferTooShort {
+            need,
+            got: rgba.len(),
+        });
+    }
+    use image::codecs::png::PngEncoder;
+    use image::{ExtendedColorType, ImageEncoder};
+
+    let mut out = Vec::new();
+    PngEncoder::new(&mut out)
+        .write_image(&rgba[..need], width, height, ExtendedColorType::Rgba8)
+        .map_err(|e| PngEncodeError::Encode(e.to_string()))?;
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encode_png_roundtrip_2x2() {
+        // 2×2 已知 RGBA → 编码 → 解码回验: 尺寸与像素一致
+        let rgba = vec![
+            255, 0, 0, 255, // (0,0) 红
+            0, 255, 0, 128, // (1,0) 绿半透明
+            0, 0, 255, 255, // (0,1) 蓝
+            255, 255, 255, 0, // (1,1) 全透明
+        ];
+        let png = encode_png(2, 2, &rgba).expect("编码应成功");
+        let img = image::load_from_memory(&png).expect("PNG 应可解码");
+        assert_eq!((img.width(), img.height()), (2, 2), "尺寸保持");
+        assert_eq!(img.to_rgba8().into_raw(), rgba, "像素逐字节一致 (RGBA8)");
+    }
+
+    #[test]
+    fn encode_png_zero_dimension_rejected() {
+        assert!(matches!(
+            encode_png(0, 1, &[]),
+            Err(PngEncodeError::ZeroDimension)
+        ));
+        assert!(matches!(
+            encode_png(1, 0, &[]),
+            Err(PngEncodeError::ZeroDimension)
+        ));
+    }
+
+    #[test]
+    fn encode_png_short_buffer_rejected() {
+        // 2×2 需要 16 字节, 只给 15
+        let mut rgba = vec![0u8; 15];
+        rgba[0] = 1;
+        assert!(matches!(
+            encode_png(2, 2, &rgba),
+            Err(PngEncodeError::BufferTooShort { need: 16, got: 15 })
+        ));
+    }
+
+    #[test]
+    fn encode_png_dimension_overflow_rejected() {
+        // u32::MAX × u32::MAX × 4 在 u64 也算不下, 必须显式错误不 panic
+        let rgba = [0u8; 4];
+        assert!(matches!(
+            encode_png(u32::MAX, u32::MAX, &rgba),
+            Err(PngEncodeError::DimensionOverflow)
+        ));
+    }
 
     #[test]
     fn aspect_fit_scales_into_box() {
