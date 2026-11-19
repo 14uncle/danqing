@@ -191,6 +191,14 @@ type HookHandler = Box<dyn Fn(HookKey) -> HookDecision + Send>;
 
 static HANDLER: Mutex<Option<HookHandler>> = Mutex::new(None);
 
+/// 清除全局 handler。
+///
+/// 锁中毒也必须清——否则后续安装永远报「已安装」(评审 O-4)。
+fn clear_handler() {
+    let mut guard = HANDLER.lock().unwrap_or_else(|p| p.into_inner());
+    *guard = None;
+}
+
 /// 键盘钩子句柄: drop 即注销钩子并回收钩子线程。
 pub struct KeyboardHookHandle {
     thread_id: u32,
@@ -222,9 +230,7 @@ impl KeyboardHookHandle {
             }
             let _ = t.join();
         }
-        // 锁中毒也必须清 handler, 否则后续安装永远报「已安装」(评审 O-4)
-        let mut guard = HANDLER.lock().unwrap_or_else(|p| p.into_inner());
-        *guard = None;
+        clear_handler();
     }
 }
 
@@ -266,14 +272,12 @@ where
         }),
         Ok(Err(e)) => {
             let _ = thread.join();
-            let mut guard = HANDLER.lock().unwrap_or_else(|p| p.into_inner());
-            *guard = None;
+            clear_handler();
             Err(std::io::Error::other(e))
         }
         Err(_) => {
             let _ = thread.join();
-            let mut guard = HANDLER.lock().unwrap_or_else(|p| p.into_inner());
-            *guard = None;
+            clear_handler();
             Err(std::io::Error::other("钩子线程提前退出"))
         }
     }
