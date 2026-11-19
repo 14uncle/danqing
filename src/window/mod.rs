@@ -28,6 +28,8 @@ mod fullscreen;
 mod handler;
 mod hotkey;
 mod icon;
+#[cfg(target_os = "windows")]
+pub mod keyboard_hook;
 mod opacity;
 mod passthrough;
 mod placement;
