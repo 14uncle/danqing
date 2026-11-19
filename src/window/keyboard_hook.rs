@@ -56,6 +56,23 @@ pub enum ComboEvent {
     SwallowOnly,
 }
 
+/// 一组修饰键的逐键按下态 (泛码 + 左 + 右独立跟踪)。
+///
+/// 为什么逐键: 左右同按后放开一侧时, 组布尔会被误清——双 Shift 场景会把
+/// Ctrl+Shift+V 误判成 Ctrl+V 吞键 (评审 O-2)。
+#[derive(Debug, Default)]
+struct ModState {
+    generic: bool,
+    left: bool,
+    right: bool,
+}
+
+impl ModState {
+    fn down(&self) -> bool {
+        self.generic || self.left || self.right
+    }
+}
+
 /// 物理 `Ctrl+V` (不含 Shift/Alt/Win) 匹配器。
 ///
 /// 做什么: 消费 [`HookKey`] 流, 输出 [`ComboEvent`]。
@@ -64,10 +81,10 @@ pub enum ComboEvent {
 /// 必须原样透传, 否则递归触发。
 #[derive(Debug, Default)]
 pub struct CtrlVCombo {
-    ctrl: bool,
-    shift: bool,
-    alt: bool,
-    win: bool,
+    ctrl: ModState,
+    shift: ModState,
+    alt: ModState,
+    win: ModState,
     /// 已吞下 V 按下, 正在等自动重复/抬起
     armed: bool,
 }
@@ -84,20 +101,48 @@ impl CtrlVCombo {
             return ComboEvent::None;
         }
         match key.vk {
-            VK_CONTROL | VK_LCONTROL | VK_RCONTROL => {
-                self.ctrl = key.down;
+            VK_CONTROL => {
+                self.ctrl.generic = key.down;
                 ComboEvent::None
             }
-            VK_SHIFT | VK_LSHIFT | VK_RSHIFT => {
-                self.shift = key.down;
+            VK_LCONTROL => {
+                self.ctrl.left = key.down;
                 ComboEvent::None
             }
-            VK_MENU | VK_LMENU | VK_RMENU => {
-                self.alt = key.down;
+            VK_RCONTROL => {
+                self.ctrl.right = key.down;
                 ComboEvent::None
             }
-            VK_LWIN | VK_RWIN => {
-                self.win = key.down;
+            VK_SHIFT => {
+                self.shift.generic = key.down;
+                ComboEvent::None
+            }
+            VK_LSHIFT => {
+                self.shift.left = key.down;
+                ComboEvent::None
+            }
+            VK_RSHIFT => {
+                self.shift.right = key.down;
+                ComboEvent::None
+            }
+            VK_MENU => {
+                self.alt.generic = key.down;
+                ComboEvent::None
+            }
+            VK_LMENU => {
+                self.alt.left = key.down;
+                ComboEvent::None
+            }
+            VK_RMENU => {
+                self.alt.right = key.down;
+                ComboEvent::None
+            }
+            VK_LWIN => {
+                self.win.left = key.down;
+                ComboEvent::None
+            }
+            VK_RWIN => {
+                self.win.right = key.down;
                 ComboEvent::None
             }
             VK_V => {
@@ -105,7 +150,11 @@ impl CtrlVCombo {
                     if self.armed {
                         // 按住 V 的自动重复: 吞键, 不重复触发
                         ComboEvent::SwallowOnly
-                    } else if self.ctrl && !self.shift && !self.alt && !self.win {
+                    } else if self.ctrl.down()
+                        && !self.shift.down()
+                        && !self.alt.down()
+                        && !self.win.down()
+                    {
                         self.armed = true;
                         ComboEvent::Matched
                     } else {
@@ -130,8 +179,9 @@ use std::sync::Mutex;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetMessageW, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG, PostThreadMessageW,
-    SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_QUIT, WM_SYSKEYDOWN,
+    CallNextHookEx, GetMessageW, KBDLLHOOKSTRUCT, LLKHF_INJECTED, MSG, PM_NOREMOVE, PeekMessageW,
+    PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN,
+    WM_QUIT, WM_SYSKEYDOWN,
 };
 
 /// 钩子事件处理器: 同步裁决吞键/透传。
@@ -156,13 +206,25 @@ impl KeyboardHookHandle {
     fn stop(&mut self) {
         if let Some(t) = self.thread.take() {
             unsafe {
-                PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0);
+                // 消息队列已由 hook_thread 提前创建 (PeekMessageW), 此处失败极罕见;
+                // 有限重试防「投递丢失 → join 永久挂起」(评审 O-3)
+                let mut posted = false;
+                for _ in 0..20 {
+                    if PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0) != 0 {
+                        posted = true;
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                if !posted {
+                    log::warn!("键盘钩子 WM_QUIT 投递失败, 钩子线程可能残留");
+                }
             }
             let _ = t.join();
         }
-        if let Ok(mut guard) = HANDLER.lock() {
-            *guard = None;
-        }
+        // 锁中毒也必须清 handler, 否则后续安装永远报「已安装」(评审 O-4)
+        let mut guard = HANDLER.lock().unwrap_or_else(|p| p.into_inner());
+        *guard = None;
     }
 }
 
@@ -204,16 +266,14 @@ where
         }),
         Ok(Err(e)) => {
             let _ = thread.join();
-            if let Ok(mut guard) = HANDLER.lock() {
-                *guard = None;
-            }
+            let mut guard = HANDLER.lock().unwrap_or_else(|p| p.into_inner());
+            *guard = None;
             Err(std::io::Error::other(e))
         }
         Err(_) => {
             let _ = thread.join();
-            if let Ok(mut guard) = HANDLER.lock() {
-                *guard = None;
-            }
+            let mut guard = HANDLER.lock().unwrap_or_else(|p| p.into_inner());
+            *guard = None;
             Err(std::io::Error::other("钩子线程提前退出"))
         }
     }
@@ -239,9 +299,11 @@ fn hook_thread(tx: std::sync::mpsc::Sender<Result<u32, String>>) {
             )));
             return;
         }
+        // 强制创建本线程消息队列后再报到, 否则极早的 WM_QUIT 可能投递失败 (评审 O-3)
+        let mut msg: MSG = std::mem::zeroed();
+        PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE);
         let _ = tx.send(Ok(thread_id));
         // 消息泵: 低级钩子事件在本线程消息检索期间被投递
-        let mut msg: MSG = std::mem::zeroed();
         while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
             // LL 钩子无窗口消息需要 Dispatch, 泵本身即投递机制
         }
@@ -259,10 +321,13 @@ unsafe extern "system" fn hook_proc(n_code: i32, w_param: usize, l_param: isize)
                 down,
                 injected: kb.flags & LLKHF_INJECTED != 0,
             };
-            let decision = HANDLER
-                .lock()
-                .ok()
-                .and_then(|guard| guard.as_ref().map(|handler| handler(key)));
+            let decision = HANDLER.lock().ok().and_then(|guard| {
+                guard.as_ref().and_then(|handler| {
+                    // handler panic 不得穿越 extern "system" 边界 (会 abort 进程),
+                    // 捕获后按透传处理 (评审 O-4)
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(key))).ok()
+                })
+            });
             if matches!(decision, Some(HookDecision::Swallow)) {
                 return 1;
             }
@@ -291,6 +356,30 @@ mod tests {
             ComboEvent::None
         ));
         assert!(matches!(combo.feed(&key(VK_V, true)), ComboEvent::Matched));
+    }
+
+    #[test]
+    fn side_modifier_keys_match_independently() {
+        // 真实 LL 钩子报 VK_LCONTROL/VK_RCONTROL, 泛码只在非 LL 场景出现
+        for vk in [VK_LCONTROL, VK_RCONTROL] {
+            let mut combo = CtrlVCombo::new();
+            combo.feed(&key(vk, true));
+            assert!(
+                matches!(combo.feed(&key(VK_V, true)), ComboEvent::Matched),
+                "vk={vk:#x} 应命中"
+            );
+        }
+    }
+
+    #[test]
+    fn dual_shift_release_one_keeps_exclusion() {
+        // 双 Shift 同按后放开一侧: 组仍视为 Shift 按下, 不得误判成 Ctrl+V (评审 O-2)
+        let mut combo = CtrlVCombo::new();
+        combo.feed(&key(VK_CONTROL, true));
+        combo.feed(&key(VK_LSHIFT, true));
+        combo.feed(&key(VK_RSHIFT, true));
+        combo.feed(&key(VK_RSHIFT, false));
+        assert!(matches!(combo.feed(&key(VK_V, true)), ComboEvent::None));
     }
 
     #[test]
