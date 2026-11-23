@@ -191,53 +191,167 @@ pub fn paste_into_previous(prev_foreground: Option<HWND>, timeout: std::time::Du
     simulate_paste();
 }
 
-/// 获取当前前台窗口的进程名 (如 "notepad.exe")。
-///
-/// 失败返回 None (无前台窗口 / 权限不足 / API 调用失败)。不取本进程自己。
-pub fn foreground_process_name() -> Option<String> {
+/// 取窗口所属进程 id；空句柄或查询失败返回 None。
+fn process_id_for_hwnd(hwnd: HWND) -> Option<u32> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+
+    if hwnd.is_null() {
+        return None;
+    }
+    let mut process_id = 0u32;
+    let result = unsafe { GetWindowThreadProcessId(hwnd, &mut process_id) };
+    (result != 0 && process_id != 0).then_some(process_id)
+}
+
+/// 取窗口进程的文件名，不返回完整路径，不排除当前进程。
+fn process_file_name_for_hwnd(hwnd: HWND) -> Option<String> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
-        GetCurrentProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        QueryFullProcessImageNameW,
-    };
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowThreadProcessId,
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
     };
 
+    let process_id = process_id_for_hwnd(hwnd)?;
     unsafe {
-        let hwnd = GetForegroundWindow();
-        if hwnd.is_null() {
-            return None;
-        }
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(hwnd, &mut pid);
-        if pid == 0 {
-            return None;
-        }
-        // 不取自己进程的名称 (监听线程的前台没意义)
-        if pid == GetCurrentProcessId() {
-            return None;
-        }
-
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id);
         if handle.is_null() {
             return None;
         }
         let result = (|| {
-            let mut buf = [0u16; 260];
-            let mut size = buf.len() as u32;
-            // PROCESS_NAME_FORMAT(0) = 0: 返回完整映像路径
-            let ok = QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut size);
-            if ok == 0 {
+            let mut buffer = [0u16; 260];
+            let mut size = buffer.len() as u32;
+            if QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size) == 0 {
                 return None;
             }
-            let path = String::from_utf16_lossy(&buf[..size as usize]);
-            // 取最后的文件名部分
+            let path = String::from_utf16_lossy(&buffer[..size as usize]);
             path.rsplit(['\\', '/']).next().map(str::to_string)
         })();
         let _ = CloseHandle(handle);
         result
     }
+}
+
+/// 获取当前前台窗口的进程名 (如 "notepad.exe")。
+///
+/// 失败返回 None (无前台窗口 / 权限不足 / API 调用失败)。不取本进程自己。
+pub fn foreground_process_name() -> Option<String> {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+    let hwnd = unsafe { GetForegroundWindow() };
+    let process_id = process_id_for_hwnd(hwnd)?;
+    if process_id == unsafe { GetCurrentProcessId() } {
+        return None;
+    }
+    process_file_name_for_hwnd(hwnd)
+}
+
+/// 剪贴板 owner 及其进程唯一可见窗口标题（只读内存结果）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClipboardOwnerInfo {
+    /// owner 进程文件名，不含完整路径。
+    pub process_name: String,
+    /// owner 进程下恰好一个可见顶层窗口的非空标题；零/多候选为 None。
+    pub window_title: Option<String>,
+}
+
+/// 同进程可见窗口标题候选中，仅允许唯一非空标题，避免多窗口猜错来源。
+fn unique_visible_window_title(titles: &[String]) -> Option<String> {
+    let mut titles = titles
+        .iter()
+        .map(|title| title.trim())
+        .filter(|title| !title.is_empty());
+    let first = titles.next()?;
+    if titles.next().is_some() {
+        return None;
+    }
+    Some(first.to_string())
+}
+
+/// 以 200ms 超时读取窗口标题，源窗口挂起不会无限卡住调用线程。
+fn bounded_window_title(hwnd: HWND) -> Option<String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_GETTEXT,
+    };
+
+    if hwnd.is_null() {
+        return None;
+    }
+    let mut buffer = [0u16; 1024];
+    let mut result_length = 0usize;
+    let ok = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXT,
+            buffer.len(),
+            buffer.as_mut_ptr() as isize,
+            SMTO_ABORTIFHUNG,
+            200,
+            &mut result_length,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    let length = result_length.min(buffer.len().saturating_sub(1));
+    Some(String::from_utf16_lossy(&buffer[..length]))
+}
+
+/// EnumWindows 的收集状态；只保留同进程、可见且可读到的非空标题候选。
+struct VisibleWindowTitles {
+    process_id: u32,
+    titles: Vec<String>,
+}
+
+unsafe extern "system" fn collect_visible_window_title(hwnd: HWND, data: isize) -> i32 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+
+    let state = unsafe { &mut *(data as *mut VisibleWindowTitles) };
+    if process_id_for_hwnd(hwnd) != Some(state.process_id) {
+        return 1;
+    }
+    if unsafe { IsWindowVisible(hwnd) } == 0 {
+        return 1;
+    }
+    if let Some(title) = bounded_window_title(hwnd)
+        && !title.trim().is_empty()
+    {
+        state.titles.push(title);
+    }
+    1
+}
+
+/// 枚举指定进程可见顶层窗口标题；不假定剪贴板 owner 根窗口就是主窗口。
+fn visible_process_window_titles(process_id: u32) -> Vec<String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::EnumWindows;
+
+    let mut state = VisibleWindowTitles {
+        process_id,
+        titles: Vec::new(),
+    };
+    unsafe {
+        let _ = EnumWindows(
+            Some(collect_visible_window_title),
+            &mut state as *mut VisibleWindowTitles as isize,
+        );
+    }
+    state.titles
+}
+
+/// 读取剪贴板 owner 进程与同进程唯一可见窗口标题。
+///
+/// 只读快照，不打开/写入剪贴板，不注入输入。owner 或进程查询失败返回 None；
+/// 窗口枚举/标题失败、零候选或多候选仅让 `window_title` 为 None。
+pub fn clipboard_owner_info() -> Option<ClipboardOwnerInfo> {
+    use windows_sys::Win32::System::DataExchange::GetClipboardOwner;
+
+    let owner = unsafe { GetClipboardOwner() };
+    let process_id = process_id_for_hwnd(owner)?;
+    let process_name = process_file_name_for_hwnd(owner)?;
+    let titles = visible_process_window_titles(process_id);
+    Some(ClipboardOwnerInfo {
+        process_name,
+        window_title: unique_visible_window_title(&titles),
+    })
 }
 
 /// 把窗口抢到前台 + 提到顶层 (Windows)。对后台常驻进程同样有效。
@@ -384,6 +498,24 @@ pub(crate) fn hwnd_of(window: &Window) -> Option<HWND> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn visible_window_title_requires_one_nonempty_candidate() {
+        assert_eq!(super::unique_visible_window_title(&[]), None);
+        assert_eq!(
+            super::unique_visible_window_title(&["  唯一标题  ".to_string()]).as_deref(),
+            Some("唯一标题")
+        );
+        assert_eq!(
+            super::unique_visible_window_title(&["   ".to_string()]),
+            None
+        );
+        assert_eq!(
+            super::unique_visible_window_title(&["相同标题".to_string(), "相同标题".to_string()]),
+            None,
+            "两个窗口即使标题相同也不能猜作唯一来源"
+        );
+    }
+
     /// 冒烟测试：隐藏窗口上调用不 panic、不产生可见副作用。
     /// (SetForegroundWindow/BringWindowToTop 对隐藏窗口均静默无效。)
     ///

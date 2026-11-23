@@ -27,6 +27,13 @@ pub trait ClipSource {
     fn html(&mut self) -> Option<String> {
         None
     }
+    /// 读原始 Windows CF_HTML（含 Version/SourceURL 头部与 fragment）。
+    ///
+    /// 与 [`ClipSource::html`] 的 fragment 视图不同，本方法保留完整头部；
+    /// 非 Windows、无格式、编码或平台读取失败返回 None。
+    fn raw_html(&mut self) -> Option<String> {
+        None
+    }
     /// 读文件路径列表 (CF_HDROP); 非文件剪贴板或读失败返回 None。
     fn files(&mut self) -> Option<Vec<String>> {
         None
@@ -156,6 +163,11 @@ impl ClipSource for SystemClipSource {
         self.clipboard.get().html().ok()
     }
 
+    #[cfg(target_os = "windows")]
+    fn raw_html(&mut self) -> Option<String> {
+        read_raw_cf_html()
+    }
+
     fn set_html(&mut self, html: &str, alt_text: &str) -> Result<(), ClipWriteError> {
         self.clipboard
             .set_html(html, Some(alt_text))
@@ -231,6 +243,59 @@ impl ClipSource for SystemClipSource {
     }
 }
 
+/// 原始 CF_HTML 字节 → 完整 UTF-8 文本；只去掉格式末尾的 NUL，不截断其他内容。
+#[cfg(any(target_os = "windows", test))]
+fn decode_raw_cf_html(bytes: &[u8]) -> Option<String> {
+    let end = bytes
+        .iter()
+        .rposition(|byte| *byte != 0)
+        .map_or(0, |index| index + 1);
+    std::str::from_utf8(&bytes[..end]).ok().map(str::to_string)
+}
+
+/// Win32 读取完整 CF_HTML，保留 arboard fragment 视图会剥掉的头部。
+#[cfg(target_os = "windows")]
+fn read_raw_cf_html() -> Option<String> {
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+        RegisterClipboardFormatW,
+    };
+    use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+
+    let format_name = "HTML Format"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    unsafe {
+        let format = RegisterClipboardFormatW(format_name.as_ptr());
+        if format == 0
+            || IsClipboardFormatAvailable(format) == 0
+            || OpenClipboard(std::ptr::null_mut()) == 0
+        {
+            return None;
+        }
+        let bytes = (|| {
+            let memory = GetClipboardData(format);
+            if memory.is_null() {
+                return None;
+            }
+            let size = GlobalSize(memory);
+            if size == 0 {
+                return Some(Vec::new());
+            }
+            let pointer = GlobalLock(memory);
+            if pointer.is_null() {
+                return None;
+            }
+            let bytes = std::slice::from_raw_parts(pointer.cast::<u8>(), size).to_vec();
+            let _ = GlobalUnlock(memory);
+            Some(bytes)
+        })();
+        let _ = CloseClipboard();
+        decode_raw_cf_html(&bytes?)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +326,36 @@ mod tests {
         let mut odd = vec![1u8, 2, 3];
         ensure_opaque_alpha(&mut odd); // 非 4 倍数长度不 panic
         assert_eq!(odd, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn raw_cf_html_decode_preserves_header_and_fragment() {
+        let raw = b"Version:0.9\r\nSourceURL:https://example.com\r\n<html><body>fragment</body></html>\0\0";
+        assert_eq!(
+            decode_raw_cf_html(raw).as_deref(),
+            Some(
+                "Version:0.9\r\nSourceURL:https://example.com\r\n<html><body>fragment</body></html>"
+            )
+        );
+        assert_eq!(
+            decode_raw_cf_html(b"\xff\0"),
+            None,
+            "非法 UTF-8 不得截断冒充"
+        );
+    }
+
+    #[test]
+    fn raw_cf_html_defaults_to_unavailable_for_read_only_source() {
+        struct TextOnly;
+        impl ClipSource for TextOnly {
+            fn sequence(&mut self) -> u32 {
+                0
+            }
+            fn text(&mut self) -> Option<String> {
+                Some("文本".into())
+            }
+        }
+        assert!(TextOnly.raw_html().is_none());
     }
 
     /// 真实系统源: 无 GUI 环境 (CI) 下 new 可能失败或读失败, 只验证不 panic。
