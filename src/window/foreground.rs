@@ -267,6 +267,16 @@ fn unique_visible_window_title(titles: &[String]) -> Option<String> {
     Some(first.to_string())
 }
 
+/// WM_GETTEXT 缓冲区 → 标题；报告长度可能包含尾部 NUL，首个 NUL 即终止。
+fn decode_window_title(buffer: &[u16], reported_length: usize) -> String {
+    let units = &buffer[..reported_length.min(buffer.len())];
+    let end = units
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(units.len());
+    String::from_utf16_lossy(&units[..end])
+}
+
 /// 以 200ms 超时读取窗口标题，源窗口挂起不会无限卡住调用线程。
 fn bounded_window_title(hwnd: HWND) -> Option<String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -292,8 +302,7 @@ fn bounded_window_title(hwnd: HWND) -> Option<String> {
     if ok == 0 {
         return None;
     }
-    let length = result_length.min(buffer.len().saturating_sub(1));
-    Some(String::from_utf16_lossy(&buffer[..length]))
+    Some(decode_window_title(&buffer, result_length))
 }
 
 /// EnumWindows 的收集状态；只保留同进程、可见且可读到的非空标题候选。
@@ -514,6 +523,17 @@ mod tests {
             None,
             "两个窗口即使标题相同也不能猜作唯一来源"
         );
+    }
+
+    #[test]
+    fn window_title_decode_stops_at_trailing_nul() {
+        let units = "标题"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        assert_eq!(super::decode_window_title(&units, units.len()), "标题");
+        let plain = "无终止符".encode_utf16().collect::<Vec<_>>();
+        assert_eq!(super::decode_window_title(&plain, plain.len()), "无终止符");
     }
 
     /// 冒烟测试：隐藏窗口上调用不 panic、不产生可见副作用。
