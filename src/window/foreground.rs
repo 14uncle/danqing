@@ -267,6 +267,11 @@ fn unique_visible_window_title(titles: &[String]) -> Option<String> {
     Some(first.to_string())
 }
 
+/// 标题长度（不含 NUL）是否无法连同终止符放入缓冲区。
+fn title_would_truncate(required: usize, capacity: usize) -> bool {
+    required >= capacity
+}
+
 /// WM_GETTEXT 缓冲区 → 标题；报告长度可能包含尾部 NUL，首个 NUL 即终止。
 fn decode_window_title(buffer: &[u16], reported_length: usize) -> String {
     let units = &buffer[..reported_length.min(buffer.len())];
@@ -280,13 +285,28 @@ fn decode_window_title(buffer: &[u16], reported_length: usize) -> String {
 /// 以 200ms 超时读取窗口标题，源窗口挂起不会无限卡住调用线程。
 fn bounded_window_title(hwnd: HWND) -> Option<String> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_GETTEXT,
+        SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_GETTEXT, WM_GETTEXTLENGTH,
     };
 
     if hwnd.is_null() {
         return None;
     }
     let mut buffer = [0u16; 1024];
+    let mut required_length = 0usize;
+    let length_ok = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXTLENGTH,
+            0,
+            0,
+            SMTO_ABORTIFHUNG,
+            200,
+            &mut required_length,
+        )
+    };
+    if length_ok == 0 || title_would_truncate(required_length, buffer.len()) {
+        return None;
+    }
     let mut result_length = 0usize;
     let ok = unsafe {
         SendMessageTimeoutW(
@@ -523,6 +543,12 @@ mod tests {
             None,
             "两个窗口即使标题相同也不能猜作唯一来源"
         );
+    }
+
+    #[test]
+    fn window_title_capacity_rejects_truncation() {
+        assert!(super::title_would_truncate(1024, 1024));
+        assert!(!super::title_would_truncate(1023, 1024));
     }
 
     #[test]
