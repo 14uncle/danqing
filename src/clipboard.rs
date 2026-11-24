@@ -34,6 +34,14 @@ pub trait ClipSource {
     fn raw_html(&mut self) -> Option<String> {
         None
     }
+    /// 按已注册格式名读取 Windows 剪贴板原始字节，调用方用 `max_bytes` 限制分配。
+    ///
+    /// 格式存在且大小不超过上限时返回完整字节（空格式返回空 Vec）；无格式、
+    /// 名称含 NUL、平台读取失败、超过上限或超过 Rust slice 安全上限均返回 None。
+    /// 本方法不解释负载，也不写剪贴板；非 Windows 与只读假源默认返回 None。
+    fn raw_format(&mut self, _format_name: &str, _max_bytes: usize) -> Option<Vec<u8>> {
+        None
+    }
     /// 读文件路径列表 (CF_HDROP); 非文件剪贴板或读失败返回 None。
     fn files(&mut self) -> Option<Vec<String>> {
         None
@@ -168,6 +176,11 @@ impl ClipSource for SystemClipSource {
         read_raw_cf_html()
     }
 
+    #[cfg(target_os = "windows")]
+    fn raw_format(&mut self, format_name: &str, max_bytes: usize) -> Option<Vec<u8>> {
+        read_raw_format(format_name, max_bytes)
+    }
+
     fn set_html(&mut self, html: &str, alt_text: &str) -> Result<(), ClipWriteError> {
         self.clipboard
             .set_html(html, Some(alt_text))
@@ -253,16 +266,31 @@ fn decode_raw_cf_html(bytes: &[u8]) -> Option<String> {
     std::str::from_utf8(&bytes[..end]).ok().map(str::to_string)
 }
 
-/// Win32 读取完整 CF_HTML，保留 arboard fragment 视图会剥掉的头部。
+/// 原始格式名必须非空且不能含 NUL，避免 Win32 以首个 NUL 截断后误读其他格式。
+#[cfg(any(target_os = "windows", test))]
+fn valid_raw_format_name(format_name: &str) -> bool {
+    !format_name.is_empty() && !format_name.contains('\0')
+}
+
+/// GlobalSize 必须同时满足调用方上限和 Rust slice 的 isize 上限，在 GlobalLock 前拒绝。
+#[cfg(any(target_os = "windows", test))]
+fn raw_size_within_limit(size: usize, max_bytes: usize) -> bool {
+    size <= max_bytes && size <= isize::MAX as usize
+}
+
+/// Win32 按已注册格式名读取完整字节；只读剪贴板，不解释负载。
 #[cfg(target_os = "windows")]
-fn read_raw_cf_html() -> Option<String> {
+fn read_raw_format(format_name: &str, max_bytes: usize) -> Option<Vec<u8>> {
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
         RegisterClipboardFormatW,
     };
     use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 
-    let format_name = "HTML Format"
+    if !valid_raw_format_name(format_name) {
+        return None;
+    }
+    let format_name = format_name
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
@@ -280,6 +308,9 @@ fn read_raw_cf_html() -> Option<String> {
                 return None;
             }
             let size = GlobalSize(memory);
+            if !raw_size_within_limit(size, max_bytes) {
+                return None;
+            }
             if size == 0 {
                 return Some(Vec::new());
             }
@@ -292,8 +323,15 @@ fn read_raw_cf_html() -> Option<String> {
             Some(bytes)
         })();
         let _ = CloseClipboard();
-        decode_raw_cf_html(&bytes?)
+        bytes
     }
+}
+
+/// Win32 读取完整 CF_HTML，保留 arboard fragment 视图会剥掉的头部。
+#[cfg(target_os = "windows")]
+fn read_raw_cf_html() -> Option<String> {
+    let bytes = read_raw_format("HTML Format", usize::MAX)?;
+    decode_raw_cf_html(&bytes)
 }
 
 #[cfg(test)]
@@ -342,6 +380,38 @@ mod tests {
             None,
             "非法 UTF-8 不得截断冒充"
         );
+    }
+
+    #[test]
+    fn raw_format_name_rejects_empty_and_interior_nul() {
+        assert!(valid_raw_format_name("HTML Format"));
+        assert!(valid_raw_format_name("JAVA_DATAFLAVOR:application/example"));
+        assert!(!valid_raw_format_name(""));
+        assert!(!valid_raw_format_name("bad\0name"));
+    }
+
+    #[test]
+    fn raw_format_size_limit_is_checked_before_allocation() {
+        assert!(raw_size_within_limit(0, 0));
+        assert!(raw_size_within_limit(306, 4096));
+        assert!(raw_size_within_limit(4096, 4096));
+        assert!(!raw_size_within_limit(4097, 4096));
+        assert!(!raw_size_within_limit(1, 0));
+        assert!(!raw_size_within_limit(isize::MAX as usize + 1, usize::MAX));
+    }
+
+    #[test]
+    fn raw_format_defaults_to_unavailable_for_read_only_source() {
+        struct TextOnly;
+        impl ClipSource for TextOnly {
+            fn sequence(&mut self) -> u32 {
+                0
+            }
+            fn text(&mut self) -> Option<String> {
+                Some("文本".into())
+            }
+        }
+        assert_eq!(TextOnly.raw_format("HTML Format", 4096), None);
     }
 
     #[test]
