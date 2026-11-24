@@ -325,6 +325,15 @@ fn bounded_window_title(hwnd: HWND) -> Option<String> {
     Some(decode_window_title(&buffer, result_length))
 }
 
+/// 按调用方给定的窗口句柄读取完整标题（只读）。
+///
+/// 复用 200ms `SendMessageTimeoutW` 与 1024 UTF-16 单元容量：空句柄、超时、
+/// 读取失败或可能截断均返回 `None`。不枚举其他窗口，也不读取当前前台替代
+/// 触发句柄；调用方负责保证 HWND 的生命周期与目标上下文一致。
+pub fn window_title_for_hwnd(hwnd: HWND) -> Option<String> {
+    bounded_window_title(hwnd)
+}
+
 /// EnumWindows 的收集状态；只保留同进程、可见且可读到的非空标题候选。
 struct VisibleWindowTitles {
     process_id: u32,
@@ -549,6 +558,11 @@ mod tests {
     fn window_title_capacity_rejects_truncation() {
         assert!(super::title_would_truncate(1024, 1024));
         assert!(!super::title_would_truncate(1023, 1024));
+    }
+
+    #[test]
+    fn window_title_for_hwnd_rejects_null_without_win32_call() {
+        assert_eq!(super::window_title_for_hwnd(std::ptr::null_mut()), None);
     }
 
     #[test]
