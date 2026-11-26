@@ -35,15 +35,25 @@ pub enum HintError {
 ///
 /// 纯函数; 空文本保留一个空行, 由绘制侧按空行测量。
 fn split_hint_lines(text: &str) -> Vec<String> {
-    let mut lines: Vec<String> = text
-        .split('\n')
+    text.split('\n')
         .take(4)
         .map(|line| line.strip_suffix('\r').unwrap_or(line).to_string())
-        .collect();
-    if lines.is_empty() {
-        lines.push(String::new());
+        .collect()
+}
+
+/// 客户区插入符矩形 → 屏幕锚点 (右下角)。
+///
+/// `GUITHREADINFO.rcCaret` 是相对 `hwndCaret` 的**客户区**坐标, 必须先换算到屏幕;
+/// 换算函数由调用方注入, 便于纯逻辑测试锁定换算方向。
+fn caret_anchor_point(
+    rect: (i32, i32, i32, i32),
+    to_screen: impl FnOnce((i32, i32)) -> Option<(i32, i32)>,
+) -> Option<(i32, i32)> {
+    let (left, top, right, bottom) = rect;
+    if right < left || bottom < top {
+        return None;
     }
-    lines
+    to_screen((right, bottom))
 }
 
 /// 96 DPI 基准缩放因子, 最小 1 倍。
@@ -53,14 +63,37 @@ fn scale_for_dpi(dpi: i32) -> i32 {
 
 /// 锚点 + 偏移 → 提示窗左上角, 钳进工作区。
 ///
-/// 纯函数; 窗口比工作区还大时贴工作区左上, 不遮挡锚点由偏移量保证。
+/// 默认放在锚点右下方; 钳制后若窗口会压住锚点, 改放锚点上方。
+/// 上下都放不下 (工作区太小或锚点贴满) 时保留先钳制结果并接受遮挡。
 fn position_with_work(
     anchor: (i32, i32),
     offset: (i32, i32),
     size: (i32, i32),
     work: (i32, i32, i32, i32),
 ) -> (i32, i32) {
-    super::placement::clamp_into_work_area((anchor.0 + offset.0, anchor.1 + offset.1), size, work)
+    let below = super::placement::clamp_into_work_area(
+        (anchor.0 + offset.0, anchor.1 + offset.1),
+        size,
+        work,
+    );
+    if !covers_anchor(below, size, anchor) {
+        return below;
+    }
+    let above = super::placement::clamp_into_work_area(
+        (anchor.0 + offset.0, anchor.1 - offset.1 - size.1),
+        size,
+        work,
+    );
+    if covers_anchor(above, size, anchor) {
+        below
+    } else {
+        above
+    }
+}
+
+/// 窗口矩形是否覆盖锚点 (右/下边界为开区间)。
+fn covers_anchor(pos: (i32, i32), size: (i32, i32), anchor: (i32, i32)) -> bool {
+    pos.0 <= anchor.0 && anchor.0 < pos.0 + size.0 && pos.1 <= anchor.1 && anchor.1 < pos.1 + size.1
 }
 
 #[cfg(target_os = "windows")]
@@ -73,27 +106,29 @@ mod win {
         COLORREF, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
     };
     use windows_sys::Win32::Graphics::Gdi::{
-        BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CreateFontW, CreateRoundRectRgn,
-        CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_PITCH, DT_CALCRECT, DT_LEFT, DT_NOPREFIX,
-        DT_SINGLELINE, DT_TOP, DeleteObject, DrawTextW, EndPaint, FF_DONTCARE, FW_NORMAL, FillRect,
-        GetDC, GetDeviceCaps, GetMonitorInfoW, InvalidateRect, LOGPIXELSY,
+        BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, ClientToScreen, CreateFontW,
+        CreateRoundRectRgn, CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_PITCH, DT_CALCRECT, DT_LEFT,
+        DT_NOPREFIX, DT_SINGLELINE, DT_TOP, DeleteObject, DrawTextW, EndPaint, FF_DONTCARE,
+        FW_NORMAL, FillRect, GetDC, GetDeviceCaps, GetMonitorInfoW, InvalidateRect, LOGPIXELSY,
         MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
         ReleaseDC, SelectObject, SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT, UpdateWindow,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::System::Threading::GetCurrentThreadId;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GUITHREADINFO,
-        GWLP_USERDATA, GetClientRect, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo,
-        GetMessageW, GetWindowLongPtrW, GetWindowThreadProcessId, HWND_TOPMOST, KillTimer,
-        LWA_ALPHA, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, RegisterClassW, SW_HIDE,
-        SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW,
-        SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_DESTROY, WM_PAINT, WM_TIMER,
-        WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-        WS_EX_TRANSPARENT, WS_POPUP,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GUI_CARETBLINKING,
+        GUITHREADINFO, GWLP_USERDATA, GetClientRect, GetCursorPos, GetForegroundWindow,
+        GetGUIThreadInfo, GetMessageW, GetWindowLongPtrW, GetWindowThreadProcessId, HWND_TOPMOST,
+        KillTimer, LWA_ALPHA, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, RegisterClassW,
+        SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SetLayeredWindowAttributes, SetTimer,
+        SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_DESTROY,
+        WM_PAINT, WM_QUIT, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
     };
 
-    use super::{HintError, position_with_work, scale_for_dpi, split_hint_lines};
+    use super::{
+        HintError, caret_anchor_point, position_with_work, scale_for_dpi, split_hint_lines,
+    };
 
     /// 线程消息: 唤醒提示窗线程并抽干命令队列。
     const WM_HINT_COMMAND: u32 = WM_APP + 1;
@@ -110,6 +145,16 @@ mod win {
         Show { text: String, ttl: Duration },
         Hide,
         Shutdown,
+    }
+
+    /// 初始化握手: 线程先报自身 id, 再报初始化结果。
+    ///
+    /// 先报 id 是为了让父线程在初始化超时时能投递 `WM_QUIT` 回收线程,
+    /// 而不是丢掉线程句柄留下永驻线程与窗口。
+    enum Handshake {
+        Started(u32),
+        Initialized,
+        Failed(HintError),
     }
 
     /// 绘制状态; 以 `GWLP_USERDATA` 挂在窗口上, 仅提示窗线程访问。
@@ -136,19 +181,38 @@ mod win {
                 .name("danqing-hint".into())
                 .spawn(move || hint_thread(cmd_rx, ready_tx))
                 .map_err(|_| HintError::ThreadStart)?;
+            // 第一阶段: 线程 id 报到。失败即线程已自行退出, 只需 join。
+            let thread_id = match ready_rx.recv_timeout(Duration::from_secs(2)) {
+                Ok(Handshake::Started(thread_id)) => thread_id,
+                Ok(_) => {
+                    let _ = join.join();
+                    return Err(HintError::ThreadStart);
+                }
+                Err(_) => {
+                    // 连报到都超时: 丢弃命令端, 线程首个发送失败即退出。
+                    drop(cmd_tx);
+                    return Err(HintError::ThreadStart);
+                }
+            };
+            // 第二阶段: 初始化结果。超时则投递 WM_QUIT 让线程退出并回收。
             match ready_rx.recv_timeout(Duration::from_secs(2)) {
-                Ok(Ok(thread_id)) => Ok(Self {
+                Ok(Handshake::Initialized) => Ok(Self {
                     tx: cmd_tx,
                     thread_id,
                     join: Some(join),
                 }),
-                Ok(Err(error)) => {
+                Ok(Handshake::Failed(error)) => {
                     drop(cmd_tx);
                     let _ = join.join();
                     Err(error)
                 }
-                Err(_) => {
+                Ok(Handshake::Started(_)) | Err(_) => {
                     drop(cmd_tx);
+                    // SAFETY: 线程 id 已报到, 消息队列已建立; 投递 WM_QUIT 结束其循环。
+                    unsafe {
+                        PostThreadMessageW(thread_id, WM_QUIT, 0, 0);
+                    }
+                    let _ = join.join();
                     Err(HintError::ThreadStart)
                 }
             }
@@ -185,16 +249,23 @@ mod win {
 
     impl Drop for HintWindow {
         fn drop(&mut self) {
-            let _ = self.tx.send(Command::Shutdown);
-            self.notify();
+            if self.tx.send(Command::Shutdown).is_ok() {
+                self.notify();
+            }
             if let Some(join) = self.join.take() {
                 let _ = join.join();
             }
         }
     }
 
-    /// 提示窗线程: 注册类、建窗、建字体, 然后泵消息直到 Shutdown。
-    fn hint_thread(cmd_rx: Receiver<Command>, ready: Sender<Result<u32, HintError>>) {
+    /// 提示窗线程: 报文线程 id、注册类、建窗、建字体, 然后泵消息直到 Shutdown。
+    fn hint_thread(cmd_rx: Receiver<Command>, ready: Sender<Handshake>) {
+        // 先报到线程 id; 父线程已放弃等待时直接退出, 不留永驻线程。
+        // SAFETY: 纯查询当前线程 id, 无内存安全风险。
+        let thread_id = unsafe { GetCurrentThreadId() };
+        if ready.send(Handshake::Started(thread_id)).is_err() {
+            return;
+        }
         // SAFETY: 线程独占窗口与 GDI 资源; 所有返回值都在使用前判空。
         unsafe {
             let hmod = GetModuleHandleW(std::ptr::null());
@@ -215,7 +286,7 @@ mod win {
             if atom == 0 {
                 let last = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
                 if last != ERROR_CLASS_ALREADY_EXISTS as i32 {
-                    let _ = ready.send(Err(HintError::WindowCreate));
+                    let _ = ready.send(Handshake::Failed(HintError::WindowCreate));
                     return;
                 }
             }
@@ -238,7 +309,7 @@ mod win {
                 std::ptr::null(),
             );
             if hwnd.is_null() {
-                let _ = ready.send(Err(HintError::WindowCreate));
+                let _ = ready.send(Handshake::Failed(HintError::WindowCreate));
                 return;
             }
 
@@ -270,7 +341,7 @@ mod win {
             );
             if font.is_null() {
                 DestroyWindow(hwnd);
-                let _ = ready.send(Err(HintError::WindowCreate));
+                let _ = ready.send(Handshake::Failed(HintError::WindowCreate));
                 return;
             }
 
@@ -285,7 +356,7 @@ mod win {
             // 强制建立本线程消息队列, 否则极早的 PostThreadMessage 会失败。
             let mut msg: MSG = std::mem::zeroed();
             PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE);
-            let _ = ready.send(Ok(GetCurrentThreadId()));
+            let _ = ready.send(Handshake::Initialized);
 
             let mut shutdown = false;
             while !shutdown {
@@ -418,14 +489,18 @@ mod win {
             SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE);
             let radius = 8 * state.scale;
             let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius, radius);
-            if !region.is_null() {
-                SetWindowRgn(hwnd, region, 1);
+            if !region.is_null() && SetWindowRgn(hwnd, region, 1) == 0 {
+                // 设置失败时区域所有权未转移, 必须自行释放, 否则每次 show 漏一个 GDI 区域。
+                DeleteObject(region);
             }
             SetLayeredWindowAttributes(hwnd, 0, HINT_ALPHA, LWA_ALPHA);
             ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             InvalidateRect(hwnd, std::ptr::null(), 0);
             UpdateWindow(hwnd);
-            SetTimer(hwnd, TIMER_ID, ttl.as_millis().max(100) as u32, None);
+            let ttl_ms = ttl.as_millis().min(u32::MAX as u128) as u32;
+            if SetTimer(hwnd, TIMER_ID, ttl_ms.max(100), None) == 0 {
+                log::warn!("提示窗 TTL 定时器创建失败, 本次提示不会自动隐藏");
+            }
         }
     }
 
@@ -472,7 +547,8 @@ mod win {
         }
     }
 
-    /// 锚点: 前台窗口插入符右下角; 取不到回退鼠标光标; 都失败用 (0,0)。
+    /// 锚点: 前台窗口插入符右下角 (客户区坐标已换算到屏幕);
+    /// 取不到回退鼠标光标; 都失败用 (0,0)。
     unsafe fn anchor_point() -> (i32, i32) {
         unsafe {
             let foreground = GetForegroundWindow();
@@ -483,11 +559,31 @@ mod win {
                     let mut info: GUITHREADINFO = std::mem::zeroed();
                     info.cbSize = size_of::<GUITHREADINFO>() as u32;
                     if GetGUIThreadInfo(thread_id, &mut info) != 0
+                        && info.flags & GUI_CARETBLINKING != 0
                         && !info.hwndCaret.is_null()
-                        && info.rcCaret.right >= info.rcCaret.left
-                        && info.rcCaret.bottom >= info.rcCaret.top
                     {
-                        return (info.rcCaret.right, info.rcCaret.bottom);
+                        let rect = (
+                            info.rcCaret.left,
+                            info.rcCaret.top,
+                            info.rcCaret.right,
+                            info.rcCaret.bottom,
+                        );
+                        let hwnd_caret = info.hwndCaret;
+                        // rcCaret 是相对 hwndCaret 的客户区坐标, 必须换算到屏幕。
+                        if let Some(anchor) = caret_anchor_point(rect, |point| {
+                            let mut pt = POINT {
+                                x: point.0,
+                                y: point.1,
+                            };
+                            // SAFETY: 只读坐标换算, 句柄来自刚查询到的插入符窗口。
+                            if ClientToScreen(hwnd_caret, &mut pt) != 0 {
+                                Some((pt.x, pt.y))
+                            } else {
+                                None
+                            }
+                        }) {
+                            return anchor;
+                        }
                     }
                 }
             }
@@ -551,7 +647,9 @@ impl HintWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::{HintError, position_with_work, scale_for_dpi, split_hint_lines};
+    use super::{
+        HintError, caret_anchor_point, position_with_work, scale_for_dpi, split_hint_lines,
+    };
 
     #[test]
     fn split_lines_keeps_order_and_strips_cr() {
@@ -582,15 +680,41 @@ mod tests {
             position_with_work((500, 400), (6, 10), (200, 40), (0, 0, 1920, 1040)),
             (506, 410)
         );
-        // 贴右下缘: 钳回工作区, 不越过任务栏。
+        // 贴右下缘: 先钳回工作区, 但下方放置会压住锚点 → 翻到锚点上方。
         assert_eq!(
             position_with_work((1900, 1030), (6, 10), (200, 40), (0, 0, 1920, 1040)),
-            (1720, 1000)
+            (1720, 980)
         );
         // 左侧副屏负坐标。
         assert_eq!(
             position_with_work((-1900, 100), (6, 10), (200, 40), (-1920, 0, 0, 1080)),
             (-1894, 110)
+        );
+        // 上下都放不下: 接受遮挡, 保留钳制结果。
+        assert_eq!(
+            position_with_work((100, 20), (6, 10), (200, 40), (0, 0, 200, 40)),
+            (0, 0)
+        );
+    }
+
+    #[test]
+    fn caret_anchor_maps_client_corner_through_screen_conversion() {
+        let seen = std::cell::Cell::new((0, 0));
+        let anchor = caret_anchor_point((10, 20, 40, 60), |point| {
+            seen.set(point);
+            Some((point.0 + 300, point.1 + 200))
+        });
+        assert_eq!(seen.get(), (40, 60), "必须换算插入符右下角, 而非左上角");
+        assert_eq!(anchor, Some((340, 260)));
+        assert_eq!(
+            caret_anchor_point((40, 60, 10, 20), |_| Some((0, 0))),
+            None,
+            "反向矩形视为无锚点"
+        );
+        assert_eq!(
+            caret_anchor_point((0, 0, 1, 1), |_| None),
+            None,
+            "换算失败回退光标路径"
         );
     }
 
