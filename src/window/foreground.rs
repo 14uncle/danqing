@@ -203,8 +203,11 @@ fn process_id_for_hwnd(hwnd: HWND) -> Option<u32> {
     (result != 0 && process_id != 0).then_some(process_id)
 }
 
-/// 取窗口进程的文件名，不返回完整路径，不排除当前进程。
-fn process_file_name_for_hwnd(hwnd: HWND) -> Option<String> {
+/// 按调用方给定的窗口句柄读取进程文件名（只读），不返回完整路径。
+///
+/// 空句柄、进程查询、权限或路径读取失败均返回 `None`。不枚举窗口、不再次读取
+/// 当前前台替代传入句柄，也不排除当前进程；调用方因此可将进程名与 HWND 绑定。
+pub fn process_file_name_for_hwnd(hwnd: HWND) -> Option<String> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
@@ -558,6 +561,14 @@ mod tests {
     fn window_title_capacity_rejects_truncation() {
         assert!(super::title_would_truncate(1024, 1024));
         assert!(!super::title_would_truncate(1023, 1024));
+    }
+
+    #[test]
+    fn process_file_name_for_hwnd_rejects_null_without_win32_call() {
+        assert_eq!(
+            super::process_file_name_for_hwnd(std::ptr::null_mut()),
+            None
+        );
     }
 
     #[test]
