@@ -53,6 +53,48 @@ pub fn restore_foreground(hwnd: HWND) {
     bring_hwnd_to_foreground(hwnd);
 }
 
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_CONTROL, VkKeyScanW,
+};
+
+/// 构造一次 Ctrl 组合键的四段事件: Ctrl 下 → 键下 → 键上 → Ctrl 上。
+fn ctrl_combo_inputs(vk: u16) -> [INPUT; 4] {
+    let key = |w_vk: u16, flags: u32| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: w_vk,
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    [
+        key(VK_CONTROL, 0),
+        key(vk, 0),
+        key(vk, KEYEVENTF_KEYUP),
+        key(VK_CONTROL, KEYEVENTF_KEYUP),
+    ]
+}
+
+/// 发送一次 Ctrl+<vk>; 全部事件被系统接受返回 `true`。
+///
+/// `SendInput` 被 UIPI 拦截时返回 0, 部分接受时小于事件数; 两者都算失败。
+fn send_ctrl_combo(vk: u16) -> bool {
+    let inputs = ctrl_combo_inputs(vk);
+    // SAFETY: 纯输入注入; 数组长度与结构体大小都与 SendInput 约定一致。
+    let sent = unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        )
+    };
+    sent as usize == inputs.len()
+}
+
 /// 模拟粘贴快捷键 (Ctrl+V) 到当前前台窗口。
 ///
 /// 用于实现剪贴板管理器的粘贴注入功能：
@@ -63,79 +105,28 @@ pub fn restore_foreground(hwnd: HWND) {
 /// 注意：此函数需要前台窗口可接收键盘输入；否则注入可能失败。
 /// 失败仅记录警告，不 panic。
 pub fn simulate_paste() {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_CONTROL,
-        VkKeyScanW,
-    };
-
+    // SAFETY: 只查询 V 键码并注入输入, 无内存安全风险。
     unsafe {
-        // 获取 V 键的虚拟键码
-        let v_result = VkKeyScanW('v' as u16);
-        let v_key_code = (v_result & 0xFF) as u16;
-        let ctrl_key = VK_CONTROL;
-
-        // 构造 Ctrl 按下 → V 按下 → V 抬起 → Ctrl 抬起 事件序列
-        let inputs = [
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: ctrl_key,
-                        wScan: 0,
-                        dwFlags: 0,
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: v_key_code,
-                        wScan: 0,
-                        dwFlags: 0,
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            },
-            // V 键抬起
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: v_key_code,
-                        wScan: 0,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            },
-            // Ctrl 键抬起
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: ctrl_key,
-                        wScan: 0,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            },
-        ];
-
-        let sent = SendInput(
-            inputs.len() as u32,
-            inputs.as_ptr(),
-            std::mem::size_of::<INPUT>() as i32,
-        );
-        if sent == 0 {
+        let v_key_code = (VkKeyScanW('v' as u16) & 0xFF) as u16;
+        if !send_ctrl_combo(v_key_code) {
             log::warn!("SendInput 模拟 Ctrl+V 失败");
         }
+    }
+}
+
+/// 模拟一次撤销 (Ctrl+Z) 到当前前台窗口。
+///
+/// 返回: 全部输入事件被系统接受为 `true`; 0 或部分接受为 `false` (同时记录警告)。
+/// 不重试、不修改剪贴板、不读取前台窗口或文档。
+pub fn simulate_undo() -> bool {
+    // SAFETY: 只查询 Z 键码并注入输入, 无内存安全风险。
+    unsafe {
+        let z_key_code = (VkKeyScanW('z' as u16) & 0xFF) as u16;
+        let ok = send_ctrl_combo(z_key_code);
+        if !ok {
+            log::warn!("SendInput 模拟 Ctrl+Z 失败");
+        }
+        ok
     }
 }
 
@@ -689,6 +680,29 @@ mod tests {
             FocusReconcile::Noop,
             "两边都说没焦点 → 一致, 不补"
         );
+    }
+
+    /// Ctrl 组合事件序列: Ctrl 下 → 键下 → 键上 → Ctrl 上, 键码与标志正确。
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn ctrl_combo_inputs_build_down_up_sequence() {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+            INPUT_KEYBOARD, KEYEVENTF_KEYUP, VK_CONTROL,
+        };
+
+        let inputs = super::ctrl_combo_inputs(0x5A);
+        // SAFETY: 只读取刚构造的 INPUT 联合体字段, 不涉及外部指针。
+        unsafe {
+            assert_eq!(inputs[0].r#type, INPUT_KEYBOARD);
+            assert_eq!(inputs[0].Anonymous.ki.wVk, VK_CONTROL);
+            assert_eq!(inputs[0].Anonymous.ki.dwFlags, 0);
+            assert_eq!(inputs[1].Anonymous.ki.wVk, 0x5A);
+            assert_eq!(inputs[1].Anonymous.ki.dwFlags, 0);
+            assert_eq!(inputs[2].Anonymous.ki.wVk, 0x5A);
+            assert_ne!(inputs[2].Anonymous.ki.dwFlags & KEYEVENTF_KEYUP, 0);
+            assert_eq!(inputs[3].Anonymous.ki.wVk, VK_CONTROL);
+            assert_ne!(inputs[3].Anonymous.ki.dwFlags & KEYEVENTF_KEYUP, 0);
+        }
     }
 
     /// 粘贴注入: 向**真实前台窗口**发 SendInput Ctrl+V。
