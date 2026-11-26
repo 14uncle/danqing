@@ -54,7 +54,7 @@ pub fn restore_foreground(hwnd: HWND) {
 }
 
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_CONTROL, VkKeyScanW,
+    INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_CONTROL, VK_V, VK_Z,
 };
 
 /// 构造一次 Ctrl 组合键的四段事件: Ctrl 下 → 键下 → 键上 → Ctrl 上。
@@ -104,13 +104,11 @@ fn send_ctrl_combo(vk: u16) -> bool {
 ///
 /// 注意：此函数需要前台窗口可接收键盘输入；否则注入可能失败。
 /// 失败仅记录警告，不 panic。
+/// 直接使用虚拟键码 `VK_V`，不按字符反查布局——非拉丁/重排布局下字符映射
+/// 会返回 `-1` 或错误物理键，把注入变成静默无效。
 pub fn simulate_paste() {
-    // SAFETY: 只查询 V 键码并注入输入, 无内存安全风险。
-    unsafe {
-        let v_key_code = (VkKeyScanW('v' as u16) & 0xFF) as u16;
-        if !send_ctrl_combo(v_key_code) {
-            log::warn!("SendInput 模拟 Ctrl+V 失败");
-        }
+    if !send_ctrl_combo(VK_V) {
+        log::warn!("SendInput 模拟 Ctrl+V 失败");
     }
 }
 
@@ -118,16 +116,13 @@ pub fn simulate_paste() {
 ///
 /// 返回: 全部输入事件被系统接受为 `true`; 0 或部分接受为 `false` (同时记录警告)。
 /// 不重试、不修改剪贴板、不读取前台窗口或文档。
+/// 与 [`simulate_paste`] 一样使用虚拟键码 `VK_Z`，避免键盘布局影响。
 pub fn simulate_undo() -> bool {
-    // SAFETY: 只查询 Z 键码并注入输入, 无内存安全风险。
-    unsafe {
-        let z_key_code = (VkKeyScanW('z' as u16) & 0xFF) as u16;
-        let ok = send_ctrl_combo(z_key_code);
-        if !ok {
-            log::warn!("SendInput 模拟 Ctrl+Z 失败");
-        }
-        ok
+    let ok = send_ctrl_combo(VK_Z);
+    if !ok {
+        log::warn!("SendInput 模拟 Ctrl+Z 失败");
     }
+    ok
 }
 
 /// 轮询等待前台窗口不再是本进程 (焦点已转移)。
