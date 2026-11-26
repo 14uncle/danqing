@@ -9,6 +9,7 @@
 //! 子模块：
 //! - `event`      应用 → Handler 事件通道 + winit → 内部事件适配
 //! - `foreground` 窗口抢前台 / 顶层 (Windows AttachThreadInput)
+//! - `hint`       无激活微提示窗 (独立线程 + 分层窗口 + GDI)
 //! - `frame_budget` Adaptive 帧率决策 (纯逻辑: 活动/降帧/全屏暂停)
 //! - `fullscreen`   前台全屏应用检测 (QUNS + 矩形覆盖双路线, Windows)
 //! - `icon`       窗口 / 托盘图标加载 + Windows 无边框样式
@@ -26,6 +27,7 @@ pub mod foreground;
 mod frame_budget;
 mod fullscreen;
 mod handler;
+pub mod hint;
 mod hotkey;
 mod icon;
 #[cfg(target_os = "windows")]
